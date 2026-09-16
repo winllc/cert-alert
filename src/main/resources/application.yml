@@ -1,0 +1,67 @@
+spring:
+  application:
+    name: cert-alert
+
+  # Default datasource is an embedded H2 file database so the app runs with no setup.
+  # Point these at PostgreSQL (see application-postgres.yml) for anything real.
+  datasource:
+    url: jdbc:h2:file:./data/cert-alert;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE
+    username: sa
+    password: ""
+    driver-class-name: org.h2.Driver
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Flyway owns the schema; Hibernate only verifies that the mapping matches it.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  jackson:
+    default-property-inclusion: non_null
+
+server:
+  port: 8080
+  error:
+    include-message: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,loggers
+  endpoint:
+    health:
+      show-details: when-authorized
+
+cert-alert:
+  # Certificates expiring inside this window are reported as EXPIRING_SOON.
+  warning-threshold-days: 30
+  # ...and escalated to CRITICAL severity inside this one.
+  critical-threshold-days: 7
+  connect-timeout: 10s
+  read-timeout: 10s
+  # A target stuck in the same unhealthy state re-alerts at most this often.
+  alert-repeat-interval: 24h
+  # Hourly, on the hour, in UTC.
+  scan-cron: "0 0 * * * *"
+  scan-enabled: true
+  alerts:
+    logging:
+      enabled: true
+    email:
+      enabled: false
+      from: cert-alert@localhost
+      to: []
+      subject-prefix: "[cert-alert] "
+
+logging:
+  level:
+    com.winllc.certalert: INFO
