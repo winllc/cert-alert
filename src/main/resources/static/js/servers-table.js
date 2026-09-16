@@ -11,7 +11,7 @@
         var pocUserClear = document.getElementById('poc-user-clear');
         var applied = document.getElementById('applied-filters');
 
-        // Arriving from a user row filters by that person. The id travels rather than the
+        // Arriving from a person's row filters by them. The id travels rather than the
         // address, because the server resolves it to every value a serverPOC could use to
         // name them - the FSD schema says that attribute carries a name, not an address.
         var params = new URLSearchParams(window.location.search);
@@ -20,9 +20,9 @@
             pocUserLabel.textContent = params.get('pocName') || ('user #' + pocUserId);
             pocUserField.hidden = false;
         }
-        var legacyPoc = params.get('poc') || params.get('pocEmail');
-        if (legacyPoc) {
-            pocInput.value = legacyPoc;
+        var literalPoc = params.get('poc') || params.get('pocEmail');
+        if (literalPoc) {
+            pocInput.value = literalPoc;
         }
 
         function readFilters() {
@@ -63,26 +63,41 @@
         var table = CertAlert.initTable({
             selector: '#servers-table',
             endpoint: '/api/v1/datatables/servers',
+            statsUrl: '/api/v1/stats/servers',
             readFilters: readFilters,
             filterInputs: [certState, withinDays, pocInput],
             order: [[1, 'asc']],
             detailUrl: function (row) {
                 return '/api/v1/servers/' + row.id + '/certificates';
             },
+            entryFields: [
+                ['DN', 'dn'],
+                ['ATO status', 'atoStatus'],
+                ['Duty organization', 'dutyOrganization'],
+                ['Description', 'description'],
+                ['Country', 'countryOfAffiliation'],
+                ['Admin org', 'adminOrganization'],
+                ['IC networks', 'icNetworks']
+            ],
             onFiltersApplied: function (filters) {
                 applied.innerHTML = CertAlert.describeFilters(filters);
             },
             columns: [
                 {data: 'id', orderable: false, searchable: false, className: 'expand',
-                    render: function () { return '+'; }},
-                {data: 'commonName', render: renderText},
+                    render: function () { return CertAlert.icon('plus'); }},
+                {data: 'commonName', render: function (value, type) {
+                    if (type !== 'display') { return value; }
+                    return value ? '<span class="fw-medium">' + CertAlert.escapeHtml(value) + '</span>'
+                        : CertAlert.text(null);
+                }},
                 {data: 'serverUrl', className: 'mono', render: renderText},
                 {data: 'icServerAddress', className: 'mono', render: renderText},
                 {data: 'serverPocDisplay', render: renderText},
                 {data: 'lifeCycleStatus', render: renderText},
-                {data: 'atoStatus', render: renderText},
-                {data: 'dutyOrganization', render: renderText},
-                {data: 'certificateCount', searchable: false, className: 'mono'},
+                // Hidden, not dropped: still searchable, and shown in the expanded row.
+                {data: 'atoStatus', visible: false},
+                {data: 'dutyOrganization', visible: false},
+                {data: 'certificateCount', searchable: false, className: 'mono text-center'},
                 {data: 'certificateStatus', searchable: false, render: function (value, type) {
                     return type === 'display' ? CertAlert.statusBadge(value) : value;
                 }},
@@ -92,7 +107,8 @@
                 {data: 'lastSyncedAt', searchable: false, render: function (value, type) {
                     return type === 'display' ? CertAlert.text(CertAlert.formatDate(value)) : value;
                 }},
-                {data: 'dn', className: 'mono', render: renderText}
+                // Searchable but not shown; it appears in the expanded row instead.
+                {data: 'dn', visible: false}
             ]
         });
 

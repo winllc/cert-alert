@@ -10,6 +10,7 @@ import com.winllc.certalert.service.DirectoryPruneService;
 import com.winllc.certalert.service.DirectorySyncService;
 import com.winllc.certalert.service.ResourceNotFoundException;
 import com.winllc.certalert.web.dto.CachedCertificateRow;
+import com.winllc.certalert.web.dto.DirectoryStats;
 import com.winllc.certalert.web.dto.SyncResponse;
 import com.winllc.certalert.web.dto.SyncRunRow;
 import java.util.List;
@@ -100,6 +101,19 @@ public class DirectoryApiController {
                 .stream()
                 .map(SyncRunRow::from)
                 .toList();
+    }
+
+    /** The roll-up behind the cards at the top of each search page. */
+    @GetMapping("/stats/users")
+    @Transactional(readOnly = true)
+    public DirectoryStats userStats() {
+        return DirectoryStats.from(userRepository.countByCertificateStatus());
+    }
+
+    @GetMapping("/stats/servers")
+    @Transactional(readOnly = true)
+    public DirectoryStats serverStats() {
+        return DirectoryStats.from(serverRepository.countByCertificateStatus());
     }
 
     @GetMapping("/users/{id}/certificates")

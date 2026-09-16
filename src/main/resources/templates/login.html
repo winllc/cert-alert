@@ -1,31 +1,63 @@
 <!DOCTYPE html>
 <html lang="en" xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{fragments/layout :: head('Sign in')}"></head>
-<body class="login-page">
-<main class="login">
-    <form class="login-card" method="post" th:action="@{/login}">
-        <h1>cert-alert</h1>
-        <p class="muted">
-            No client certificate was accepted, so sign in with your directory credentials.
-        </p>
+<body class="d-flex flex-column bg-surface-secondary">
+<svg th:replace="~{fragments/icons :: sprite}"></svg>
 
-        <div th:if="${param.error}" class="notice error">
-            That username and password were not accepted by the directory.
+<div class="page page-center">
+    <div class="container container-tight py-4">
+        <div class="text-center mb-4">
+            <span class="navbar-brand navbar-brand-autodark">
+                <svg class="icon icon-lg text-primary me-2"><use href="#icon-shield-check"></use></svg>
+                <span class="h1 align-middle">cert-alert</span>
+            </span>
         </div>
-        <div th:if="${param.logout}" class="notice">You have been signed out.</div>
 
-        <label for="username">Username</label>
-        <input type="text" id="username" name="username" autocomplete="username" autofocus required>
+        <div class="card card-md">
+            <div class="card-body">
+                <h2 class="h3 text-center mb-3">Sign in</h2>
 
-        <label for="password">Password</label>
-        <input type="password" id="password" name="password" autocomplete="current-password" required>
+                <div class="alert alert-info" role="alert">
+                    <div class="d-flex">
+                        <div><svg class="icon alert-icon"><use href="#icon-key"></use></svg></div>
+                        <div>
+                            No client certificate was accepted. Presenting one the directory publishes
+                            signs you in without this form.
+                        </div>
+                    </div>
+                </div>
 
-        <button type="submit" class="action">Sign in</button>
+                <div th:if="${param.error}" class="alert alert-danger" role="alert">
+                    That username and password were not accepted by the directory.
+                </div>
+                <div th:if="${param.logout}" class="alert alert-success" role="alert">
+                    You have been signed out.
+                </div>
 
-        <p class="muted hint">
-            Presenting a certificate the directory publishes signs you in without this form.
-        </p>
-    </form>
-</main>
+                <form method="post" th:action="@{/login}" autocomplete="off">
+                    <div class="mb-3">
+                        <label class="form-label" for="username">Username</label>
+                        <input type="text" id="username" name="username" class="form-control"
+                               placeholder="your directory username" autocomplete="username" autofocus required>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label" for="password">Password</label>
+                        <input type="password" id="password" name="password" class="form-control"
+                               placeholder="your directory password" autocomplete="current-password" required>
+                    </div>
+                    <div class="form-footer">
+                        <button type="submit" class="btn btn-primary w-100">
+                            <svg class="icon me-1"><use href="#icon-lock"></use></svg>
+                            Sign in
+                        </button>
+                    </div>
+                </form>
+            </div>
+            <div class="card-footer text-center text-secondary small">
+                Your password is checked by binding to the directory. It is never stored here.
+            </div>
+        </div>
+    </div>
+</div>
 </body>
 </html>

@@ -1,4 +1,4 @@
-/* The users search table. */
+/* The people search table. */
 (function ($) {
     'use strict';
 
@@ -38,40 +38,53 @@
         CertAlert.initTable({
             selector: '#users-table',
             endpoint: '/api/v1/datatables/users',
+            statsUrl: '/api/v1/stats/users',
             readFilters: readFilters,
             filterInputs: [certState, withinDays],
-            // Sort by name, not by expiry: entries with no certificate have a null
-            // expiry, and databases disagree about whether nulls sort first or last.
+            // Sort by name, not by expiry: entries with no certificate have a null expiry,
+            // and databases disagree about whether nulls sort first or last.
             order: [[1, 'asc']],
             detailUrl: function (row) {
                 return '/api/v1/users/' + row.id + '/certificates';
             },
+            entryFields: [
+                ['DN', 'dn'],
+                ['Employee type', 'employeeType'],
+                ['Country', 'countryOfAffiliation'],
+                ['Admin org', 'adminOrganization'],
+                ['Telephone', 'telephoneNumber'],
+                ['IC networks', 'icNetworks']
+            ],
             onFiltersApplied: function (filters) {
                 applied.innerHTML = CertAlert.describeFilters(filters);
             },
             columns: [
                 {data: 'id', orderable: false, searchable: false, className: 'expand',
-                    render: function () { return '+'; }},
+                    render: function () { return CertAlert.icon('plus'); }},
                 {data: 'displayName', render: function (value, type, row) {
                     if (type !== 'display') { return value; }
-                    return CertAlert.text(value || row.commonName);
+                    var name = value || row.commonName;
+                    if (!name) { return CertAlert.text(null); }
+                    return '<span class="fw-medium">' + CertAlert.escapeHtml(name) + '</span>';
                 }},
-                {data: 'uid', render: renderText},
+                {data: 'uid', className: 'mono', render: renderText},
                 // The link hands this person's id to the servers table, which resolves it
                 // to every value a serverPOC could name them by.
                 {data: 'email', render: function (value, type, row) {
                     if (type !== 'display') { return value; }
                     var label = row.displayName || row.commonName || row.uid || '';
-                    var link = ' <a class="poc-link" href="/servers?pocUserId=' + row.id
+                    var link = ' <a class="text-decoration-none ms-1" href="/servers?pocUserId=' + row.id
                         + '&pocName=' + encodeURIComponent(label)
-                        + '" title="Servers this person is the contact for">servers &rarr;</a>';
+                        + '" title="Servers this person is the contact for">'
+                        + CertAlert.icon('link') + '</a>';
                     return (value ? CertAlert.escapeHtml(value) : CertAlert.text(null)) + link;
                 }},
                 {data: 'title', render: renderText},
-                {data: 'employeeType', render: renderText},
+                // Hidden, not dropped: still searchable, and shown in the expanded row.
+                {data: 'employeeType', visible: false},
                 {data: 'dutyOrganization', render: renderText},
-                {data: 'countryOfAffiliation', render: renderText},
-                {data: 'certificateCount', searchable: false, className: 'mono'},
+                {data: 'countryOfAffiliation', visible: false},
+                {data: 'certificateCount', searchable: false, className: 'mono text-center'},
                 {data: 'certificateStatus', searchable: false, render: function (value, type) {
                     return type === 'display' ? CertAlert.statusBadge(value) : value;
                 }},
@@ -81,7 +94,9 @@
                 {data: 'lastSyncedAt', searchable: false, render: function (value, type) {
                     return type === 'display' ? CertAlert.text(CertAlert.formatDate(value)) : value;
                 }},
-                {data: 'dn', className: 'mono', render: renderText}
+                // Kept as a column so it stays searchable, but not shown: a DN is long and
+                // nobody scans one. It appears in the expanded row instead.
+                {data: 'dn', visible: false}
             ]
         });
 

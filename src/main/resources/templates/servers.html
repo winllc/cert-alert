@@ -2,80 +2,119 @@
 <html lang="en" xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{fragments/layout :: head('Servers')}"></head>
 <body>
-<header th:replace="~{fragments/layout :: appbar('servers')}"></header>
+<svg th:replace="~{fragments/icons :: sprite}"></svg>
 
-<main>
-    <section class="filters">
-        <div class="field">
-            <label for="cert-state">Certificates</label>
-            <select id="cert-state">
-                <option value="">Any</option>
-                <option value="expired">Has an expired certificate</option>
-                <option value="not-expired">No expired certificate</option>
-                <option value="expiring-soon">Expiring soon</option>
-                <option value="valid">Valid only</option>
-                <option value="none">Holds no certificate</option>
-            </select>
-        </div>
-        <div class="field">
-            <label for="within-days">Expiring within (days)</label>
-            <input type="number" id="within-days" min="1" max="3650" placeholder="any">
-        </div>
-        <div class="field">
-            <!-- The FSD schema defines serverPOC as the NAME of the responsible person or
-                 organization; directories often hold an address instead. Either matches. -->
-            <label for="poc-email">Point of contact (serverPOC)</label>
-            <input type="text" id="poc-email" placeholder="name or address">
-        </div>
-        <div class="field" id="poc-user-field" hidden>
-            <label>Responsible for</label>
-            <span class="chip">
-                <span id="poc-user-label"></span>
-                <button type="button" id="poc-user-clear" title="Clear">x</button>
-            </span>
-        </div>
-        <div class="applied" id="applied-filters"></div>
-    </section>
+<div class="page">
+    <header th:replace="~{fragments/layout :: navbar('servers')}"></header>
 
-    <section class="table-panel">
-        <table id="servers-table" class="directory display" style="width:100%">
-            <thead>
-            <tr>
-                <th></th>
-                <th>Name</th>
-                <th>URL</th>
-                <th>IP address</th>
-                <th>Points of contact</th>
-                <th>Lifecycle</th>
-                <th>ATO</th>
-                <th>Duty organization</th>
-                <th>Certs</th>
-                <th>Status</th>
-                <th>Expires</th>
-                <th>Last synced</th>
-                <th>DN</th>
-            </tr>
-            </thead>
-            <tfoot>
-            <tr>
-                <th></th>
-                <th><input type="text" placeholder="Name"></th>
-                <th><input type="text" placeholder="URL"></th>
-                <th><input type="text" placeholder="IP address"></th>
-                <th><input type="text" placeholder="Contact"></th>
-                <th><input type="text" placeholder="Lifecycle"></th>
-                <th><input type="text" placeholder="ATO"></th>
-                <th><input type="text" placeholder="Duty organization"></th>
-                <th></th>
-                <th></th>
-                <th></th>
-                <th></th>
-                <th><input type="text" placeholder="DN"></th>
-            </tr>
-            </tfoot>
-        </table>
-    </section>
-</main>
+    <div class="page-wrapper">
+        <div th:replace="~{fragments/layout :: pageheader('Servers', 'IC Non-Person Entities and the certificates they publish')}"></div>
+
+        <div class="page-body">
+            <div class="container-xl">
+                <div th:replace="~{fragments/layout :: stats}"></div>
+
+                <div class="card">
+                    <div class="card-body border-bottom py-3">
+                        <div class="row g-3 align-items-end">
+                    <div class="col-12 col-md-auto">
+                        <label class="form-label" for="cert-state">Certificates</label>
+                        <select id="cert-state" class="form-select">
+                            <option value="">Any</option>
+                            <option value="expired">Has an expired certificate</option>
+                            <option value="not-expired">No expired certificate</option>
+                            <option value="expiring-soon">Expiring soon</option>
+                            <option value="valid">Valid only</option>
+                            <option value="none">Holds no certificate</option>
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-auto">
+                        <label class="form-label" for="within-days">Expiring within</label>
+                        <div class="input-group">
+                            <input type="number" id="within-days" class="form-control" min="1" max="3650"
+                                   placeholder="any" style="max-width: 7rem">
+                            <span class="input-group-text">days</span>
+                        </div>
+                    </div>
+                    <div class="col-12 col-md-auto">
+                        <!-- The FSD schema defines serverPOC as the NAME of the responsible person or
+                             organization; directories often hold an address instead. Either matches. -->
+                        <label class="form-label" for="poc-email">Point of contact</label>
+                        <input type="text" id="poc-email" class="form-control" placeholder="name or address">
+                    </div>
+                    <div class="col-12 col-md-auto" id="poc-user-field" hidden>
+                        <label class="form-label">Responsible for</label>
+                        <div>
+                            <span class="badge bg-primary-lt">
+                                <span id="poc-user-label"></span>
+                                <button type="button" id="poc-user-clear" class="btn-close ms-2"
+                                        aria-label="Clear"></button>
+                            </span>
+                        </div>
+                    </div>
+                            <div class="col d-flex justify-content-md-end align-items-center">
+                                <span id="applied-filters" class="text-secondary small"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table id="servers-table" class="table card-table table-vcenter text-nowrap datatable"
+                               style="width:100%">
+                            <thead>
+                            <tr>
+                            <th></th>
+                            <th>Name</th>
+                            <th>URL</th>
+                            <th>IP address</th>
+                            <th>Points of contact</th>
+                            <th>Lifecycle</th>
+                            <th>ATO</th>
+                            <th>Duty organization</th>
+                            <th>Certs</th>
+                            <th>Status</th>
+                            <th>Expires</th>
+                            <th>Last synced</th>
+                            <th>DN</th>
+                            </tr>
+                            </thead>
+                            <tfoot>
+                            <tr class="column-search">
+                            <th></th>
+                            <th><input type="text" class="form-control form-control-sm" placeholder="Name"></th>
+                            <th><input type="text" class="form-control form-control-sm" placeholder="URL"></th>
+                            <th><input type="text" class="form-control form-control-sm" placeholder="IP address"></th>
+                            <th><input type="text" class="form-control form-control-sm" placeholder="Contact"></th>
+                            <th><input type="text" class="form-control form-control-sm" placeholder="Lifecycle"></th>
+                            <th></th>
+                            <th></th>
+                            <th></th>
+                            <th></th>
+                            <th></th>
+                            <th></th>
+                            <th></th>
+                            </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <footer class="footer footer-transparent d-print-none">
+            <div class="container-xl">
+                <div class="row text-center align-items-center flex-row-reverse">
+                    <div class="col-12 col-lg-auto mt-3 mt-lg-0">
+                        <span class="text-secondary">
+                            Cached from the IC Full Service Directory. Expiry is evaluated from the cached
+                            certificate, not re-read from the directory on every view.
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </footer>
+    </div>
+</div>
 
 <div th:replace="~{fragments/layout :: scripts}"></div>
 <script th:src="@{/js/servers-table.js}"></script>

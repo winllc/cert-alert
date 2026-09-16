@@ -37,4 +37,12 @@ public interface DirectoryServerRepository extends DataTablesRepository<Director
     @Modifying
     @Query("delete from DirectoryServer s where s.lastSyncedAt < :cutoff")
     int deleteByLastSyncedAtBefore(@Param("cutoff") Instant cutoff);
+
+    /**
+     * The certificate roll-up across every entry, as one grouped query rather than a count
+     * per state.
+     */
+    @Query("select s.certificateStatus as status, count(s) as total from DirectoryServer s "
+            + "group by s.certificateStatus")
+    List<CertificateStatusCount> countByCertificateStatus();
 }

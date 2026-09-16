@@ -1,16 +1,36 @@
 /*
  * Shared wiring for the two directory search tables.
  *
- * DataTables owns paging, ordering, the global search box and the per-column search
- * inputs; all of that is posted as the request body and turned into a query server side.
- * The extra filters this application adds (certificate state, point of contact) are query
- * parameters instead, so changing one just points the table's ajax URL somewhere new and
- * reloads.
+ * DataTables owns paging, ordering, the global search box and the per-column search inputs;
+ * all of that is posted as the request body and turned into a query server side. The extra
+ * filters this application adds (certificate state, point of contact) are query parameters
+ * instead, so changing one just points the table's ajax URL somewhere new and reloads.
+ *
+ * Presentation is Tabler's: status pills are Tabler badges, the expand affordance is a
+ * Tabler icon, and DataTables renders through its Bootstrap 5 integration so its own
+ * furniture matches the card it sits in.
  */
 (function (window, $) {
     'use strict';
 
     var MS_PER_DAY = 86400000;
+
+    /**
+     * Every table built on this page.
+     *
+     * Held here rather than hung off the DataTables API object, because $().DataTable()
+     * hands back a fresh wrapper on each call - anything attached to one instance is not
+     * there on the next.
+     */
+    var tables = [];
+
+    /** Tabler's light-tint badge colours, one per certificate state. */
+    var STATUS_BADGE = {
+        VALID: 'bg-green-lt',
+        EXPIRING_SOON: 'bg-yellow-lt',
+        EXPIRED: 'bg-red-lt',
+        NONE: 'bg-secondary-lt'
+    };
 
     // Every request the tables make is a POST, so each one carries the CSRF token the
     // server rendered into the page. Done once here rather than per call site.
@@ -52,9 +72,13 @@
 
     function text(value, fallback) {
         if (value === null || value === undefined || value === '') {
-            return '<span class="muted">' + escapeHtml(fallback || '—') + '</span>';
+            return '<span class="text-secondary">' + escapeHtml(fallback || '—') + '</span>';
         }
         return escapeHtml(value);
+    }
+
+    function icon(name, extraClass) {
+        return '<svg class="icon ' + (extraClass || '') + '"><use href="#icon-' + name + '"></use></svg>';
     }
 
     /** Dates render as plain UTC days: the audience cares about the day, not the second. */
@@ -63,10 +87,7 @@
             return null;
         }
         var parsed = new Date(iso);
-        if (isNaN(parsed.getTime())) {
-            return null;
-        }
-        return parsed.toISOString().slice(0, 10);
+        return isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
     }
 
     function daysUntil(iso) {
@@ -74,22 +95,21 @@
             return null;
         }
         var parsed = new Date(iso);
-        if (isNaN(parsed.getTime())) {
-            return null;
-        }
-        return Math.floor((parsed.getTime() - Date.now()) / MS_PER_DAY);
+        return isNaN(parsed.getTime()) ? null : Math.floor((parsed.getTime() - Date.now()) / MS_PER_DAY);
     }
 
     function statusBadge(status) {
-        var label = (status || 'NONE').replace('_', ' ');
-        return '<span class="badge ' + escapeHtml(status || 'NONE') + '">' + escapeHtml(label) + '</span>';
+        var key = status || 'NONE';
+        var label = key.replace('_', ' ').toLowerCase();
+        return '<span class="badge ' + (STATUS_BADGE[key] || 'bg-secondary-lt') + '">'
+            + escapeHtml(label.charAt(0).toUpperCase() + label.slice(1)) + '</span>';
     }
 
     /** Expiry date plus how long is left, which is what people actually scan the column for. */
     function expiryCell(iso) {
         var formatted = formatDate(iso);
         if (!formatted) {
-            return '<span class="muted">—</span>';
+            return '<span class="text-secondary">—</span>';
         }
         var days = daysUntil(iso);
         var suffix = '';
@@ -113,11 +133,6 @@
         };
     }
 
-    /** Re-points a built table at a new filter set. */
-    function reload(table, filters) {
-        table.ajax.url(buildUrl(table.certAlertEndpoint, filters)).load();
-    }
-
     function buildUrl(endpoint, filters) {
         var params = new URLSearchParams();
         Object.keys(filters).forEach(function (key) {
@@ -128,6 +143,45 @@
         });
         var query = params.toString();
         return query ? endpoint + '?' + query : endpoint;
+    }
+
+    /** Re-points a built table at a new filter set. */
+    function reload(table, filters) {
+        var entry = tables.find(function (candidate) {
+            return candidate.table === table;
+        });
+        table.ajax.url(buildUrl(entry ? entry.endpoint : '', filters)).load();
+    }
+
+    /** Re-reads every table on the page and its roll-up, after something changed the data. */
+    function refreshAll() {
+        tables.forEach(function (entry) {
+            entry.table.ajax.reload(null, false);
+            if (entry.statsUrl) {
+                loadStats(entry.statsUrl);
+            }
+        });
+    }
+
+    /** Renders the applied-filter summary shown beside the filter controls. */
+    function describeFilters(filters) {
+        var keys = Object.keys(filters);
+        if (keys.length === 0) {
+            return 'No extra filters';
+        }
+        return keys.map(function (key) {
+            return '<span class="badge bg-blue-lt ms-1">' + escapeHtml(key + '=' + filters[key]) + '</span>';
+        }).join('');
+    }
+
+    /** Fills the roll-up cards above the table. Counts are of the whole directory. */
+    function loadStats(url) {
+        $.getJSON(url).done(function (stats) {
+            $('[data-stat="total"]').text(stats.total);
+            Object.keys(stats.byStatus || {}).forEach(function (status) {
+                $('[data-stat="' + status + '"]').text(stats.byStatus[status]);
+            });
+        });
     }
 
     /** Renders the cached details of one certificate as a definition-style block. */
@@ -151,11 +205,24 @@
         return '<div class="cert"><table>' + body + '</table></div>';
     }
 
-    function renderCertificates(certificates) {
+    /** The directory entry itself, above its certificates. */
+    function entryBlock(row, fields) {
+        var body = fields
+            .filter(function (field) { return row[field[1]]; })
+            .map(function (field) {
+                return '<tr><th>' + field[0] + '</th><td>' + text(row[field[1]]) + '</td></tr>';
+            })
+            .join('');
+        return body ? '<div class="cert"><table>' + body + '</table></div>' : '';
+    }
+
+    function renderCertificates(certificates, row, entryFields) {
+        var entry = entryFields ? entryBlock(row, entryFields) : '';
         if (!certificates || certificates.length === 0) {
-            return '<div class="cert-detail muted">This entry publishes no certificates.</div>';
+            return '<div class="cert-detail">' + entry
+                + '<div class="text-secondary">This entry publishes no certificates.</div></div>';
         }
-        return '<div class="cert-detail">' + certificates.map(certificateBlock).join('') + '</div>';
+        return '<div class="cert-detail">' + entry + certificates.map(certificateBlock).join('') + '</div>';
     }
 
     /**
@@ -163,11 +230,13 @@
      *
      * @param config.selector      table element to attach to
      * @param config.endpoint      DataTables endpoint
+     * @param config.statsUrl      roll-up endpoint for the cards above the table
      * @param config.columns       DataTables column definitions
      * @param config.order         initial ordering
      * @param config.readFilters   returns the current extra filters as an object
      * @param config.filterInputs  elements that re-apply the filters when changed
      * @param config.detailUrl     given a row, the URL of its cached certificates
+     * @param config.entryFields   [label, field] pairs shown above the certificates
      */
     function initTable(config) {
         var $table = $(config.selector);
@@ -199,20 +268,24 @@
                 processing: 'Loading…',
                 emptyTable: 'Nothing has been synced from the directory yet',
                 zeroRecords: 'No entries match these filters',
-                search: 'Search all columns:'
+                search: '',
+                searchPlaceholder: 'Search all columns',
+                lengthMenu: '_MENU_ per page'
             }
         });
 
+        // ':visIdx' rather than a bare index: a hidden column leaves no footer cell, so
+        // the DOM position of an input is its visible index, not its column index.
         $table.find('tfoot input').on('input', debounce(function () {
-            var index = $(this).closest('th').index();
-            if (table.column(index).search() !== this.value) {
-                table.column(index).search(this.value).draw();
+            var column = table.column($(this).closest('th').index() + ':visIdx');
+            if (column.search() !== this.value) {
+                column.search(this.value).draw();
             }
         }, 350));
 
         function applyFilters() {
             var filters = config.readFilters();
-            table.ajax.url(buildUrl(config.endpoint, filters)).load();
+            reload(table, filters);
             if (config.onFiltersApplied) {
                 config.onFiltersApplied(filters);
             }
@@ -233,49 +306,44 @@
             var row = table.row($cell.closest('tr'));
             if (row.child.isShown()) {
                 row.child.hide();
-                $cell.text('+');
+                $cell.html(icon('plus'));
                 return;
             }
-            $cell.text('−');
-            row.child('<div class="cert-detail muted">Loading…</div>').show();
+            $cell.html(icon('minus'));
+            row.child('<div class="cert-detail text-secondary">Loading…</div>').show();
             $.getJSON(config.detailUrl(row.data()))
                 .done(function (certificates) {
-                    row.child(renderCertificates(certificates)).show();
+                    row.child(renderCertificates(certificates, row.data(), config.entryFields)).show();
                 })
                 .fail(function (xhr) {
                     if (handleUnauthorized(xhr)) {
                         return;
                     }
-                    row.child('<div class="cert-detail muted">Could not load certificate details.</div>').show();
+                    row.child('<div class="cert-detail text-secondary">Could not load certificate details.</div>')
+                        .show();
                 });
         });
 
-        // Kept on the table so a caller can re-point it without holding the config.
-        table.certAlertEndpoint = config.endpoint;
+        tables.push({table: table, endpoint: config.endpoint, statsUrl: config.statsUrl});
 
+        if (config.statsUrl) {
+            loadStats(config.statsUrl);
+        }
         if (config.onFiltersApplied) {
             config.onFiltersApplied(config.readFilters());
         }
         return table;
     }
 
-    /** Renders the applied-filter summary shown beside the filter controls. */
-    function describeFilters(filters) {
-        var keys = Object.keys(filters);
-        if (keys.length === 0) {
-            return 'No extra filters';
-        }
-        return 'Filtered by <strong>' + keys.map(function (key) {
-            return escapeHtml(key + '=' + filters[key]);
-        }).join('</strong>, <strong>') + '</strong>';
-    }
-
     window.CertAlert = {
         initTable: initTable,
         describeFilters: describeFilters,
         reload: reload,
+        refreshAll: refreshAll,
+        loadStats: loadStats,
         escapeHtml: escapeHtml,
         text: text,
+        icon: icon,
         formatDate: formatDate,
         expiryCell: expiryCell,
         statusBadge: statusBadge

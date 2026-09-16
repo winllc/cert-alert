@@ -49,7 +49,7 @@ Two details from the spec shape the design:
 | Persistence | Spring Data JPA + Flyway migrations                      |
 | Database    | H2 by default, PostgreSQL for deployment                 |
 | Tables      | [spring-data-jpa-datatables](https://github.com/darrachequesne/spring-data-jpa-datatables) |
-| UI          | Thymeleaf + DataTables, assets served from webjars       |
+| UI          | [Tabler](https://tabler.io/admin-template) + Thymeleaf + DataTables, all from webjars |
 | Tests       | JUnit 5, in-memory UnboundID directory, MockMvc          |
 
 ## Running it
@@ -209,29 +209,26 @@ table driven by fetch has no use for HTML in the response.
 
 ## The search tables
 
-Two pages, `/users` and `/servers`, each a server-side DataTables grid. DataTables owns
-paging, ordering, the global search box and the per-column search inputs in the table
-footer; all of it posts as the request body and the library turns it into a JPA query.
-The filters this application adds ride along as query parameters and become an additional
-`Specification`, so the two never have to know about each other.
+Two pages, `/users` and `/servers`, built on the [Tabler](https://tabler.io/admin-template)
+admin template (MIT). Tabler ships as a webjar and bundles the Bootstrap 5 it is built
+from, so the whole UI is served out of the application jar — no CDN, which is the point on
+a network that has no route to one. DataTables renders through its Bootstrap 5 integration
+so its own paging and search controls match the card they sit in.
 
-| Parameter             | Applies to    | Effect                                                    |
-|-----------------------|---------------|-----------------------------------------------------------|
-| `expired=true`        | both          | Holds at least one expired certificate                     |
-| `expired=false`       | both          | Holds certificates, none expired                           |
-| `certificateStatus=`  | both          | One or more of `NONE,VALID,EXPIRING_SOON,EXPIRED`          |
-| `expiringWithinDays=` | both          | Next expiry falls inside that window                       |
-| `hasCertificates=`    | both          | Publishes any certificate at all                           |
-| `poc=`                | servers       | Servers whose `serverPOC` holds this literal value          |
-| `pocUserId=`          | servers       | Servers naming this person, by any of their identifiers     |
+Tabler's icon package is 6.8MB of individual SVGs, so rather than ship all of it for a
+dozen glyphs, the icons used here are inlined as a sprite in
+`templates/fragments/icons.html`, regenerated from the package when the set changes.
 
-```bash
-curl -X POST 'http://localhost:8080/api/v1/datatables/servers?pocUserId=2&expired=true' \
-  -H 'Content-Type: application/json' \
-  -d '{"draw":1,"start":0,"length":10,"search":{"value":"","regex":false},"order":[],
-       "columns":[{"data":"commonName","searchable":true,"orderable":true,
-                   "search":{"value":"","regex":false}}]}'
-```
+Each page carries a roll-up of the certificate states across that object type, then a card
+holding the filters and the table. Expanding a row fetches that entry's cached certificate
+detail on demand, along with the attributes that are too long or too rarely scanned to
+earn a column — the DN among them. Those stay **searchable**: they are declared as hidden
+DataTables columns rather than dropped, so the global search still reaches them.
+
+DataTables owns paging, ordering, the global search box and the per-column search inputs in
+the table footer; all of it posts as the request body and the library turns it into a JPA
+query. The filters this application adds ride along as query parameters and become an
+additional `Specification`, so the two never have to know about each other.
 
 ### The user ↔ server join
 
@@ -258,6 +255,8 @@ link finds servers named either way. The free-text box next to it matches a lite
 | `POST` | `/api/v1/sync/prune`                | Remove entries unseen past the window     |
 | `GET`  | `/api/v1/sync/prune/preview`        | How many the next prune would remove      |
 | `GET`  | `/api/v1/sync/runs`                 | The run log, newest first                |
+| `GET`  | `/api/v1/stats/users`               | Certificate roll-up across IC Persons    |
+| `GET`  | `/api/v1/stats/servers`             | Certificate roll-up across servers       |
 | `GET`  | `/api/v1/users/{id}/certificates`   | Cached certificate detail for a person   |
 | `GET`  | `/api/v1/servers/{id}/certificates` | Cached certificate detail for a server   |
 | `GET`  | `/api/v1/servers/{id}/contacts`     | A server's points of contact             |
@@ -409,8 +408,8 @@ src/main/java/com/winllc/certalert/
 └── web/         DataTables endpoints, REST API, page controllers
 src/main/resources/
 ├── db/migration/          Flyway migrations
-├── static/{css,js}/       stylesheet and table wiring
-├── templates/             Thymeleaf pages
+├── static/{css,js}/       a thin layer over Tabler, and the table wiring
+├── templates/             Thymeleaf pages, Tabler layout and the icon sprite
 └── dev-directory.ldif     sample directory for the dev profile
 ```
 

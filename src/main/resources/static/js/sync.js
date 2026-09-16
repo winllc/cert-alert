@@ -1,4 +1,4 @@
-/* Triggers a directory sync from the app bar and reports what it did. */
+/* Triggers a directory sync from the page header and reports what it did. */
 (function ($) {
     'use strict';
 
@@ -8,23 +8,25 @@
         if ($button.length === 0) {
             return;
         }
+        var original = $button.html();
 
         $button.on('click', function () {
-            $button.prop('disabled', true);
-            $status.text('Syncing…');
+            $button.prop('disabled', true)
+                .html('<span class="spinner-border spinner-border-sm me-2" role="status"></span>Syncing…');
+            $status.text('');
+
             $.ajax({url: '/api/v1/sync', type: 'POST'})
                 .done(function (results) {
-                    $status.text(results.map(function (result) {
-                        return result.job.toLowerCase() + ': ' + result.entriesSeen + ' seen, '
-                            + result.certificatesCached + ' new cert(s), ' + result.errors + ' error(s)';
-                    }).join(' | '));
-                    $('table.directory').each(function () {
-                        $(this).DataTable().ajax.reload(null, false);
-                    });
+                    $status.html(results.map(function (result) {
+                        var tone = result.errors > 0 ? 'bg-red-lt' : 'bg-green-lt';
+                        return '<span class="badge ' + tone + ' ms-1">' + result.job.toLowerCase() + ': '
+                            + result.entriesSeen + ' seen, ' + result.certificatesCached + ' new</span>';
+                    }).join(''));
+                    CertAlert.refreshAll();
                 })
                 .fail(function (xhr) {
                     if (xhr.status === 403) {
-                        $status.text('Sync failed: this account is not an administrator');
+                        $status.html('<span class="badge bg-red-lt">not an administrator</span>');
                         return;
                     }
                     if (xhr.status === 401) {
@@ -34,10 +36,11 @@
                     var detail = xhr.responseJSON && xhr.responseJSON.detail
                         ? xhr.responseJSON.detail
                         : 'check the application log';
-                    $status.text('Sync failed: ' + detail);
+                    $status.html('<span class="badge bg-red-lt">sync failed: '
+                        + CertAlert.escapeHtml(detail) + '</span>');
                 })
                 .always(function () {
-                    $button.prop('disabled', false);
+                    $button.prop('disabled', false).html(original);
                 });
         });
     });

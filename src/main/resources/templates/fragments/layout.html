@@ -2,39 +2,167 @@
 <html lang="en" xmlns:th="http://www.thymeleaf.org">
 <head th:fragment="head(pageTitle)">
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title th:text="'cert-alert · ' + ${pageTitle}">cert-alert</title>
     <!-- The tables POST, so every request needs the CSRF token; the scripts read it here. -->
     <meta name="_csrf" th:content="${_csrf != null} ? ${_csrf.token} : ''">
     <meta name="_csrf_header" th:content="${_csrf != null} ? ${_csrf.headerName} : ''">
-    <!-- Assets come from webjars in the application jar, not a CDN: this is meant to run
-         on networks with no route to the public internet. -->
-    <link rel="stylesheet" th:href="@{/webjars/datatables/css/dataTables.dataTables.css}">
+    <!-- Everything is served from the jar rather than a CDN: this runs on networks with no
+         route to one. Tabler bundles the Bootstrap it is built on, so it comes first and
+         DataTables' Bootstrap 5 integration layers on top. -->
+    <link rel="stylesheet" th:href="@{/webjars/tabler__core/dist/css/tabler.min.css}">
+    <link rel="stylesheet" th:href="@{/webjars/datatables/css/dataTables.bootstrap5.css}">
     <link rel="stylesheet" th:href="@{/css/app.css}">
 </head>
 <body>
-<header th:fragment="appbar(active)" class="app-bar">
-    <h1>cert-alert</h1>
-    <nav>
-        <a th:href="@{/users}" th:classappend="${active == 'users'} ? 'active'">Users</a>
-        <a th:href="@{/servers}" th:classappend="${active == 'servers'} ? 'active'">Servers</a>
-    </nav>
-    <span class="spacer"></span>
-    <span id="sync-status" class="muted"></span>
-    <!-- Triggering a sweep is an administrator's job, so only they are offered it. -->
-    <button type="button" id="sync-now" class="action" th:if="${isAdmin}">Sync directory</button>
-    <span class="signed-in" th:if="${currentUser != null}">
-        <span th:text="${currentUser.displayName}">name</span>
-        <span class="via" th:text="'via ' + ${currentUser.method}">via X509</span>
-    </span>
-    <form method="post" th:action="@{/logout}" class="logout-form" th:if="${currentUser != null}">
-        <button type="submit" class="link-button">Sign out</button>
-    </form>
+
+<!--/* The application shell: brand, navigation, and who is signed in. */-->
+<header th:fragment="navbar(active)" class="navbar navbar-expand-md d-print-none" data-bs-theme="dark">
+    <div class="container-xl">
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar-menu"
+                aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <a class="navbar-brand navbar-brand-autodark d-none-navbar-horizontal pe-0 pe-md-3" th:href="@{/users}">
+            <svg class="icon text-primary me-2"><use href="#icon-shield-check"></use></svg>
+            <span>cert-alert</span>
+        </a>
+
+        <div class="navbar-nav flex-row order-md-last">
+            <div class="nav-item dropdown" th:if="${currentUser != null}">
+                <a href="#" class="nav-link d-flex lh-1 p-0 px-2" data-bs-toggle="dropdown" aria-label="Open account menu">
+                    <span class="avatar avatar-sm bg-primary-lt"
+                          th:text="${#strings.substring(currentUser.displayName, 0, 1)}">A</span>
+                    <div class="d-none d-xl-block ps-2">
+                        <div th:text="${currentUser.displayName}">Name</div>
+                        <div class="mt-1 small text-secondary">
+                            <span th:text="${isAdmin} ? 'Administrator' : 'Reader'">Reader</span>
+                            &middot;
+                            <span th:text="'via ' + ${currentUser.method}">via X509</span>
+                        </div>
+                    </div>
+                </a>
+                <div class="dropdown-menu dropdown-menu-end dropdown-menu-arrow">
+                    <span class="dropdown-header" th:text="${currentUser.username}">username</span>
+                    <div class="dropdown-item-text small text-secondary" th:if="${currentUser.directoryDn != null}"
+                         th:text="${currentUser.directoryDn}">dn</div>
+                    <div class="dropdown-divider"></div>
+                    <form method="post" th:action="@{/logout}">
+                        <button type="submit" class="dropdown-item">
+                            <svg class="icon me-2"><use href="#icon-logout"></use></svg>
+                            Sign out
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="collapse navbar-collapse" id="navbar-menu">
+            <ul class="navbar-nav">
+                <li class="nav-item" th:classappend="${active == 'users'} ? 'active'">
+                    <a class="nav-link" th:href="@{/users}">
+                        <span class="nav-link-icon d-md-none d-lg-inline-block">
+                            <svg class="icon"><use href="#icon-users"></use></svg>
+                        </span>
+                        <span class="nav-link-title">People</span>
+                    </a>
+                </li>
+                <li class="nav-item" th:classappend="${active == 'servers'} ? 'active'">
+                    <a class="nav-link" th:href="@{/servers}">
+                        <span class="nav-link-icon d-md-none d-lg-inline-block">
+                            <svg class="icon"><use href="#icon-server"></use></svg>
+                        </span>
+                        <span class="nav-link-title">Servers</span>
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </div>
 </header>
+
+<!--/* Page title, the run summary, and the sync control for administrators. */-->
+<div th:fragment="pageheader(title, subtitle)" class="page-header d-print-none">
+    <div class="container-xl">
+        <div class="row g-2 align-items-center">
+            <div class="col">
+                <div class="page-pretitle">IC Full Service Directory</div>
+                <h2 class="page-title" th:text="${title}">Title</h2>
+                <div class="text-secondary mt-1" th:text="${subtitle}">Subtitle</div>
+            </div>
+            <div class="col-auto ms-auto d-print-none">
+                <div class="btn-list align-items-center">
+                    <span id="sync-status" class="text-secondary small"></span>
+                    <button type="button" id="sync-now" class="btn btn-primary" th:if="${isAdmin}">
+                        <svg class="icon"><use href="#icon-refresh"></use></svg>
+                        Sync directory
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!--/* The certificate roll-up across whichever object type the page is showing. */-->
+<div th:fragment="stats" class="row row-deck row-cards mb-3" id="stat-cards">
+    <div class="col-6 col-sm-3">
+        <div class="card card-sm">
+            <div class="card-body">
+                <div class="row align-items-center">
+                    <div class="col-auto"><span class="bg-blue-lt avatar"><svg class="icon"><use href="#icon-certificate"></use></svg></span></div>
+                    <div class="col">
+                        <div class="h3 mb-0" data-stat="total">&ndash;</div>
+                        <div class="text-secondary">Total</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-sm-3">
+        <div class="card card-sm">
+            <div class="card-body">
+                <div class="row align-items-center">
+                    <div class="col-auto"><span class="bg-green-lt avatar"><svg class="icon"><use href="#icon-circle-check"></use></svg></span></div>
+                    <div class="col">
+                        <div class="h3 mb-0" data-stat="VALID">&ndash;</div>
+                        <div class="text-secondary">Valid</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-sm-3">
+        <div class="card card-sm">
+            <div class="card-body">
+                <div class="row align-items-center">
+                    <div class="col-auto"><span class="bg-yellow-lt avatar"><svg class="icon"><use href="#icon-clock"></use></svg></span></div>
+                    <div class="col">
+                        <div class="h3 mb-0" data-stat="EXPIRING_SOON">&ndash;</div>
+                        <div class="text-secondary">Expiring soon</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-sm-3">
+        <div class="card card-sm">
+            <div class="card-body">
+                <div class="row align-items-center">
+                    <div class="col-auto"><span class="bg-red-lt avatar"><svg class="icon"><use href="#icon-alert-triangle"></use></svg></span></div>
+                    <div class="col">
+                        <div class="h3 mb-0" data-stat="EXPIRED">&ndash;</div>
+                        <div class="text-secondary">Expired</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 
 <div th:fragment="scripts">
     <script th:src="@{/webjars/jquery/jquery.min.js}"></script>
     <script th:src="@{/webjars/datatables/js/dataTables.js}"></script>
+    <script th:src="@{/webjars/datatables/js/dataTables.bootstrap5.js}"></script>
+    <script th:src="@{/webjars/tabler__core/dist/js/tabler.min.js}"></script>
     <script th:src="@{/js/directory-table.js}"></script>
     <script th:src="@{/js/sync.js}"></script>
 </div>

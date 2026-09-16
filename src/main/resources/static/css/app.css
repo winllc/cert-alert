@@ -1,375 +1,100 @@
-:root {
-    --bg: #f5f6f8;
-    --panel: #ffffff;
-    --border: #d8dce3;
-    --text: #1f2328;
-    --muted: #61697a;
-    --accent: #1f5fa9;
-    --ok: #1a7f46;
-    --ok-bg: #e5f4ea;
-    --warn: #96650a;
-    --warn-bg: #fdf3dc;
-    --bad: #b3261e;
-    --bad-bg: #fce9e7;
-    --none-bg: #eceef2;
-}
+/*
+ * A thin layer on top of Tabler.
+ *
+ * Everything structural - the shell, cards, forms, buttons, badges - is Tabler's. What is
+ * left here is the handful of things it has no opinion about: the expand affordance on a
+ * table row, the certificate detail panel, and making DataTables' own furniture sit
+ * comfortably inside a Tabler card.
+ */
 
-* {
-    box-sizing: border-box;
-}
-
-body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-}
-
-header.app-bar {
-    display: flex;
-    align-items: baseline;
-    gap: 24px;
-    padding: 14px 24px;
-    background: #17212f;
-    color: #fff;
-}
-
-header.app-bar h1 {
-    margin: 0;
-    font-size: 16px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-}
-
-header.app-bar nav a {
-    color: #c3cbd8;
-    text-decoration: none;
-    margin-right: 18px;
-    font-weight: 500;
-}
-
-header.app-bar nav a.active,
-header.app-bar nav a:hover {
-    color: #fff;
-}
-
-header.app-bar .spacer {
-    margin-left: auto;
-}
-
-button.action {
-    background: var(--accent);
-    color: #fff;
-    border: 0;
-    border-radius: 4px;
-    padding: 6px 14px;
-    font-size: 13px;
-    cursor: pointer;
-}
-
-button.action:disabled {
-    opacity: 0.6;
-    cursor: progress;
-}
-
-main {
-    padding: 20px 24px 48px;
-}
-
-.filters {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-end;
-    gap: 16px;
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 14px 16px;
-    margin-bottom: 16px;
-}
-
-.filters .field {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.filters label {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--muted);
-    font-weight: 600;
-}
-
-.filters select,
-.filters input {
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 6px 8px;
-    font-size: 13px;
-    min-width: 170px;
-    background: #fff;
-}
-
-.filters .applied {
-    font-size: 12px;
-    color: var(--muted);
-    padding-bottom: 7px;
-}
-
-.filters .applied strong {
-    color: var(--accent);
-}
-
-.table-panel {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 12px 16px;
-}
-
-table.directory {
-    width: 100% !important;
-}
-
-table.directory tfoot input {
-    width: 100%;
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    padding: 4px 6px;
-    font-size: 12px;
-    font-weight: 400;
-}
-
-table.directory tfoot th {
-    padding: 6px 8px;
-}
-
-.badge {
-    display: inline-block;
-    padding: 1px 8px;
-    border-radius: 10px;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    white-space: nowrap;
-}
-
-.badge.VALID {
-    background: var(--ok-bg);
-    color: var(--ok);
-}
-
-.badge.EXPIRING_SOON {
-    background: var(--warn-bg);
-    color: var(--warn);
-}
-
-.badge.EXPIRED {
-    background: var(--bad-bg);
-    color: var(--bad);
-}
-
-.badge.NONE {
-    background: var(--none-bg);
-    color: var(--muted);
-}
-
+/* The row-expand column. */
 td.expand {
     cursor: pointer;
-    color: var(--accent);
-    font-weight: 700;
+    width: 2.5rem;
     text-align: center;
-    width: 28px;
+    color: var(--tblr-primary);
     user-select: none;
 }
 
-td.mono,
-.mono {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 12px;
+td.expand svg {
+    width: 1rem;
+    height: 1rem;
+    vertical-align: middle;
 }
 
-a.poc-link {
-    color: var(--accent);
-    text-decoration: none;
-    white-space: nowrap;
-}
-
-a.poc-link:hover {
-    text-decoration: underline;
-}
-
+/* Cached certificate detail, shown when a row is expanded. */
 .cert-detail {
-    background: #fafbfc;
-    padding: 10px 14px;
+    padding: 0.75rem 1rem;
+    background: var(--tblr-bg-surface-secondary);
+}
+
+.cert-detail .cert + .cert {
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--tblr-border-color);
 }
 
 .cert-detail table {
     width: 100%;
-    border-collapse: collapse;
-    font-size: 12px;
+    font-size: 0.8125rem;
 }
 
 .cert-detail th {
+    width: 8rem;
+    padding: 0.15rem 0.75rem 0.15rem 0;
+    color: var(--tblr-secondary);
+    font-weight: 500;
     text-align: left;
-    color: var(--muted);
-    font-weight: 600;
-    padding: 4px 10px 4px 0;
-    white-space: nowrap;
     vertical-align: top;
+    white-space: nowrap;
 }
 
 .cert-detail td {
-    padding: 4px 10px 4px 0;
+    padding: 0.15rem 0;
     word-break: break-all;
 }
 
-.cert-detail .cert + .cert {
-    border-top: 1px solid var(--border);
-    margin-top: 8px;
-    padding-top: 8px;
-}
-
-.muted {
-    color: var(--muted);
-}
-
-.days {
-    font-size: 11px;
-    color: var(--muted);
-    margin-left: 6px;
-}
-
-.chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    background: #e8eefc;
-    color: var(--accent);
-    border: 1px solid #c6d6f3;
-    border-radius: 12px;
-    padding: 4px 6px 4px 10px;
-    font-size: 13px;
-    font-weight: 500;
-}
-
-.chip button {
-    border: 0;
-    background: transparent;
-    color: var(--accent);
-    cursor: pointer;
-    font-size: 13px;
-    line-height: 1;
-    padding: 2px 4px;
-}
-
-.chip button:hover {
-    color: var(--bad);
-}
-
-.signed-in {
-    font-size: 13px;
-    color: #c3cbd8;
-    display: flex;
-    flex-direction: column;
-    line-height: 1.25;
-}
-
-.signed-in .via {
-    font-size: 11px;
-    color: #8b97a8;
-}
-
-.logout-form {
+/* DataTables puts its length, search and pagination controls around the table; give them
+   the padding a Tabler card would. */
+.card .dt-layout-row {
+    padding: 0.75rem 1rem;
     margin: 0;
 }
 
-.link-button {
-    background: none;
-    border: 0;
-    color: #c3cbd8;
-    cursor: pointer;
-    font-size: 13px;
-    text-decoration: underline;
+.card .dt-layout-row:has(table) {
     padding: 0;
 }
 
-.link-button:hover {
-    color: #fff;
+.card .dt-search input,
+.card .dt-length select {
+    display: inline-block;
+    width: auto;
 }
 
-body.login-page {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 100vh;
+/* Per-column search inputs live in the footer. */
+table.datatable tfoot.column-search-hidden {
+    display: none;
 }
 
-main.login {
-    width: 100%;
-    max-width: 380px;
-    padding: 24px 16px;
+table.datatable tfoot th {
+    padding: 0.5rem;
+    font-weight: 400;
 }
 
-.login-card {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 28px 26px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
+/* How long is left, next to the expiry date. */
+.days {
+    margin-left: 0.4rem;
+    font-size: 0.75rem;
+    color: var(--tblr-secondary);
 }
 
-.login-card h1 {
-    margin: 0;
-    font-size: 20px;
-    letter-spacing: 0.01em;
+.mono {
+    font-family: var(--tblr-font-monospace);
+    font-size: 0.8125rem;
 }
 
-.login-card p.muted {
-    margin: 0 0 12px;
-    font-size: 13px;
-}
-
-.login-card label {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--muted);
-    font-weight: 600;
-    margin-top: 10px;
-}
-
-.login-card input {
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 8px 10px;
-    font-size: 14px;
-}
-
-.login-card button {
-    margin-top: 18px;
-    padding: 9px 14px;
-    font-size: 14px;
-}
-
-.login-card .hint {
-    margin: 14px 0 0;
-    font-size: 12px;
-}
-
-.notice {
-    border-radius: 4px;
-    padding: 8px 10px;
-    font-size: 13px;
-    background: var(--none-bg);
-    color: var(--muted);
-}
-
-.notice.error {
-    background: var(--bad-bg);
-    color: var(--bad);
+/* The badge in the point-of-contact filter carries a clear button. */
+#poc-user-field .btn-close {
+    font-size: 0.6rem;
+    vertical-align: middle;
 }
