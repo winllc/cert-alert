@@ -31,6 +31,13 @@ public interface CachedCertificateRepository extends JpaRepository<CachedCertifi
             @Param("afterId") long afterId,
             Pageable pageable);
 
+    /**
+     * Looks a certificate up by its fingerprint, with the owning person attached. This is
+     * how a presented client certificate is recognised as one the directory publishes.
+     */
+    @Query("select c from CachedCertificate c left join fetch c.user where c.sha256Fingerprint = :fingerprint")
+    List<CachedCertificate> findByFingerprint(@Param("fingerprint") String fingerprint);
+
     @Query("select distinct c.user.id from CachedCertificate c where c.id in :ids and c.user is not null")
     List<Long> findUserIdsByCertificateIds(@Param("ids") Collection<Long> ids);
 

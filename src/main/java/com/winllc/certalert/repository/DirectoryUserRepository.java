@@ -34,6 +34,13 @@ public interface DirectoryUserRepository extends DataTablesRepository<DirectoryU
     @Query("select i from DirectoryUser u join u.identifiers i where u.id = :id")
     Set<String> findIdentifiersById(@Param("id") Long id);
 
+    /**
+     * Finds the person the directory knows by this value - an address, a uid, a name.
+     * Returns a list because nothing stops two entries sharing a common name.
+     */
+    @Query("select distinct u from DirectoryUser u join u.identifiers i where i = :identifier")
+    List<DirectoryUser> findByIdentifier(@Param("identifier") String identifier);
+
     long countByLastSyncedAtBefore(Instant cutoff);
 
     /** Used by the prune job; the cascade takes the certificates and identifiers with it. */

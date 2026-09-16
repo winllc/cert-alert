@@ -45,6 +45,22 @@ server:
   error:
     include-message: never
 
+  # X.509 needs TLS with client authentication. "want" is deliberate: with "need", a
+  # browser holding no certificate cannot even reach the login form, so the password
+  # fallback becomes unreachable.
+  ssl:
+    enabled: ${CERT_ALERT_TLS_ENABLED:false}
+    client-auth: want
+    key-store: ${CERT_ALERT_KEYSTORE:}
+    key-store-password: ${CERT_ALERT_KEYSTORE_PASSWORD:}
+    key-store-type: ${CERT_ALERT_KEYSTORE_TYPE:PKCS12}
+    # The CAs whose client certificates are accepted at the handshake. Being in here only
+    # gets a certificate as far as the application; it still has to be one the directory
+    # publishes.
+    trust-store: ${CERT_ALERT_TRUSTSTORE:}
+    trust-store-password: ${CERT_ALERT_TRUSTSTORE_PASSWORD:}
+    trust-store-type: ${CERT_ALERT_TRUSTSTORE_TYPE:PKCS12}
+
 management:
   endpoints:
     web:
@@ -148,6 +164,29 @@ cert-alert:
       organization: o
       organizational-unit: ou
       certificate: userCertificate
+
+  security:
+    # Turning this off leaves the application open. Local development only.
+    enabled: true
+    # Any value the directory knows a person by: an address, a uid, a common name.
+    # Everyone else who signs in can read the tables but cannot trigger jobs.
+    admin-identifiers: []
+
+    x509:
+      enabled: true
+      # Match the presented certificate against the ones the directory publishes, by
+      # fingerprint. Turning this off falls back to matching its subject and subject
+      # alternative names against directory entries, which trusts a name rather than a key.
+      require-known-certificate: true
+
+    ldap:
+      # The password fallback. Set false for a deployment that wants certificates only.
+      enabled: true
+      user-search-base: ""
+      user-search-filter: "(uid={0})"
+      # Bind straight to these instead of searching, for directories that permit no
+      # anonymous search, e.g. ["uid={0},ou=people"].
+      user-dn-patterns: []
 
   alerts:
     logging:

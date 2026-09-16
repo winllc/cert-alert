@@ -25,6 +25,9 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.springframework.boot:spring-boot-starter-mail")
     implementation("org.springframework.boot:spring-boot-starter-data-ldap")
+    implementation("org.springframework.boot:spring-boot-starter-security")
+    // X.509 authenticates most people; this backs the password fallback onto the directory.
+    implementation("org.springframework.security:spring-security-ldap")
     implementation("org.springframework.boot:spring-boot-starter-thymeleaf")
 
     // Maps DataTables' paging/ordering/search request straight onto a JPA query.
@@ -48,6 +51,7 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     // Spring Boot 4 ships test slices as separate modules; this one provides @WebMvcTest.
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
+    testImplementation("org.springframework.security:spring-security-test")
     // In-memory LDAP server, so the sync is tested against a real directory protocol.
     testImplementation("com.unboundid:unboundid-ldapsdk")
     // Test-only: mints certificates with exact expiry offsets for the sync tests.

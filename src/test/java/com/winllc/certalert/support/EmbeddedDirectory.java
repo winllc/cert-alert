@@ -107,6 +107,8 @@ public final class EmbeddedDirectory implements AutoCloseable {
                 "uid=" + uid + "," + PEOPLE_DN,
                 new Attribute("objectClass", "top", "person", "organizationalPerson", "inetOrgPerson", "icOrgPerson"),
                 new Attribute("uid", uid),
+                // Lets the tests exercise a real bind against this entry.
+                new Attribute("userPassword", "password"),
                 new Attribute("cn", displayName),
                 new Attribute("sn", displayName.substring(displayName.lastIndexOf(' ') + 1)),
                 new Attribute("givenName", displayName.substring(0, displayName.indexOf(' '))),

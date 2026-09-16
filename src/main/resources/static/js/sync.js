@@ -23,6 +23,14 @@
                     });
                 })
                 .fail(function (xhr) {
+                    if (xhr.status === 403) {
+                        $status.text('Sync failed: this account is not an administrator');
+                        return;
+                    }
+                    if (xhr.status === 401) {
+                        window.location.href = '/login';
+                        return;
+                    }
                     var detail = xhr.responseJSON && xhr.responseJSON.detail
                         ? xhr.responseJSON.detail
                         : 'check the application log';

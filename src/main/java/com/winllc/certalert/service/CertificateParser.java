@@ -2,8 +2,6 @@ package com.winllc.certalert.service;
 
 import com.winllc.certalert.domain.CachedCertificate;
 import java.io.ByteArrayInputStream;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.security.PublicKey;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
@@ -15,7 +13,6 @@ import java.security.interfaces.RSAPublicKey;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HexFormat;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,7 +42,7 @@ public class CertificateParser {
     public CachedCertificate parse(byte[] der, Instant cachedAt) {
         X509Certificate certificate = readCertificate(der);
         return new CachedCertificate(
-                fingerprint(der),
+                CertificateFingerprints.sha256(der),
                 certificate.getSerialNumber().toString(16),
                 certificate.getSubjectX500Principal().getName(),
                 certificate.getIssuerX500Principal().getName(),
@@ -64,15 +61,6 @@ public class CertificateParser {
             return (X509Certificate) factory.generateCertificate(new ByteArrayInputStream(der));
         } catch (CertificateException | ClassCastException e) {
             throw new CertificateParseException("Attribute did not contain a readable X.509 certificate", e);
-        }
-    }
-
-    /** Lowercase hex SHA-256 over the DER encoding, matching what openssl and browsers show. */
-    private String fingerprint(byte[] der) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(der));
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 is required by the platform but was unavailable", e);
         }
     }
 

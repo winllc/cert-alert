@@ -34,6 +34,13 @@ management:
       show-details: always
 
 cert-alert:
+  security:
+    # The sample directory gives everyone the password "password"; alice is the admin.
+    admin-identifiers: [alice@intelink.ic.gov]
+    ldap:
+      user-search-base: ou=people
+      user-search-filter: "(uid={0})"
+
   ldap:
     # Small pages and batches, so the sample directory still exercises the paging loop.
     page-size: 2

@@ -1,5 +1,6 @@
 package com.winllc.certalert.web;
 
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -20,6 +21,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
@@ -29,6 +32,7 @@ import org.springframework.web.context.WebApplicationContext;
  */
 @SpringBootTest
 @ActiveProfiles("test")
+@WithMockUser(roles = "USER")
 class DirectoryDataTablesControllerTest {
 
     private static final String USERS = "/api/v1/datatables/users";
@@ -61,7 +65,11 @@ class DirectoryDataTablesControllerTest {
 
     @BeforeEach
     void seed() {
-        mockMvc = MockMvcBuilders.webAppContextSetup(context).build();
+        // With the security filter chain in place, so these tests run against the same
+        // stack a browser hits rather than an unprotected one.
+        mockMvc = MockMvcBuilders.webAppContextSetup(context)
+                .apply(SecurityMockMvcConfigurers.springSecurity())
+                .build();
         serverRepository.deleteAll();
         userRepository.deleteAll();
 
@@ -86,7 +94,8 @@ class DirectoryDataTablesControllerTest {
 
     @Test
     void returnsAPageOfUsersWithTheTotalCounts() throws Exception {
-        mockMvc.perform(post(USERS).contentType(MediaType.APPLICATION_JSON).content(usersRequest(0, 2, null, null)))
+        mockMvc.perform(post(USERS).contentType(MediaType.APPLICATION_JSON).content(usersRequest(0, 2, null, null))
+                        .with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.draw").value(1))
                 .andExpect(jsonPath("$.recordsTotal").value(4))
@@ -97,7 +106,8 @@ class DirectoryDataTablesControllerTest {
     @Test
     void globalSearchMatchesAcrossSearchableColumns() throws Exception {
         mockMvc.perform(post(USERS).contentType(MediaType.APPLICATION_JSON)
-                        .content(usersRequest(0, 10, "Archer", null)))
+                        .content(usersRequest(0, 10, "Archer", null))
+                        .with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.recordsFiltered").value(1))
                 .andExpect(jsonPath("$.data[0].email").value("alice@example.gov"));
@@ -106,7 +116,8 @@ class DirectoryDataTablesControllerTest {
     @Test
     void perColumnSearchNarrowsToThatColumn() throws Exception {
         mockMvc.perform(post(USERS).contentType(MediaType.APPLICATION_JSON)
-                        .content(usersRequest(0, 10, null, "bob")))
+                        .content(usersRequest(0, 10, null, "bob"))
+                        .with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.recordsFiltered").value(1))
                 .andExpect(jsonPath("$.data[0].uid").value("bob"));
@@ -115,7 +126,8 @@ class DirectoryDataTablesControllerTest {
     @Test
     void expiredFilterReturnsOnlyEntitiesHoldingAnExpiredCertificate() throws Exception {
         mockMvc.perform(post(USERS + "?expired=true").contentType(MediaType.APPLICATION_JSON)
-                        .content(usersRequest(0, 10, null, null)))
+                        .content(usersRequest(0, 10, null, null))
+                        .with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.recordsFiltered").value(1))
                 .andExpect(jsonPath("$.data[0].uid").value("bob"))
@@ -125,7 +137,8 @@ class DirectoryDataTablesControllerTest {
     @Test
     void notExpiredFilterExcludesExpiredAndCertificatelessEntities() throws Exception {
         mockMvc.perform(post(USERS + "?expired=false").contentType(MediaType.APPLICATION_JSON)
-                        .content(usersRequest(0, 10, null, null)))
+                        .content(usersRequest(0, 10, null, null))
+                        .with(csrf()))
                 .andExpect(status().isOk())
                 // alice (valid) and carol (expiring soon); bob is expired, dave has none.
                 .andExpect(jsonPath("$.recordsFiltered").value(2));
@@ -134,7 +147,8 @@ class DirectoryDataTablesControllerTest {
     @Test
     void statusFilterSelectsASingleState() throws Exception {
         mockMvc.perform(post(USERS + "?certificateStatus=EXPIRING_SOON").contentType(MediaType.APPLICATION_JSON)
-                        .content(usersRequest(0, 10, null, null)))
+                        .content(usersRequest(0, 10, null, null))
+                        .with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.recordsFiltered").value(1))
                 .andExpect(jsonPath("$.data[0].uid").value("carol"));
@@ -143,7 +157,8 @@ class DirectoryDataTablesControllerTest {
     @Test
     void hasCertificatesFilterFindsEntitiesWithNone() throws Exception {
         mockMvc.perform(post(USERS + "?hasCertificates=false").contentType(MediaType.APPLICATION_JSON)
-                        .content(usersRequest(0, 10, null, null)))
+                        .content(usersRequest(0, 10, null, null))
+                        .with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.recordsFiltered").value(1))
                 .andExpect(jsonPath("$.data[0].uid").value("dave"))
@@ -153,7 +168,8 @@ class DirectoryDataTablesControllerTest {
     @Test
     void expiringWithinDaysWindowsOnTheNextExpiry() throws Exception {
         mockMvc.perform(post(USERS + "?expiringWithinDays=30").contentType(MediaType.APPLICATION_JSON)
-                        .content(usersRequest(0, 10, null, null)))
+                        .content(usersRequest(0, 10, null, null))
+                        .with(csrf()))
                 .andExpect(status().isOk())
                 // carol expires in 10 days; alice is 400 days out and bob already expired.
                 .andExpect(jsonPath("$.recordsFiltered").value(1))
@@ -163,7 +179,8 @@ class DirectoryDataTablesControllerTest {
     @Test
     void serversFilterByPointOfContactEmail() throws Exception {
         mockMvc.perform(post(SERVERS + "?pocEmail=alice@example.gov").contentType(MediaType.APPLICATION_JSON)
-                        .content(serversRequest(0, 10, null)))
+                        .content(serversRequest(0, 10, null))
+                        .with(csrf()))
                 .andExpect(status().isOk())
                 // web01 lists alice, web02 lists her in a different case; db01 does not.
                 .andExpect(jsonPath("$.recordsFiltered").value(2));
@@ -172,7 +189,8 @@ class DirectoryDataTablesControllerTest {
     @Test
     void pointOfContactMatchIgnoresCase() throws Exception {
         mockMvc.perform(post(SERVERS + "?pocEmail=ALICE@EXAMPLE.GOV").contentType(MediaType.APPLICATION_JSON)
-                        .content(serversRequest(0, 10, null)))
+                        .content(serversRequest(0, 10, null))
+                        .with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.recordsFiltered").value(2));
     }
@@ -182,7 +200,8 @@ class DirectoryDataTablesControllerTest {
         Long bobId = userRepository.findByDn("uid=bob,ou=people").orElseThrow().getId();
 
         mockMvc.perform(post(SERVERS + "?pocUserId=" + bobId).contentType(MediaType.APPLICATION_JSON)
-                        .content(serversRequest(0, 10, null)))
+                        .content(serversRequest(0, 10, null))
+                        .with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.recordsFiltered").value(2));
     }
@@ -190,7 +209,8 @@ class DirectoryDataTablesControllerTest {
     @Test
     void anUnknownUserIdMatchesNoServersRatherThanAllOfThem() throws Exception {
         mockMvc.perform(post(SERVERS + "?pocUserId=999999").contentType(MediaType.APPLICATION_JSON)
-                        .content(serversRequest(0, 10, null)))
+                        .content(serversRequest(0, 10, null))
+                        .with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.recordsFiltered").value(0))
                 .andExpect(jsonPath("$.data.length()").value(0));
@@ -200,7 +220,8 @@ class DirectoryDataTablesControllerTest {
     void pointOfContactAndCertificateFiltersCombine() throws Exception {
         mockMvc.perform(post(SERVERS + "?pocEmail=alice@example.gov&expired=true")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(serversRequest(0, 10, null)))
+                        .content(serversRequest(0, 10, null))
+                        .with(csrf()))
                 .andExpect(status().isOk())
                 // Of alice's two servers only web02 holds an expired certificate.
                 .andExpect(jsonPath("$.recordsFiltered").value(1))
@@ -210,10 +231,18 @@ class DirectoryDataTablesControllerTest {
     @Test
     void serverRowsCarryTheFlattenedContactList() throws Exception {
         mockMvc.perform(post(SERVERS).contentType(MediaType.APPLICATION_JSON)
-                        .content(serversRequest(0, 10, "web02")))
+                        .content(serversRequest(0, 10, "web02"))
+                        .with(csrf()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.recordsFiltered").value(1))
                 .andExpect(jsonPath("$.data[0].serverPocDisplay").value("alice@example.gov, bob@example.gov"));
+    }
+
+    @Test
+    void aTableRequestWithoutACsrfTokenIsRejected() throws Exception {
+        mockMvc.perform(post(USERS).contentType(MediaType.APPLICATION_JSON)
+                        .content(usersRequest(0, 10, null, null)))
+                .andExpect(status().isForbidden());
     }
 
     private DirectoryUser user(String dn, String uid, String displayName, String email, CachedCertificate... certs) {

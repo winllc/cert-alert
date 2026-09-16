@@ -6,6 +6,12 @@ spring:
     driver-class-name: org.h2.Driver
 
 cert-alert:
+  security:
+    admin-identifiers: [admin@example.gov]
+    ldap:
+      user-search-base: ou=people
+      user-search-filter: "(uid={0})"
+
   ldap:
     # Deliberately tiny, so even a handful of fixture entries cross page and batch
     # boundaries and the streaming path is what the tests actually exercise.

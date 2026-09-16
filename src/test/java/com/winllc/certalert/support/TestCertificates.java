@@ -83,6 +83,16 @@ public final class TestCertificates {
         }
     }
 
+    /** Rebuilds a certificate from the DER that was handed to the directory. */
+    public static X509Certificate certificateOf(byte[] der) {
+        try {
+            return (X509Certificate) java.security.cert.CertificateFactory.getInstance("X.509")
+                    .generateCertificate(new java.io.ByteArrayInputStream(der));
+        } catch (java.security.cert.CertificateException e) {
+            throw new IllegalStateException("Could not read back a test certificate", e);
+        }
+    }
+
     /** The fingerprint the application will cache this certificate under. */
     public static String sha256(byte[] der) {
         try {

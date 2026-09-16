@@ -12,6 +12,32 @@
 
     var MS_PER_DAY = 86400000;
 
+    // Every request the tables make is a POST, so each one carries the CSRF token the
+    // server rendered into the page. Done once here rather than per call site.
+    $(function () {
+        var token = $('meta[name="_csrf"]').attr('content');
+        var header = $('meta[name="_csrf_header"]').attr('content');
+        if (token && header) {
+            $.ajaxSetup({
+                beforeSend: function (xhr) {
+                    xhr.setRequestHeader(header, token);
+                }
+            });
+        }
+    });
+
+    /**
+     * A 401 means the session lapsed while the page stayed open. Sending them to the login
+     * form beats leaving a table that silently stops updating.
+     */
+    function handleUnauthorized(xhr) {
+        if (xhr.status === 401 || xhr.status === 403) {
+            window.location.href = '/login';
+            return true;
+        }
+        return false;
+    }
+
     function escapeHtml(value) {
         if (value === null || value === undefined) {
             return '';
@@ -163,6 +189,9 @@
                     return JSON.stringify(request);
                 },
                 error: function (xhr) {
+                    if (handleUnauthorized(xhr)) {
+                        return;
+                    }
                     window.console && console.error('Table request failed', xhr.status, xhr.responseText);
                 }
             },
@@ -213,7 +242,10 @@
                 .done(function (certificates) {
                     row.child(renderCertificates(certificates)).show();
                 })
-                .fail(function () {
+                .fail(function (xhr) {
+                    if (handleUnauthorized(xhr)) {
+                        return;
+                    }
                     row.child('<div class="cert-detail muted">Could not load certificate details.</div>').show();
                 });
         });

@@ -4,6 +4,9 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title th:text="'cert-alert · ' + ${pageTitle}">cert-alert</title>
+    <!-- The tables POST, so every request needs the CSRF token; the scripts read it here. -->
+    <meta name="_csrf" th:content="${_csrf != null} ? ${_csrf.token} : ''">
+    <meta name="_csrf_header" th:content="${_csrf != null} ? ${_csrf.headerName} : ''">
     <!-- Assets come from webjars in the application jar, not a CDN: this is meant to run
          on networks with no route to the public internet. -->
     <link rel="stylesheet" th:href="@{/webjars/datatables/css/dataTables.dataTables.css}">
@@ -18,7 +21,15 @@
     </nav>
     <span class="spacer"></span>
     <span id="sync-status" class="muted"></span>
-    <button type="button" id="sync-now" class="action">Sync directory</button>
+    <!-- Triggering a sweep is an administrator's job, so only they are offered it. -->
+    <button type="button" id="sync-now" class="action" th:if="${isAdmin}">Sync directory</button>
+    <span class="signed-in" th:if="${currentUser != null}">
+        <span th:text="${currentUser.displayName}">name</span>
+        <span class="via" th:text="'via ' + ${currentUser.method}">via X509</span>
+    </span>
+    <form method="post" th:action="@{/logout}" class="logout-form" th:if="${currentUser != null}">
+        <button type="submit" class="link-button">Sign out</button>
+    </form>
 </header>
 
 <div th:fragment="scripts">

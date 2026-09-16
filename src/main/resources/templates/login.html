@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Sign in')}"></head>
+<body class="login-page">
+<main class="login">
+    <form class="login-card" method="post" th:action="@{/login}">
+        <h1>cert-alert</h1>
+        <p class="muted">
+            No client certificate was accepted, so sign in with your directory credentials.
+        </p>
+
+        <div th:if="${param.error}" class="notice error">
+            That username and password were not accepted by the directory.
+        </div>
+        <div th:if="${param.logout}" class="notice">You have been signed out.</div>
+
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" autocomplete="username" autofocus required>
+
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" autocomplete="current-password" required>
+
+        <button type="submit" class="action">Sign in</button>
+
+        <p class="muted hint">
+            Presenting a certificate the directory publishes signs you in without this form.
+        </p>
+    </form>
+</main>
+</body>
+</html>

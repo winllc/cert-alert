@@ -83,6 +83,9 @@ class DevLdifGenerator {
         entry.append("objectClass: inetOrgPerson\n");
         entry.append("objectClass: icOrgPerson\n");
         entry.append("uid: ").append(uid).append('\n');
+        // Only the dev sample carries a password, so the fallback sign-in can be tried
+        // without a real directory. Nothing like this ships anywhere else.
+        entry.append("userPassword: password\n");
         entry.append("cn: ").append(name).append('\n');
         entry.append("sn: ").append(name.substring(name.lastIndexOf(' ') + 1)).append('\n');
         entry.append("givenName: ").append(name.substring(0, name.indexOf(' '))).append('\n');

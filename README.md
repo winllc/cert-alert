@@ -11,8 +11,8 @@ alerts when a cached certificate crosses into expiry.
 ## Status
 
 The framework is in place and covered by tests: the scrape, the cached certificate model,
-the search tables and their filters, and the alert channels. Authentication is **not**
-implemented — see [Next steps](#next-steps).
+the search tables and their filters, the scheduled jobs, the alert channels, and
+authentication.
 
 ### Directory schema
 
@@ -60,7 +60,9 @@ Two details from the spec shape the design:
 
 The `dev` profile runs against an **embedded sample directory** (four people, four
 servers, a mix of valid, expiring and expired certificates) so the UI works with no LDAP
-server to hand. Open <http://localhost:8080/users> and press **Sync directory**.
+server to hand. Open <http://localhost:8080/users> and sign in as `alice` / `password` —
+the sample gives everyone that password, and alice is the configured administrator — then
+press **Sync directory**.
 
 The sample's expiry dates are baked in and will age; regenerate it by re-enabling and
 running `DevLdifGenerator`. Neither the in-memory directory nor its fixture reaches the
@@ -125,6 +127,85 @@ so one expired certificate alongside a healthy one still reads as `EXPIRED`.
 | `VALID`         | Expires beyond the warning window                    |
 | `EXPIRING_SOON` | Expires within `warning-threshold-days`              |
 | `EXPIRED`       | Past its notAfter date                               |
+
+## Signing in
+
+Two ways in, in order of preference.
+
+### A client certificate
+
+Everyone in this directory already holds one, and the application already caches every
+certificate the directory publishes — so a presented client certificate is matched **by the
+SHA-256 fingerprint of its DER** against `cached_certificate`.
+
+That is a stronger binding than the usual approach of pattern-matching a subject name. It
+authenticates the exact bytes the directory publishes for that person, so a certificate
+issued to a colliding common name does not get in, and revoking access is a matter of
+removing the certificate from the directory. Only certificates belonging to an **IC Person**
+authenticate; one published by an IC Non-Person Entity identifies a machine, not somebody
+who should hold a session.
+
+```yaml
+server:
+  ssl:
+    enabled: true
+    client-auth: want      # not "need" — see below
+    key-store: file:/etc/cert-alert/keystore.p12
+    trust-store: file:/etc/cert-alert/truststore.p12   # the CAs whose client certs are accepted
+```
+
+`client-auth: want` is deliberate. With `need`, the handshake fails for a browser holding
+no certificate and the password fallback becomes unreachable. Being in the truststore only
+gets a certificate as far as the application; it still has to be one the directory
+publishes.
+
+Setting `cert-alert.security.x509.require-known-certificate: false` falls back to matching
+the certificate's subject and `rfc822Name` alternative names against directory entries.
+That trusts a name rather than a key, so it is off by default.
+
+### A directory password
+
+For a browser that presents no certificate. It binds to the same directory as the person
+signing in, so no password is ever stored here, and roles come from the same place either
+way.
+
+```yaml
+cert-alert:
+  security:
+    ldap:
+      user-search-base: ou=people
+      user-search-filter: "(uid={0})"
+      # or, where no anonymous search is permitted:
+      user-dn-patterns: ["uid={0},ou=people"]
+```
+
+Set `cert-alert.security.ldap.enabled: false` for a deployment that wants certificates and
+nothing else, and there will be no password path at all.
+
+### Roles
+
+| Role         | May                                                        |
+|--------------|------------------------------------------------------------|
+| `ROLE_USER`  | Read the search tables and the cached certificate detail   |
+| `ROLE_ADMIN` | Also trigger the jobs and reach the management endpoints   |
+
+Everyone who authenticates gets `ROLE_USER`. `ROLE_ADMIN` comes from
+`cert-alert.security.admin-identifiers`, matched against **any** value the directory knows
+a person by — an address, a uid, a common name:
+
+```yaml
+cert-alert:
+  security:
+    admin-identifiers: [alice@intelink.ic.gov]
+```
+
+On a fresh deployment the cache is empty, so roles for someone signing in with a password
+are resolved from the directory entry they just bound against. Otherwise nobody could
+trigger the first sync.
+
+`/actuator/health` stays open so the thing can be monitored. Everything else requires
+authentication; an unauthenticated API call gets a 401 rather than a login page, because a
+table driven by fetch has no use for HTML in the response.
 
 ## The search tables
 
@@ -276,6 +357,19 @@ Scraping, under `cert-alert.ldap`:
 | `prune.after`        | `30d`   | How long an entry may go unseen before deletion |
 | `user.*`, `server.*` | FSD names | Search base, filter, and attribute names      |
 
+Access, under `cert-alert.security`:
+
+| Property                          | Default | Purpose                                      |
+|-----------------------------------|---------|----------------------------------------------|
+| `enabled`                         | `true`  | Off leaves the application open; local development only |
+| `admin-identifiers`               | `[]`    | Identifiers granted `ROLE_ADMIN`              |
+| `x509.enabled`                    | `true`  | Accept client certificates                    |
+| `x509.require-known-certificate`  | `true`  | Match by fingerprint against the cache        |
+| `ldap.enabled`                    | `true`  | Offer the password fallback                   |
+| `ldap.user-search-base`           | `""`    | Where to look the username up                 |
+| `ldap.user-search-filter`         | `(uid={0})` | How to look the username up               |
+| `ldap.user-dn-patterns`           | `[]`    | Bind straight to a DN shape instead           |
+
 Alert channels, under `cert-alert.alerts`:
 
 | Property         | Default | Purpose                              |
@@ -309,6 +403,7 @@ src/main/java/com/winllc/certalert/
 ├── domain/      DirectoryUser, DirectoryServer, CachedCertificate
 ├── ldap/        attribute mapping, paged streaming directory client
 ├── repository/  DataTables repositories and the filter specifications
+├── security/    X.509 and directory-password authentication, roles
 ├── scheduling/  the four cron jobs
 ├── service/     certificate parsing, status evaluation, sync
 └── web/         DataTables endpoints, REST API, page controllers
@@ -321,7 +416,8 @@ src/main/resources/
 
 ## Next steps
 
-- **Secure the application** — nothing is authenticated today
+- Group-derived roles, for directories that express administrators as a group rather than
+  a list of people
 - Incremental sync, driven by the directory's change log rather than a full sweep
 - Distributed locking (ShedLock or similar) if more than one instance will run the jobs;
   the overlap guard is per-process

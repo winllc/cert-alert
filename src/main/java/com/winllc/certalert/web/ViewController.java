@@ -21,4 +21,10 @@ public class ViewController {
     public String servers() {
         return "servers";
     }
+
+    /** The password fallback, for a browser that presented no client certificate. */
+    @GetMapping("/login")
+    public String login() {
+        return "login";
+    }
 }
