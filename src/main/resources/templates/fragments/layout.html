@@ -91,6 +91,8 @@
             </div>
             <div class="col-auto ms-auto d-print-none">
                 <div class="btn-list align-items-center">
+                    <!-- Only appears when the changelog connector is enabled. -->
+                    <span id="changelog-status" class="d-none"></span>
                     <span id="sync-status" class="text-secondary small"></span>
                     <button type="button" id="sync-now" class="btn btn-primary" th:if="${isAdmin}">
                         <svg class="icon"><use href="#icon-refresh"></use></svg>

@@ -68,7 +68,7 @@ public class SecurityConfig {
                 .hasRole("ADMIN")
                 // Triggering a sweep of the whole directory, and above all pruning it, is
                 // not something a reader gets to do.
-                .requestMatchers(HttpMethod.POST, "/api/v1/sync/**")
+                .requestMatchers(HttpMethod.POST, "/api/v1/sync/**", "/api/v1/changelog/**")
                 .hasRole("ADMIN")
                 .anyRequest()
                 .authenticated());

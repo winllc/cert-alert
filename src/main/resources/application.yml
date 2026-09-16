@@ -95,6 +95,31 @@ cert-alert:
       # Re-evaluates cached expiry only; reads no LDAP, so it can run often.
       refresh-cron: "0 15 * * * *"
 
+    # The connector that follows the directory's changelog, so a change shows up in seconds
+    # rather than waiting for the next sweep. Off by default: a directory that publishes no
+    # changelog, or does not let this account read it, would leave it erroring on a loop, and
+    # the sweeps already keep the cache correct on their own.
+    changelog:
+      enabled: false
+      base-dn: cn=changelog
+      filter: "(&(objectClass=changeLogEntry)(changeNumber>={0}))"
+      poll-interval: 10s
+      batch-size: 500
+      # LATEST or BEGINNING. LATEST is right after a full sweep has populated the cache;
+      # replaying the directory's whole retained history would reach the same place.
+      start-from: LATEST
+      # A trimmed changelog means changes were lost to the connector; the only way back to a
+      # correct cache is to read the tree again.
+      full-sync-on-gap: true
+      max-backoff: 5m
+      change-number-attribute: changeNumber
+      target-dn-attribute: targetDN
+      change-type-attribute: changeType
+      new-rdn-attribute: newRDN
+      new-superior-attribute: newSuperior
+      first-change-number-attribute: firstChangeNumber
+      last-change-number-attribute: lastChangeNumber
+
     prune:
       # Off by default. Turn on once you have checked GET /api/v1/sync/prune/preview.
       enabled: false

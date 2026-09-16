@@ -55,4 +55,12 @@ public interface DirectoryUserRepository extends DataTablesRepository<DirectoryU
     @Query("select u.certificateStatus as status, count(u) as total from DirectoryUser u "
             + "group by u.certificateStatus")
     List<CertificateStatusCount> countByCertificateStatus();
+
+    /**
+     * Removes one entry by name. The foreign keys cascade, so its certificates and its
+     * identifiers or contacts go with it.
+     */
+    @Modifying
+    @Query("delete from DirectoryUser u where u.dn = :dn")
+    int deleteByDn(@Param("dn") String dn);
 }

@@ -26,12 +26,27 @@ public final class EmbeddedDirectory implements AutoCloseable {
     public static final String PEOPLE_DN = "ou=people," + BASE_DN;
     public static final String SERVERS_DN = "ou=servers," + BASE_DN;
 
+    /** The changelog is its own suffix, as it is in a real directory. */
+    public static final String CHANGELOG_DN = "cn=changelog";
+
     private final InMemoryDirectoryServer server;
 
     public EmbeddedDirectory() {
+        this(0);
+    }
+
+    /**
+     * @param maxChangeLogEntries how many changes the directory retains, or 0 for no
+     *     changelog at all. The server records changes itself, at {@code cn=changelog},
+     *     following the same draft-good-ldap-changelog shape the connector reads - so the
+     *     tests run against a real changelog rather than a hand-written imitation. A small
+     *     number makes it trim, which is how a gap is produced on purpose.
+     */
+    public EmbeddedDirectory(int maxChangeLogEntries) {
         try {
             InMemoryDirectoryServerConfig config = new InMemoryDirectoryServerConfig(BASE_DN);
             config.setSchema(null);
+            config.setMaxChangeLogEntries(maxChangeLogEntries);
             config.setListenerConfigs(InMemoryListenerConfig.createLDAPConfig("test", 0));
             this.server = new InMemoryDirectoryServer(config);
             this.server.startListening();
@@ -59,6 +74,24 @@ public final class EmbeddedDirectory implements AutoCloseable {
                 SERVERS_DN,
                 new Attribute("objectClass", "top", "organizationalUnit"),
                 new Attribute("ou", "servers")));
+    }
+
+    /** Replaces a single attribute, as an ordinary directory modify would. */
+    public void modify(String dn, String attribute, String... values) {
+        try {
+            server.modify(new ModifyRequest(dn, new Modification(ModificationType.REPLACE, attribute, values)));
+        } catch (LDAPException e) {
+            throw new IllegalStateException("Could not modify " + dn, e);
+        }
+    }
+
+    /** Renames an entry, as a modrdn would. */
+    public void rename(String dn, String newRdn) {
+        try {
+            server.modifyDN(dn, newRdn, true);
+        } catch (LDAPException e) {
+            throw new IllegalStateException("Could not rename " + dn, e);
+        }
     }
 
     /** Adds an IC Person. Certificates are stored under the binary attribute option. */

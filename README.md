@@ -277,6 +277,9 @@ Four schedules, because they are four different kinds of work. All are configure
 | **refresh** | `0 15 * * * *`    | Re-evaluates cached expiry; reads no LDAP                 |
 | **prune**   | `0 0 6 * * SUN`   | Removes entries the directory has stopped publishing      |
 
+Alongside them, the [changelog connector](#following-the-changelog) follows the directory
+continuously, so the sweeps are a backstop rather than the only way a change arrives.
+
 **Why refresh is its own job.** A certificate moves from valid to expiring to expired purely
 because time passes — nothing in the directory changes. Without it, a status would only be
 corrected when its entry happened to be re-scraped, so a nightly sweep would mean expiry
@@ -293,6 +296,81 @@ turning it on.
 Every job is guarded against overlapping itself — a sweep of a large directory can outlast
 its own interval — and every run is recorded in `sync_run`, readable at
 `GET /api/v1/sync/runs`.
+
+## Following the changelog
+
+The sweeps read the whole tree. On a directory of 100,000+ entries that is a nightly job,
+not a way to find out that somebody's certificate was replaced twenty minutes ago. The
+changelog connector closes that window.
+
+```yaml
+cert-alert:
+  ldap:
+    changelog:
+      enabled: true
+      base-dn: cn=changelog
+      poll-interval: 10s
+```
+
+It reads `cn=changelog` — the `changeLogEntry` suffix directories derived from the
+Netscape line publish (draft-good-ldap-changelog) — from where it last got to, applies each
+change, and records its new position. **Off by default**: a directory that publishes no
+changelog, or does not let this account read it, would leave it erroring in a loop, and the
+sweeps keep the cache correct on their own.
+
+### It re-reads rather than replaying
+
+A `changeLogEntry` carries the modifications themselves, as an LDIF fragment. This ignores
+them and re-reads the named entry instead, pushing it through the same path a sweep uses.
+
+Replaying the fragment would mean re-implementing LDAP modify semantics — add, delete and
+replace of individual attribute values, binary or not — against a format directories spell
+differently. Re-reading costs one search per changed entry, which is nothing beside a sweep,
+and buys three things: applying a change is **idempotent**, so one replayed after a crash is
+harmless; the result **cannot drift** from what a sweep would have written; and certificate
+reconciliation, the roll-ups and the alert transitions all come along for free.
+
+| Change | What happens |
+|--------|--------------|
+| `add`, `modify` | Re-read the entry and upsert it |
+| `delete` | Remove it from the cache |
+| `modrdn` | Remove the old name, read the new one |
+| anything else | Counted and stepped over |
+
+An entry that no longer matches the sweep's search filter — its objectClass changed, say —
+is removed rather than left behind as a stale row. Whether a changed DN is a person, a
+server or neither is decided by running those same filters at base scope against it, so
+anything a sweep would collect, the connector collects.
+
+### Durability
+
+Its position lives in `changelog_cursor`, so a restart resumes rather than replaying the
+directory's history or skipping what happened while it was down. It advances one change at a
+time and writes after each, so a crash mid-batch re-applies at most that batch.
+
+**Gaps are the interesting case.** A changelog is trimmed as it ages. If the directory has
+discarded changes the connector never reached, the cache is missing them and no amount of
+further reading will find them — so that triggers a full sweep rather than carrying on
+quietly wrong. It is counted in `gapsDetected` either way.
+
+Every change number read is re-checked against the cursor rather than trusted from the
+filter, because `changeNumber>=N` depends on the directory having that attribute indexed
+with an integer ordering rule; where it does not, the comparison quietly becomes a string
+one.
+
+| Method | Path                        | Purpose                                    |
+|--------|-----------------------------|--------------------------------------------|
+| `GET`  | `/api/v1/changelog`         | Position, lag, counters and the last error  |
+| `POST` | `/api/v1/changelog/poll`    | Read one batch now (admin)                  |
+
+The page header shows a badge — *Live · change 4,182*, or how far behind it is — whenever
+the connector is switched on.
+
+**Caveats.** It runs in every instance that starts it; applying is idempotent so a second
+one is harmless rather than wrong, but it is wasted work — set `auto-start: false` on all
+but one, or add leader election. And the `dev` profile's embedded directory publishes no
+changelog, so the connector stays off there; the tests run against the in-memory server's
+real one.
 
 ## How the sync works
 
@@ -354,6 +432,13 @@ Scraping, under `cert-alert.ldap`:
 | `prune.enabled`      | `false` | Whether stale entries are deleted at all        |
 | `prune.cron`         | `0 0 6 * * SUN` | Prune schedule                          |
 | `prune.after`        | `30d`   | How long an entry may go unseen before deletion |
+| `changelog.enabled`  | `false` | Follow the directory's changelog continuously   |
+| `changelog.auto-start` | `true` | Whether the loop starts with the application   |
+| `changelog.base-dn`  | `cn=changelog` | The changelog suffix                     |
+| `changelog.poll-interval` | `10s` | Wait after a poll that found nothing      |
+| `changelog.batch-size` | `500` | Most changes read in one poll                  |
+| `changelog.start-from` | `LATEST` | `LATEST` or `BEGINNING`, with no stored position |
+| `changelog.full-sync-on-gap` | `true` | Sweep when the changelog has been trimmed past the cursor |
 | `user.*`, `server.*` | FSD names | Search base, filter, and attribute names      |
 
 Access, under `cert-alert.security`:
@@ -417,8 +502,7 @@ src/main/resources/
 
 - Group-derived roles, for directories that express administrators as a group rather than
   a list of people
-- Incremental sync, driven by the directory's change log rather than a full sweep
-- Distributed locking (ShedLock or similar) if more than one instance will run the jobs;
-  the overlap guard is per-process
+- Distributed locking (ShedLock or similar) if more than one instance will run the jobs or
+  the changelog connector; the overlap guard is per-process
 - Certificate chain and revocation status, not just the leaf
 - More alert channels (Slack, PagerDuty, webhooks)

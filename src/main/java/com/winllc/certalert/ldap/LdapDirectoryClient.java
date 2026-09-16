@@ -1,13 +1,8 @@
 package com.winllc.certalert.ldap;
 
-import java.util.ArrayList;
-import java.util.EnumMap;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 import java.util.function.Consumer;
 import javax.naming.NamingException;
-import javax.naming.directory.Attributes;
 import javax.naming.directory.SearchControls;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,10 +33,13 @@ public class LdapDirectoryClient {
 
     private final ContextSource contextSource;
     private final LdapProperties properties;
+    private final DirectoryEntryMapper mapper;
 
-    public LdapDirectoryClient(ContextSource contextSource, LdapProperties properties) {
+    public LdapDirectoryClient(
+            ContextSource contextSource, LdapProperties properties, DirectoryEntryMapper mapper) {
         this.contextSource = contextSource;
         this.properties = properties;
+        this.mapper = mapper;
     }
 
     /**
@@ -51,24 +49,12 @@ public class LdapDirectoryClient {
      */
     public int forEachUser(Consumer<LdapUserEntry> consumer) {
         LdapProperties.User mapping = properties.getUser();
-        List<String> attributes = new ArrayList<>();
-        for (UserField field : UserField.values()) {
-            addIfPresent(attributes, field.attributeName(mapping));
-        }
-        addIfPresent(attributes, LdapAttributes.asBinaryRequest(mapping.getCertificate()));
-
-        return search(mapping.getSearchBase(), mapping.getSearchFilter(), attributes, consumer, ctx -> {
-            Attributes source = ctx.getAttributes();
-            Map<UserField, String> values = new EnumMap<>(UserField.class);
-            for (UserField field : UserField.values()) {
-                String value = LdapAttributes.string(source, field.attributeName(mapping));
-                if (value != null) {
-                    values.put(field, value);
-                }
-            }
-            return new LdapUserEntry(
-                    ctx.getNameInNamespace(), values, LdapAttributes.binaries(source, mapping.getCertificate()));
-        });
+        return search(
+                mapping.getSearchBase(),
+                mapping.getSearchFilter(),
+                List.of(mapper.userAttributes()),
+                consumer,
+                mapper::toUser);
     }
 
     /**
@@ -78,35 +64,12 @@ public class LdapDirectoryClient {
      */
     public int forEachServer(Consumer<LdapServerEntry> consumer) {
         LdapProperties.Server mapping = properties.getServer();
-        List<String> attributes = new ArrayList<>();
-        for (ServerField field : ServerField.values()) {
-            addIfPresent(attributes, field.attributeName(mapping));
-        }
-        addIfPresent(attributes, mapping.getServerPoc());
-        addIfPresent(attributes, LdapAttributes.asBinaryRequest(mapping.getCertificate()));
-
-        return search(mapping.getSearchBase(), mapping.getSearchFilter(), attributes, consumer, ctx -> {
-            Attributes source = ctx.getAttributes();
-            Map<ServerField, String> values = new EnumMap<>(ServerField.class);
-            for (ServerField field : ServerField.values()) {
-                String value = LdapAttributes.string(source, field.attributeName(mapping));
-                if (value != null) {
-                    values.put(field, value);
-                }
-            }
-            Set<String> pocs = LdapAttributes.strings(source, mapping.getServerPoc());
-            return new LdapServerEntry(
-                    ctx.getNameInNamespace(),
-                    values,
-                    pocs,
-                    LdapAttributes.binaries(source, mapping.getCertificate()));
-        });
-    }
-
-    private void addIfPresent(List<String> attributes, String name) {
-        if (name != null && !name.isBlank() && !attributes.contains(name)) {
-            attributes.add(name);
-        }
+        return search(
+                mapping.getSearchBase(),
+                mapping.getSearchFilter(),
+                List.of(mapper.serverAttributes()),
+                consumer,
+                mapper::toServer);
     }
 
     private <T> int search(
@@ -158,6 +121,7 @@ public class LdapDirectoryClient {
         });
     }
 
+    /** Maps one entry, allowed to fail the way JNDI does. */
     @FunctionalInterface
     private interface ThrowingMapper<T> {
         T map(DirContextOperations ctx) throws NamingException;
