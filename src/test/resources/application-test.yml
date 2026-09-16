@@ -6,8 +6,9 @@ spring:
     driver-class-name: org.h2.Driver
 
 cert-alert:
-  # The scheduler must not fire during tests; checks are driven explicitly.
-  scan-enabled: false
+  ldap:
+    # Tests drive the sync explicitly; nothing should fire on a timer.
+    sync-enabled: false
 
 logging:
   level:

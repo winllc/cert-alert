@@ -1,7 +1,7 @@
 package com.winllc.certalert.service;
 
 import com.winllc.certalert.config.CertAlertProperties;
-import com.winllc.certalert.domain.CheckStatus;
+import com.winllc.certalert.domain.CertificateStatus;
 import com.winllc.certalert.domain.Severity;
 import java.time.Duration;
 import java.time.Instant;
@@ -22,19 +22,22 @@ public class CertificateStatusEvaluator {
         return Duration.between(now, notAfter).toDays();
     }
 
-    public CheckStatus evaluate(Instant notAfter, Instant now) {
+    public CertificateStatus evaluate(Instant notAfter, Instant now) {
+        if (notAfter == null) {
+            return CertificateStatus.NONE;
+        }
         if (!notAfter.isAfter(now)) {
-            return CheckStatus.EXPIRED;
+            return CertificateStatus.EXPIRED;
         }
         return daysUntilExpiry(notAfter, now) < properties.getWarningThresholdDays()
-                ? CheckStatus.EXPIRING_SOON
-                : CheckStatus.VALID;
+                ? CertificateStatus.EXPIRING_SOON
+                : CertificateStatus.VALID;
     }
 
-    public Severity severityFor(CheckStatus status, Long daysUntilExpiry) {
+    public Severity severityFor(CertificateStatus status, Long daysUntilExpiry) {
         return switch (status) {
-            case VALID -> Severity.INFO;
-            case EXPIRED, UNREACHABLE -> Severity.CRITICAL;
+            case NONE, VALID -> Severity.INFO;
+            case EXPIRED -> Severity.CRITICAL;
             case EXPIRING_SOON -> daysUntilExpiry != null && daysUntilExpiry < properties.getCriticalThresholdDays()
                     ? Severity.CRITICAL
                     : Severity.WARNING;

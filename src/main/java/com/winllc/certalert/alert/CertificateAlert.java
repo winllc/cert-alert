@@ -1,59 +1,71 @@
 package com.winllc.certalert.alert;
 
-import com.winllc.certalert.domain.CertificateCheck;
-import com.winllc.certalert.domain.CertificateTarget;
-import com.winllc.certalert.domain.CheckStatus;
+import com.winllc.certalert.domain.CachedCertificate;
+import com.winllc.certalert.domain.CertificateStatus;
+import com.winllc.certalert.domain.OwnerType;
 import com.winllc.certalert.domain.Severity;
 import java.time.Instant;
 
 /**
- * A single alert-worthy observation about a target, handed to every {@link AlertNotifier}.
+ * A certificate that has just moved into a state worth telling someone about.
  *
- * @param targetName human readable name of the target
- * @param hostname host that was checked
- * @param port port that was checked
- * @param status status that triggered the alert
- * @param severity how urgent the alert is
- * @param notAfter expiry of the certificate, null when the endpoint was unreachable
- * @param daysUntilExpiry days left before expiry, null when the endpoint was unreachable
- * @param detail failure message or other supporting detail, may be null
+ * @param ownerType whether the certificate belongs to a user or a server
+ * @param ownerName display name of the owner
+ * @param ownerDn distinguished name of the owner in the directory
+ * @param contact who to chase: the user's own address, or a server's points of contact
+ * @param status the state the certificate moved into
+ * @param severity how urgent it is
+ * @param certificateSubject subject DN of the certificate
+ * @param serialNumber certificate serial, in hexadecimal
+ * @param notAfter when the certificate expires
+ * @param daysUntilExpiry days remaining, negative once expired
  * @param raisedAt when the alert was raised
  */
 public record CertificateAlert(
-        String targetName,
-        String hostname,
-        int port,
-        CheckStatus status,
+        OwnerType ownerType,
+        String ownerName,
+        String ownerDn,
+        String contact,
+        CertificateStatus status,
         Severity severity,
+        String certificateSubject,
+        String serialNumber,
         Instant notAfter,
         Long daysUntilExpiry,
-        String detail,
         Instant raisedAt) {
 
-    public static CertificateAlert from(CertificateTarget target, CertificateCheck check, Severity severity) {
+    public static CertificateAlert from(
+            OwnerType ownerType,
+            String ownerName,
+            String ownerDn,
+            String contact,
+            CachedCertificate certificate,
+            Severity severity,
+            Long daysUntilExpiry,
+            Instant raisedAt) {
         return new CertificateAlert(
-                target.getName(),
-                target.getHostname(),
-                target.getPort(),
-                check.getStatus(),
+                ownerType,
+                ownerName,
+                ownerDn,
+                contact,
+                certificate.getStatus(),
                 severity,
-                check.getNotAfter(),
-                check.getDaysUntilExpiry(),
-                check.getErrorMessage(),
-                check.getCheckedAt());
+                certificate.getSubjectDn(),
+                certificate.getSerialNumber(),
+                certificate.getNotAfter(),
+                daysUntilExpiry,
+                raisedAt);
     }
 
     /** A one-line summary suitable for a log line, a chat message, or an email subject. */
     public String summary() {
+        String owner = "%s %s".formatted(ownerType == OwnerType.USER ? "user" : "server", ownerName);
         return switch (status) {
-            case UNREACHABLE -> "[%s] %s (%s:%d) is unreachable: %s"
-                    .formatted(severity, targetName, hostname, port, detail == null ? "unknown error" : detail);
-            case EXPIRED -> "[%s] %s (%s:%d) certificate expired on %s"
-                    .formatted(severity, targetName, hostname, port, notAfter);
-            case EXPIRING_SOON -> "[%s] %s (%s:%d) certificate expires in %d day(s), on %s"
-                    .formatted(severity, targetName, hostname, port, daysUntilExpiry, notAfter);
-            case VALID -> "[%s] %s (%s:%d) certificate is valid until %s"
-                    .formatted(severity, targetName, hostname, port, notAfter);
+            case EXPIRED -> "[%s] Certificate for %s expired on %s (serial %s)"
+                    .formatted(severity, owner, notAfter, serialNumber);
+            case EXPIRING_SOON -> "[%s] Certificate for %s expires in %d day(s), on %s (serial %s)"
+                    .formatted(severity, owner, daysUntilExpiry, notAfter, serialNumber);
+            case VALID, NONE -> "[%s] Certificate for %s is valid until %s".formatted(severity, owner, notAfter);
         };
     }
 }

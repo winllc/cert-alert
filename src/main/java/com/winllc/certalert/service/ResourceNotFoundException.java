@@ -7,7 +7,11 @@ public class ResourceNotFoundException extends RuntimeException {
         super(message);
     }
 
-    public static ResourceNotFoundException target(Long id) {
-        return new ResourceNotFoundException("No certificate target with id " + id);
+    public static ResourceNotFoundException user(Long id) {
+        return new ResourceNotFoundException("No directory user with id " + id);
+    }
+
+    public static ResourceNotFoundException server(Long id) {
+        return new ResourceNotFoundException("No directory server with id " + id);
     }
 }

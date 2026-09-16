@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:fragment="head(pageTitle)">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title th:text="'cert-alert · ' + ${pageTitle}">cert-alert</title>
+    <!-- Assets come from webjars in the application jar, not a CDN: this is meant to run
+         on networks with no route to the public internet. -->
+    <link rel="stylesheet" th:href="@{/webjars/datatables/css/dataTables.dataTables.css}">
+    <link rel="stylesheet" th:href="@{/css/app.css}">
+</head>
+<body>
+<header th:fragment="appbar(active)" class="app-bar">
+    <h1>cert-alert</h1>
+    <nav>
+        <a th:href="@{/users}" th:classappend="${active == 'users'} ? 'active'">Users</a>
+        <a th:href="@{/servers}" th:classappend="${active == 'servers'} ? 'active'">Servers</a>
+    </nav>
+    <span class="spacer"></span>
+    <span id="sync-status" class="muted"></span>
+    <button type="button" id="sync-now" class="action">Sync directory</button>
+</header>
+
+<div th:fragment="scripts">
+    <script th:src="@{/webjars/jquery/jquery.min.js}"></script>
+    <script th:src="@{/webjars/datatables/js/dataTables.js}"></script>
+    <script th:src="@{/js/directory-table.js}"></script>
+    <script th:src="@{/js/sync.js}"></script>
+</div>
+</body>
+</html>

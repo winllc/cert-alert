@@ -27,6 +27,13 @@ spring:
   jackson:
     default-property-inclusion: non_null
 
+  # Directory connection. Credentials belong in the environment, not in source control.
+  ldap:
+    urls: ${CERT_ALERT_LDAP_URL:ldap://localhost:389}
+    base: ${CERT_ALERT_LDAP_BASE:}
+    username: ${CERT_ALERT_LDAP_USER:}
+    password: ${CERT_ALERT_LDAP_PASSWORD:}
+
 server:
   port: 8080
   error:
@@ -46,13 +53,51 @@ cert-alert:
   warning-threshold-days: 30
   # ...and escalated to CRITICAL severity inside this one.
   critical-threshold-days: 7
-  connect-timeout: 10s
-  read-timeout: 10s
-  # A target stuck in the same unhealthy state re-alerts at most this often.
-  alert-repeat-interval: 24h
-  # Hourly, on the hour, in UTC.
-  scan-cron: "0 0 * * * *"
-  scan-enabled: true
+
+  ldap:
+    sync-enabled: true
+    # Every six hours, in UTC.
+    sync-cron: "0 0 */6 * * *"
+    page-size: 500
+    paged: true
+    search-timeout: 60s
+
+    # ---------------------------------------------------------------------------------
+    # Attribute mapping. Defaults follow inetOrgPerson (RFC 2798) for people and device
+    # (RFC 4519) for servers. Confirm every name against your directory's schema before
+    # the first run: a wrong name silently yields a null column, not an error.
+    # ---------------------------------------------------------------------------------
+    user:
+      search-base: ""
+      search-filter: "(objectClass=inetOrgPerson)"
+      uid: uid
+      common-name: cn
+      display-name: displayName
+      given-name: givenName
+      surname: sn
+      email: mail
+      telephone-number: telephoneNumber
+      title: title
+      employee-type: employeeType
+      country: c
+      organization: o
+      organizational-unit: ou
+      certificate: userCertificate
+
+    server:
+      search-base: ""
+      search-filter: "(objectClass=device)"
+      common-name: cn
+      fqdn: associatedDomain
+      description: description
+      serial-number: serialNumber
+      operating-system: operatingSystem
+      # Joined to a user's email address to answer "which servers is this person responsible for".
+      server-poc: serverPoc
+      organization: o
+      organizational-unit: ou
+      certificate: userCertificate
+
   alerts:
     logging:
       enabled: true

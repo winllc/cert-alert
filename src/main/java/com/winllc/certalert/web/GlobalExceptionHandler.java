@@ -1,6 +1,5 @@
 package com.winllc.certalert.web;
 
-import com.winllc.certalert.service.DuplicateTargetException;
 import com.winllc.certalert.service.ResourceNotFoundException;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -27,13 +26,6 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     public ProblemDetail handleNotFound(ResourceNotFoundException e) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
         problem.setTitle("Resource not found");
-        return problem;
-    }
-
-    @ExceptionHandler(DuplicateTargetException.class)
-    public ProblemDetail handleDuplicate(DuplicateTargetException e) {
-        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
-        problem.setTitle("Duplicate target");
         return problem;
     }
 

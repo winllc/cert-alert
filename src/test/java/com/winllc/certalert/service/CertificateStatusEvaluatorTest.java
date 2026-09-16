@@ -3,7 +3,7 @@ package com.winllc.certalert.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.winllc.certalert.config.CertAlertProperties;
-import com.winllc.certalert.domain.CheckStatus;
+import com.winllc.certalert.domain.CertificateStatus;
 import com.winllc.certalert.domain.Severity;
 import java.time.Duration;
 import java.time.Instant;
@@ -26,27 +26,27 @@ class CertificateStatusEvaluatorTest {
 
     @Test
     void certificateWellInsideValidityIsValid() {
-        assertThat(evaluator.evaluate(NOW.plus(Duration.ofDays(90)), NOW)).isEqualTo(CheckStatus.VALID);
+        assertThat(evaluator.evaluate(NOW.plus(Duration.ofDays(90)), NOW)).isEqualTo(CertificateStatus.VALID);
     }
 
     @Test
     void certificateExactlyAtWarningThresholdIsStillValid() {
-        assertThat(evaluator.evaluate(NOW.plus(Duration.ofDays(30)), NOW)).isEqualTo(CheckStatus.VALID);
+        assertThat(evaluator.evaluate(NOW.plus(Duration.ofDays(30)), NOW)).isEqualTo(CertificateStatus.VALID);
     }
 
     @Test
     void certificateInsideWarningWindowIsExpiringSoon() {
-        assertThat(evaluator.evaluate(NOW.plus(Duration.ofDays(29)), NOW)).isEqualTo(CheckStatus.EXPIRING_SOON);
+        assertThat(evaluator.evaluate(NOW.plus(Duration.ofDays(29)), NOW)).isEqualTo(CertificateStatus.EXPIRING_SOON);
     }
 
     @Test
     void certificatePastNotAfterIsExpired() {
-        assertThat(evaluator.evaluate(NOW.minus(Duration.ofSeconds(1)), NOW)).isEqualTo(CheckStatus.EXPIRED);
+        assertThat(evaluator.evaluate(NOW.minus(Duration.ofSeconds(1)), NOW)).isEqualTo(CertificateStatus.EXPIRED);
     }
 
     @Test
     void certificateExpiringExactlyNowIsExpired() {
-        assertThat(evaluator.evaluate(NOW, NOW)).isEqualTo(CheckStatus.EXPIRED);
+        assertThat(evaluator.evaluate(NOW, NOW)).isEqualTo(CertificateStatus.EXPIRED);
     }
 
     @Test
@@ -56,17 +56,21 @@ class CertificateStatusEvaluatorTest {
 
     @Test
     void expiringSoonInsideCriticalWindowIsCritical() {
-        assertThat(evaluator.severityFor(CheckStatus.EXPIRING_SOON, 3L)).isEqualTo(Severity.CRITICAL);
+        assertThat(evaluator.severityFor(CertificateStatus.EXPIRING_SOON, 3L)).isEqualTo(Severity.CRITICAL);
     }
 
     @Test
     void expiringSoonOutsideCriticalWindowIsWarning() {
-        assertThat(evaluator.severityFor(CheckStatus.EXPIRING_SOON, 20L)).isEqualTo(Severity.WARNING);
+        assertThat(evaluator.severityFor(CertificateStatus.EXPIRING_SOON, 20L)).isEqualTo(Severity.WARNING);
     }
 
     @Test
-    void expiredAndUnreachableAreAlwaysCritical() {
-        assertThat(evaluator.severityFor(CheckStatus.EXPIRED, -1L)).isEqualTo(Severity.CRITICAL);
-        assertThat(evaluator.severityFor(CheckStatus.UNREACHABLE, null)).isEqualTo(Severity.CRITICAL);
+    void expiredIsAlwaysCritical() {
+        assertThat(evaluator.severityFor(CertificateStatus.EXPIRED, -1L)).isEqualTo(Severity.CRITICAL);
+    }
+
+    @Test
+    void anAbsentExpiryIsReportedAsNoCertificate() {
+        assertThat(evaluator.evaluate(null, NOW)).isEqualTo(CertificateStatus.NONE);
     }
 }

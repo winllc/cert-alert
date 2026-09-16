@@ -1,28 +1,45 @@
 # cert-alert
 
-Monitors TLS certificates on endpoints you care about and raises an alert before they
-expire.
+Scrapes an LDAP directory for the certificates its entries publish, caches the details
+that matter, and puts them behind searchable tables.
 
-Point it at a list of `host:port` targets; it connects to each one on a schedule, reads
-the certificate the endpoint presents, records the result, and alerts when a certificate
-is close to expiry, already expired, or the endpoint has stopped answering.
+The directory is the source of truth; this application is the index over it. It reads
+people and servers out of the tree, parses every certificate they publish, stores the
+parsed detail so nothing has to re-read DER or go back to LDAP to answer a question, and
+alerts when a cached certificate crosses into expiry.
 
 ## Status
 
-This is the project skeleton: the domain model, persistence, scheduling, alerting, and
-REST API are in place and covered by tests. Authentication, a UI, and additional alert
-channels are not implemented yet — see [Next steps](#next-steps).
+The framework is in place and covered by tests: the scrape, the cached certificate model,
+the search tables and their filters, and the alert channels. Authentication is **not**
+implemented — see [Next steps](#next-steps).
+
+### On the directory schema
+
+This is built for the
+[IC IdAM Full Service Directory](https://www.odni.gov/index.php/who-we-are/organizations/ic-cio/ic-technical-specifications/idam-full-service-directory)
+schema. That specification was not reachable from the environment this was written in, so
+**every LDAP attribute name is configuration, not code**. The defaults follow
+inetOrgPerson (RFC 2798) for people and the device object class (RFC 4519) for servers,
+with `serverPoc` as the point-of-contact attribute. Confirm each name against the real
+schema before the first run against a live directory and correct it in
+`application.yml` — a wrong attribute name yields a null column rather than an error.
+The two names that matter most are `cert-alert.ldap.user.email` and
+`cert-alert.ldap.server.server-poc`, because those two are the join.
 
 ## Tech stack
 
-| Concern    | Choice                                   |
-|------------|------------------------------------------|
-| Language   | Java 21                                  |
-| Framework  | Spring Boot 4.1                          |
-| Build      | Gradle (Kotlin DSL) with wrapper         |
-| Persistence| Spring Data JPA + Flyway migrations      |
-| Database   | H2 by default, PostgreSQL for deployment |
-| Tests      | JUnit 5, Mockito, MockMvc                |
+| Concern     | Choice                                                   |
+|-------------|----------------------------------------------------------|
+| Language    | Java 21                                                  |
+| Framework   | Spring Boot 4.1                                          |
+| Build       | Gradle (Kotlin DSL) with wrapper                         |
+| Directory   | Spring LDAP, paged searches                              |
+| Persistence | Spring Data JPA + Flyway migrations                      |
+| Database    | H2 by default, PostgreSQL for deployment                 |
+| Tables      | [spring-data-jpa-datatables](https://github.com/darrachequesne/spring-data-jpa-datatables) |
+| UI          | Thymeleaf + DataTables, assets served from webjars       |
+| Tests       | JUnit 5, in-memory UnboundID directory, MockMvc          |
 
 ## Running it
 
@@ -30,9 +47,13 @@ channels are not implemented yet — see [Next steps](#next-steps).
 ./gradlew bootRun --args='--spring.profiles.active=dev'
 ```
 
-The `dev` profile uses an in-memory database, enables the H2 console at `/h2-console`,
-turns on debug logging, and scans every five minutes. With no profile the app uses an H2
-file database under `./data`, so it also runs standalone with no setup.
+The `dev` profile runs against an **embedded sample directory** (four people, four
+servers, a mix of valid, expiring and expired certificates) so the UI works with no LDAP
+server to hand. Open <http://localhost:8080/users> and press **Sync directory**.
+
+The sample's expiry dates are baked in and will age; regenerate it by re-enabling and
+running `DevLdifGenerator`. Neither the in-memory directory nor its fixture reaches the
+built jar.
 
 ```bash
 ./gradlew test    # run the test suite
@@ -40,122 +61,167 @@ file database under `./data`, so it also runs standalone with no setup.
 java -jar build/libs/cert-alert-0.0.1-SNAPSHOT.jar
 ```
 
-### Against PostgreSQL
+### Against a real directory and PostgreSQL
 
 ```bash
+export CERT_ALERT_LDAP_URL=ldaps://directory.example.gov:636
+export CERT_ALERT_LDAP_BASE=dc=example,dc=gov
+export CERT_ALERT_LDAP_USER='cn=cert-alert,ou=services,dc=example,dc=gov'
+export CERT_ALERT_LDAP_PASSWORD=...
 export CERT_ALERT_DB_URL=jdbc:postgresql://localhost:5432/certalert
 export CERT_ALERT_DB_USER=certalert
 export CERT_ALERT_DB_PASSWORD=...
 ./gradlew bootRun --args='--spring.profiles.active=postgres'
 ```
 
-Flyway owns the schema and applies migrations on startup. Hibernate is set to `validate`,
-so a mapping that drifts from the migrations fails fast at boot rather than silently
-altering tables.
+Flyway owns the schema and migrates on startup. Hibernate is set to `validate`, so a
+mapping that drifts from the migrations fails at boot rather than silently altering
+tables.
 
-## API
-
-All endpoints live under `/api/v1/targets`. Errors are returned as RFC 7807 problem
-details.
-
-| Method   | Path                  | Purpose                                     |
-|----------|-----------------------|---------------------------------------------|
-| `GET`    | `/`                   | List targets with their latest check summary |
-| `POST`   | `/`                   | Add a target                                 |
-| `GET`    | `/{id}`               | Fetch one target                             |
-| `PUT`    | `/{id}`               | Replace a target                             |
-| `DELETE` | `/{id}`               | Remove a target and its history              |
-| `POST`   | `/{id}/check`         | Check one target now                         |
-| `POST`   | `/check`              | Check every enabled target now               |
-| `GET`    | `/{id}/checks`        | Paged check history (`page`, `size`)         |
-
-```bash
-curl -X POST http://localhost:8080/api/v1/targets \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"prod-api","hostname":"api.example.com","port":443}'
-
-curl -X POST http://localhost:8080/api/v1/targets/1/check
-```
-
-```json
-{
-  "id": 1,
-  "status": "EXPIRING_SOON",
-  "checkedAt": "2026-09-16T09:38:29Z",
-  "subject": "CN=api.example.com",
-  "issuer": "CN=Example CA",
-  "serialNumber": "212d841bea9dffa1ce19b36a961f4d78",
-  "notBefore": "2026-09-16T09:38:20Z",
-  "notAfter": "2026-10-06T09:38:20Z",
-  "daysUntilExpiry": 19
-}
-```
-
-Actuator is exposed at `/actuator` (`health`, `info`, `metrics`, `loggers`).
-
-## How it works
+## The two object types
 
 ```
-CertificateScanScheduler  (cron)
-        |
-CertificateSweepService   one transaction per target, so one bad endpoint
-        |                 cannot stall or roll back the rest of the sweep
-CertificateMonitorService
-        |-- CertificateInspector          opens TLS, reads the leaf certificate
-        |-- CertificateStatusEvaluator    expiry -> status + severity
-        |-- CertificateCheckRepository    appends to the history
-        `-- AlertDispatcher --> AlertNotifier beans (log, email, ...)
+DirectoryUser ──< CachedCertificate >── DirectoryServer
+     email                                  serverPoc
+       └──────────────── join ─────────────────┘
 ```
 
-### Statuses
+**`directory_user`** — a person: `uid`, `cn`, `sn`, `givenName`, `displayName`, `mail`,
+`telephoneNumber`, `title`, `employeeType`, `c`, `o`, `ou`.
+
+**`directory_server`** — a server: `cn`, its FQDN, description, serial number, operating
+system, `o`, `ou`, and its points of contact.
+
+**`cached_certificate`** — everything parsed out of a published certificate: subject,
+issuer, serial, validity window, signature and key algorithm, key size, SANs, and the
+SHA-256 fingerprint of the DER. A certificate belongs to exactly one owner, user or
+server, enforced by a check constraint. The fingerprint is its identity, which is how a
+re-sync recognises a certificate it already holds and leaves it alone.
+
+Both object types carry a denormalised roll-up — `certificate_count`,
+`certificate_status`, `earliest_expiry`, `latest_expiry` — refreshed on every sync. The
+search tables sort and filter on these constantly, and keeping them on the row turns
+"everyone with an expired certificate" into an indexed predicate on one table instead of
+a correlated subquery. The roll-up takes the **worst** state of the entry's certificates,
+so one expired certificate alongside a healthy one still reads as `EXPIRED`.
 
 | Status          | Meaning                                              |
 |-----------------|------------------------------------------------------|
+| `NONE`          | Publishes no certificate (roll-up only)              |
 | `VALID`         | Expires beyond the warning window                    |
 | `EXPIRING_SOON` | Expires within `warning-threshold-days`              |
-| `EXPIRED`       | Past its `notAfter` date                             |
-| `UNREACHABLE`   | Connection or TLS handshake failed                   |
+| `EXPIRED`       | Past its notAfter date                               |
 
-Severity is `WARNING`, or `CRITICAL` once a certificate is inside
-`critical-threshold-days`, expired, or the endpoint is unreachable.
+## The search tables
 
-### Alert suppression
+Two pages, `/users` and `/servers`, each a server-side DataTables grid. DataTables owns
+paging, ordering, the global search box and the per-column search inputs in the table
+footer; all of it posts as the request body and the library turns it into a JPA query.
+The filters this application adds ride along as query parameters and become an additional
+`Specification`, so the two never have to know about each other.
 
-A target that stays in the same unhealthy state re-alerts at most once per
-`alert-repeat-interval`. Any change of state alerts immediately, and a target returning to
-`VALID` sends one `INFO` recovery alert and resets its alert bookkeeping.
+| Parameter             | Applies to    | Effect                                                    |
+|-----------------------|---------------|-----------------------------------------------------------|
+| `expired=true`        | both          | Holds at least one expired certificate                     |
+| `expired=false`       | both          | Holds certificates, none expired                           |
+| `certificateStatus=`  | both          | One or more of `NONE,VALID,EXPIRING_SOON,EXPIRED`          |
+| `expiringWithinDays=` | both          | Next expiry falls inside that window                       |
+| `hasCertificates=`    | both          | Publishes any certificate at all                           |
+| `pocEmail=`           | servers       | Servers whose `serverPoc` names this address               |
+| `pocUserId=`          | servers       | The same, resolving the address from a user id             |
 
-### A note on trust
+```bash
+curl -X POST 'http://localhost:8080/api/v1/datatables/servers?pocEmail=alice@example.gov&expired=true' \
+  -H 'Content-Type: application/json' \
+  -d '{"draw":1,"start":0,"length":10,"search":{"value":"","regex":false},"order":[],
+       "columns":[{"data":"commonName","searchable":true,"orderable":true,
+                   "search":{"value":"","regex":false}}]}'
+```
 
-The inspector completes its handshake with a trust manager that accepts every chain. That
-is deliberate: an expired or self-signed certificate is exactly what this tool needs to
-report on, and a validating trust manager would abort the handshake before the certificate
-could be read. Nothing is ever sent over these connections, and validity is judged from
-the certificate's own dates. Do not reuse `CertificateInspector` as a general-purpose
-HTTPS client.
+### The user ↔ server join
+
+A server names its points of contact by email in `serverPoc`; that address is a person's
+`mail`. `serverPoc` is multi-valued, so contacts live in their own table and the filter is
+an indexed join against it. Both sides are stored lowercased, so the match never depends
+on how the directory happened to case either one.
+
+In the UI, every user row carries a **servers →** link that opens the servers table
+already filtered to the servers that person is responsible for.
+
+### Other endpoints
+
+| Method | Path                                | Purpose                                  |
+|--------|-------------------------------------|------------------------------------------|
+| `POST` | `/api/v1/sync`                      | Run a directory sync now                 |
+| `GET`  | `/api/v1/users/{id}/certificates`   | Cached certificate detail for a user     |
+| `GET`  | `/api/v1/servers/{id}/certificates` | Cached certificate detail for a server   |
+| `GET`  | `/api/v1/servers/{id}/contacts`     | A server's points of contact             |
+
+Errors come back as RFC 7807 problem details. Actuator is at `/actuator`
+(`health`, `info`, `metrics`, `loggers`); the LDAP health indicator reports the
+directory connection.
+
+## How the sync works
+
+```
+DirectorySyncScheduler  (cron)
+        |
+DirectorySyncService        scrapes LDAP outside any transaction
+        |
+DirectoryPersistenceService one transaction per entry, so one bad entry
+        |                   cannot roll back the whole run
+        |-- CertificateParser           DER -> cached detail + SHA-256 identity
+        |-- CertificateStatusEvaluator  expiry -> status + severity
+        `-- AlertDispatcher --> AlertNotifier beans (log, email, ...)
+```
+
+Searches are paged (the control is stateful, so every page travels down one connection).
+A directory of any size enforces a size limit, and an unpaged search just stops there —
+which here would mean quietly forgetting certificates.
+
+Reconciliation matches on fingerprint: certificates already cached are left alone,
+fingerprints the directory no longer publishes are dropped, new ones are parsed and
+stored. Re-syncing an unchanged directory writes nothing but the refreshed expiry state.
+
+**Alerting fires on transitions, not on discovery.** A certificate seen for the first time
+is not news, it is just the first time we looked — so a first sync of a large directory
+does not produce thousands of alerts. When a certificate already in the cache moves into
+`EXPIRING_SOON` or `EXPIRED`, that is an alert, carrying the owner and the contact to
+chase (the user's own address, or the server's points of contact).
 
 ## Configuration
 
-Everything below sits under the `cert-alert` prefix in `application.yml`.
+Expiry thresholds, under `cert-alert`:
 
-| Property                  | Default       | Purpose                                      |
-|---------------------------|---------------|----------------------------------------------|
-| `warning-threshold-days`  | `30`          | Window that marks a certificate expiring soon |
-| `critical-threshold-days` | `7`           | Window that escalates severity to critical    |
-| `connect-timeout`         | `10s`         | TCP connect timeout                           |
-| `read-timeout`            | `10s`         | TLS handshake read timeout                    |
-| `alert-repeat-interval`   | `24h`         | Minimum gap between repeat alerts             |
-| `scan-cron`               | `0 0 * * * *` | Sweep schedule, evaluated in UTC              |
-| `scan-enabled`            | `true`        | Set false to drive checks via the API only    |
-| `alerts.logging.enabled`  | `true`        | Write alerts to the application log           |
-| `alerts.email.enabled`    | `false`       | Email alerts; needs `spring.mail.*`           |
-| `alerts.email.to`         | `[]`          | Recipients                                    |
+| Property                  | Default | Purpose                                   |
+|---------------------------|---------|-------------------------------------------|
+| `warning-threshold-days`  | `30`    | Window that marks a certificate expiring soon |
+| `critical-threshold-days` | `7`     | Window that escalates severity to critical    |
+
+Scraping, under `cert-alert.ldap`:
+
+| Property         | Default         | Purpose                                     |
+|------------------|-----------------|---------------------------------------------|
+| `sync-enabled`   | `true`          | Set false to drive syncs through the API     |
+| `sync-cron`      | `0 0 */6 * * *` | Sync schedule, evaluated in UTC              |
+| `page-size`      | `500`           | Paged search page size                       |
+| `paged`          | `true`          | Turn off for servers without the control     |
+| `search-timeout` | `60s`           | Per-search time limit                        |
+| `user.*`         | see above       | Search base, filter, and attribute names     |
+| `server.*`       | see above       | Search base, filter, and attribute names     |
+
+Alert channels, under `cert-alert.alerts`:
+
+| Property         | Default | Purpose                              |
+|------------------|---------|--------------------------------------|
+| `logging.enabled`| `true`  | Write alerts to the application log  |
+| `email.enabled`  | `false` | Email alerts; needs `spring.mail.*`  |
+| `email.to`       | `[]`    | Recipients                           |
 
 ### Adding an alert channel
 
 Implement `AlertNotifier` and expose it as a bean. `AlertDispatcher` picks up every
-implementation on the classpath and isolates failures, so a broken channel cannot stop the
-others.
+implementation and isolates failures, so a broken channel cannot stop the others.
 
 ```java
 @Component
@@ -173,19 +239,25 @@ class SlackAlertNotifier implements AlertNotifier {
 ```
 src/main/java/com/winllc/certalert/
 ├── alert/       notifier SPI, dispatcher, log and email channels
-├── config/      configuration properties, clock
-├── domain/      JPA entities and enums
-├── repository/  Spring Data repositories
-├── scheduling/  cron-driven sweep
-├── service/     inspection, evaluation, monitoring, CRUD
-└── web/         REST controller, DTOs, problem-detail handling
-src/main/resources/db/migration/   Flyway migrations
+├── config/      expiry thresholds, clock, DataTables repository factory
+├── domain/      DirectoryUser, DirectoryServer, CachedCertificate
+├── ldap/        attribute mapping, paged directory client
+├── repository/  DataTables repositories and the filter specifications
+├── scheduling/  cron-driven sync
+├── service/     certificate parsing, status evaluation, sync
+└── web/         DataTables endpoints, REST API, page controllers
+src/main/resources/
+├── db/migration/          Flyway migrations
+├── static/{css,js}/       stylesheet and table wiring
+├── templates/             Thymeleaf pages
+└── dev-directory.ldif     sample directory for the dev profile
 ```
 
 ## Next steps
 
-- Secure the API (nothing is authenticated today)
-- Retention/pruning for the `certificate_check` history
+- **Secure the application** — nothing is authenticated today
+- Prune entries the directory no longer publishes (they currently linger, with a stale
+  `last_synced_at`)
+- Incremental sync, driven by the directory's change log rather than a full sweep
+- Certificate chain and revocation status, not just the leaf
 - More alert channels (Slack, PagerDuty, webhooks)
-- Certificate chain reporting, not just the leaf
-- A UI over the target list

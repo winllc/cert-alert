@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Users')}"></head>
+<body>
+<header th:replace="~{fragments/layout :: appbar('users')}"></header>
+
+<main>
+    <section class="filters">
+        <div class="field">
+            <label for="cert-state">Certificates</label>
+            <select id="cert-state">
+                <option value="">Any</option>
+                <option value="expired">Has an expired certificate</option>
+                <option value="not-expired">No expired certificate</option>
+                <option value="expiring-soon">Expiring soon</option>
+                <option value="valid">Valid only</option>
+                <option value="none">Holds no certificate</option>
+            </select>
+        </div>
+        <div class="field">
+            <label for="within-days">Expiring within (days)</label>
+            <input type="number" id="within-days" min="1" max="3650" placeholder="any">
+        </div>
+        <div class="applied" id="applied-filters"></div>
+    </section>
+
+    <section class="table-panel">
+        <table id="users-table" class="directory display" style="width:100%">
+            <thead>
+            <tr>
+                <th></th>
+                <th>Name</th>
+                <th>UID</th>
+                <th>Email</th>
+                <th>Title</th>
+                <th>Organization</th>
+                <th>Org unit</th>
+                <th>Certs</th>
+                <th>Status</th>
+                <th>Expires</th>
+                <th>Last synced</th>
+                <th>DN</th>
+            </tr>
+            </thead>
+            <tfoot>
+            <tr>
+                <th></th>
+                <th><input type="text" placeholder="Name"></th>
+                <th><input type="text" placeholder="UID"></th>
+                <th><input type="text" placeholder="Email"></th>
+                <th><input type="text" placeholder="Title"></th>
+                <th><input type="text" placeholder="Organization"></th>
+                <th><input type="text" placeholder="Org unit"></th>
+                <th></th>
+                <th></th>
+                <th></th>
+                <th></th>
+                <th><input type="text" placeholder="DN"></th>
+            </tr>
+            </tfoot>
+        </table>
+    </section>
+</main>
+
+<div th:replace="~{fragments/layout :: scripts}"></div>
+<script th:src="@{/js/users-table.js}"></script>
+</body>
+</html>

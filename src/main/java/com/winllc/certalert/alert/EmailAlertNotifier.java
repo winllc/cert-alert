@@ -29,22 +29,27 @@ public class EmailAlertNotifier implements AlertNotifier {
     public void send(CertificateAlert alert) {
         if (properties.getTo().isEmpty()) {
             log.warn("Email alerts are enabled but no recipients are configured; skipping alert for '{}'",
-                    alert.targetName());
+                    alert.ownerName());
             return;
         }
         SimpleMailMessage message = new SimpleMailMessage();
         message.setFrom(properties.getFrom());
         message.setTo(properties.getTo().toArray(String[]::new));
-        message.setSubject(properties.getSubjectPrefix() + alert.targetName() + " - " + alert.status());
+        message.setSubject(properties.getSubjectPrefix() + alert.ownerName() + " - " + alert.status());
         message.setText(body(alert));
         mailSender.send(message);
-        log.info("Emailed alert for target '{}' to {} recipient(s)", alert.targetName(), properties.getTo().size());
+        log.info("Emailed alert for '{}' to {} recipient(s)", alert.ownerName(), properties.getTo().size());
     }
 
     private String body(CertificateAlert alert) {
         StringBuilder body = new StringBuilder(alert.summary()).append("\n\n");
-        body.append("Target:    ").append(alert.targetName()).append('\n');
-        body.append("Endpoint:  ").append(alert.hostname()).append(':').append(alert.port()).append('\n');
+        body.append("Owner:     ").append(alert.ownerType()).append(' ').append(alert.ownerName()).append('\n');
+        body.append("DN:        ").append(alert.ownerDn()).append('\n');
+        if (alert.contact() != null) {
+            body.append("Contact:   ").append(alert.contact()).append('\n');
+        }
+        body.append("Subject:   ").append(alert.certificateSubject()).append('\n');
+        body.append("Serial:    ").append(alert.serialNumber()).append('\n');
         body.append("Status:    ").append(alert.status()).append('\n');
         body.append("Severity:  ").append(alert.severity()).append('\n');
         if (alert.notAfter() != null) {
@@ -52,9 +57,6 @@ public class EmailAlertNotifier implements AlertNotifier {
         }
         if (alert.daysUntilExpiry() != null) {
             body.append("Days left: ").append(alert.daysUntilExpiry()).append('\n');
-        }
-        if (alert.detail() != null) {
-            body.append("Detail:    ").append(alert.detail()).append('\n');
         }
         body.append("Raised at: ").append(alert.raisedAt()).append('\n');
         return body.toString();

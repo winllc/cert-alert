@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Servers')}"></head>
+<body>
+<header th:replace="~{fragments/layout :: appbar('servers')}"></header>
+
+<main>
+    <section class="filters">
+        <div class="field">
+            <label for="cert-state">Certificates</label>
+            <select id="cert-state">
+                <option value="">Any</option>
+                <option value="expired">Has an expired certificate</option>
+                <option value="not-expired">No expired certificate</option>
+                <option value="expiring-soon">Expiring soon</option>
+                <option value="valid">Valid only</option>
+                <option value="none">Holds no certificate</option>
+            </select>
+        </div>
+        <div class="field">
+            <label for="within-days">Expiring within (days)</label>
+            <input type="number" id="within-days" min="1" max="3650" placeholder="any">
+        </div>
+        <div class="field">
+            <!-- The join the directory itself defines: a server names its points of
+                 contact by email, and that is a user's mail attribute. -->
+            <label for="poc-email">Point of contact (user email)</label>
+            <input type="text" id="poc-email" placeholder="user@example.gov">
+        </div>
+        <div class="applied" id="applied-filters"></div>
+    </section>
+
+    <section class="table-panel">
+        <table id="servers-table" class="directory display" style="width:100%">
+            <thead>
+            <tr>
+                <th></th>
+                <th>Name</th>
+                <th>FQDN</th>
+                <th>Points of contact</th>
+                <th>OS</th>
+                <th>Organization</th>
+                <th>Org unit</th>
+                <th>Certs</th>
+                <th>Status</th>
+                <th>Expires</th>
+                <th>Last synced</th>
+                <th>DN</th>
+            </tr>
+            </thead>
+            <tfoot>
+            <tr>
+                <th></th>
+                <th><input type="text" placeholder="Name"></th>
+                <th><input type="text" placeholder="FQDN"></th>
+                <th><input type="text" placeholder="Contact"></th>
+                <th><input type="text" placeholder="OS"></th>
+                <th><input type="text" placeholder="Organization"></th>
+                <th><input type="text" placeholder="Org unit"></th>
+                <th></th>
+                <th></th>
+                <th></th>
+                <th></th>
+                <th><input type="text" placeholder="DN"></th>
+            </tr>
+            </tfoot>
+        </table>
+    </section>
+</main>
+
+<div th:replace="~{fragments/layout :: scripts}"></div>
+<script th:src="@{/js/servers-table.js}"></script>
+</body>
+</html>

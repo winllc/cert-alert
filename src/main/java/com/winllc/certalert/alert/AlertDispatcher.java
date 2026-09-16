@@ -27,7 +27,7 @@ public class AlertDispatcher {
                 notifier.send(alert);
             } catch (RuntimeException e) {
                 log.error("Alert channel '{}' failed to deliver alert for target '{}'",
-                        notifier.channelName(), alert.targetName(), e);
+                        notifier.channelName(), alert.ownerName(), e);
             }
         }
     }

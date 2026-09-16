@@ -1,7 +1,24 @@
-# Local development: in-memory database, verbose logging, H2 console, frequent scans.
+# Local development: in-memory database, verbose logging, H2 console, no scheduled sync.
 spring:
   datasource:
     url: jdbc:h2:mem:cert-alert;DB_CLOSE_DELAY=-1
+
+  # An embedded sample directory, so the UI can be worked on without a real LDAP server.
+  # The in-memory server and its fixture never reach the built jar. The url is set
+  # explicitly because the base configuration already names one, and that would otherwise
+  # win over the address the embedded server supplies.
+  ldap:
+    urls: ldap://localhost:18389
+    base: dc=example,dc=test
+    username: ""
+    password: ""
+    embedded:
+      base-dn: dc=example,dc=test
+      ldif: classpath:dev-directory.ldif
+      port: 18389
+      validation:
+        # The sample carries attributes such as serverPoc that no stock schema defines.
+        enabled: false
   h2:
     console:
       enabled: true
@@ -17,9 +34,15 @@ management:
       show-details: always
 
 cert-alert:
-  scan-cron: "0 */5 * * * *"
+  ldap:
+    # Sync on demand from the UI rather than on a timer while developing.
+    sync-enabled: false
+    user:
+      search-base: ou=people
+    server:
+      search-base: ou=servers
 
 logging:
   level:
     com.winllc.certalert: DEBUG
-    org.hibernate.SQL: DEBUG
+    org.springframework.ldap: DEBUG
