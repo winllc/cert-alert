@@ -42,18 +42,12 @@
             filterInputs: [certState, withinDays],
             // Sort by name, not by expiry: entries with no certificate have a null
             // expiry, and databases disagree about whether nulls sort first or last.
-            // The expiry-focused views are a column click or a filter away.
             order: [[1, 'asc']],
             detailUrl: function (row) {
                 return '/api/v1/users/' + row.id + '/certificates';
             },
             onFiltersApplied: function (filters) {
-                var keys = Object.keys(filters);
-                applied.innerHTML = keys.length === 0
-                    ? 'No extra filters'
-                    : 'Filtered by <strong>' + keys.map(function (key) {
-                        return CertAlert.escapeHtml(key + '=' + filters[key]);
-                    }).join('</strong>, <strong>') + '</strong>';
+                applied.innerHTML = CertAlert.describeFilters(filters);
             },
             columns: [
                 {data: 'id', orderable: false, searchable: false, className: 'expand',
@@ -63,18 +57,20 @@
                     return CertAlert.text(value || row.commonName);
                 }},
                 {data: 'uid', render: renderText},
-                // The link carries this person's address into the servers table, which is
-                // exactly the serverPoc join.
-                {data: 'email', render: function (value, type) {
+                // The link hands this person's id to the servers table, which resolves it
+                // to every value a serverPOC could name them by.
+                {data: 'email', render: function (value, type, row) {
                     if (type !== 'display') { return value; }
-                    if (!value) { return CertAlert.text(null); }
-                    return CertAlert.escapeHtml(value)
-                        + ' <a class="poc-link" href="/servers?pocEmail=' + encodeURIComponent(value)
-                        + '" title="Servers this person is the contact for">servers →</a>';
+                    var label = row.displayName || row.commonName || row.uid || '';
+                    var link = ' <a class="poc-link" href="/servers?pocUserId=' + row.id
+                        + '&pocName=' + encodeURIComponent(label)
+                        + '" title="Servers this person is the contact for">servers &rarr;</a>';
+                    return (value ? CertAlert.escapeHtml(value) : CertAlert.text(null)) + link;
                 }},
                 {data: 'title', render: renderText},
-                {data: 'organization', render: renderText},
-                {data: 'organizationalUnit', render: renderText},
+                {data: 'employeeType', render: renderText},
+                {data: 'dutyOrganization', render: renderText},
+                {data: 'countryOfAffiliation', render: renderText},
                 {data: 'certificateCount', searchable: false, className: 'mono'},
                 {data: 'certificateStatus', searchable: false, render: function (value, type) {
                     return type === 'display' ? CertAlert.statusBadge(value) : value;

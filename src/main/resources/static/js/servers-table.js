@@ -5,14 +5,24 @@
     $(function () {
         var certState = document.getElementById('cert-state');
         var withinDays = document.getElementById('within-days');
-        var pocEmail = document.getElementById('poc-email');
+        var pocInput = document.getElementById('poc-email');
+        var pocUserField = document.getElementById('poc-user-field');
+        var pocUserLabel = document.getElementById('poc-user-label');
+        var pocUserClear = document.getElementById('poc-user-clear');
         var applied = document.getElementById('applied-filters');
 
-        // Arriving from a user row pre-fills the contact filter, so the link from the
-        // users table lands on an already-filtered server list.
-        var initialPoc = new URLSearchParams(window.location.search).get('pocEmail');
-        if (initialPoc) {
-            pocEmail.value = initialPoc;
+        // Arriving from a user row filters by that person. The id travels rather than the
+        // address, because the server resolves it to every value a serverPOC could use to
+        // name them - the FSD schema says that attribute carries a name, not an address.
+        var params = new URLSearchParams(window.location.search);
+        var pocUserId = params.get('pocUserId');
+        if (pocUserId) {
+            pocUserLabel.textContent = params.get('pocName') || ('user #' + pocUserId);
+            pocUserField.hidden = false;
+        }
+        var legacyPoc = params.get('poc') || params.get('pocEmail');
+        if (legacyPoc) {
+            pocInput.value = legacyPoc;
         }
 
         function readFilters() {
@@ -40,42 +50,38 @@
             if (days) {
                 filters.expiringWithinDays = days;
             }
-            var contact = pocEmail.value.trim();
+            if (pocUserId) {
+                filters.pocUserId = pocUserId;
+            }
+            var contact = pocInput.value.trim();
             if (contact) {
-                filters.pocEmail = contact;
+                filters.poc = contact;
             }
             return filters;
         }
 
-        CertAlert.initTable({
+        var table = CertAlert.initTable({
             selector: '#servers-table',
             endpoint: '/api/v1/datatables/servers',
             readFilters: readFilters,
-            filterInputs: [certState, withinDays, pocEmail],
-            // Sort by name, not by expiry: entries with no certificate have a null
-            // expiry, and databases disagree about whether nulls sort first or last.
-            // The expiry-focused views are a column click or a filter away.
+            filterInputs: [certState, withinDays, pocInput],
             order: [[1, 'asc']],
             detailUrl: function (row) {
                 return '/api/v1/servers/' + row.id + '/certificates';
             },
             onFiltersApplied: function (filters) {
-                var keys = Object.keys(filters);
-                applied.innerHTML = keys.length === 0
-                    ? 'No extra filters'
-                    : 'Filtered by <strong>' + keys.map(function (key) {
-                        return CertAlert.escapeHtml(key + '=' + filters[key]);
-                    }).join('</strong>, <strong>') + '</strong>';
+                applied.innerHTML = CertAlert.describeFilters(filters);
             },
             columns: [
                 {data: 'id', orderable: false, searchable: false, className: 'expand',
                     render: function () { return '+'; }},
                 {data: 'commonName', render: renderText},
-                {data: 'fqdn', className: 'mono', render: renderText},
+                {data: 'serverUrl', className: 'mono', render: renderText},
+                {data: 'icServerAddress', className: 'mono', render: renderText},
                 {data: 'serverPocDisplay', render: renderText},
-                {data: 'operatingSystem', render: renderText},
-                {data: 'organization', render: renderText},
-                {data: 'organizationalUnit', render: renderText},
+                {data: 'lifeCycleStatus', render: renderText},
+                {data: 'atoStatus', render: renderText},
+                {data: 'dutyOrganization', render: renderText},
                 {data: 'certificateCount', searchable: false, className: 'mono'},
                 {data: 'certificateStatus', searchable: false, render: function (value, type) {
                     return type === 'display' ? CertAlert.statusBadge(value) : value;
@@ -88,6 +94,12 @@
                 }},
                 {data: 'dn', className: 'mono', render: renderText}
             ]
+        });
+
+        pocUserClear.addEventListener('click', function () {
+            pocUserId = null;
+            pocUserField.hidden = true;
+            CertAlert.reload(table, readFilters());
         });
 
         function renderText(value, type) {

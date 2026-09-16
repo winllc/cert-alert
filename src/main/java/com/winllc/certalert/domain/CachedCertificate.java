@@ -12,6 +12,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.SequenceGenerator;
 import jakarta.persistence.Table;
 import java.time.Instant;
 
@@ -40,7 +41,11 @@ import java.time.Instant;
 public class CachedCertificate {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "cached_certificate_seq")
+    @SequenceGenerator(
+            name = "cached_certificate_seq",
+            sequenceName = "cached_certificate_seq",
+            allocationSize = 100)
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)

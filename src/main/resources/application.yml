@@ -19,6 +19,12 @@ spring:
       hibernate:
         jdbc:
           time_zone: UTC
+          # Sync batches are written as JDBC batches. Entities use sequence ids precisely
+          # so this is possible: an identity column forces a round trip per insert.
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
+        batch_versioned_data: true
 
   flyway:
     enabled: true
@@ -55,45 +61,90 @@ cert-alert:
   critical-threshold-days: 7
 
   ldap:
-    sync-enabled: true
-    # Every six hours, in UTC.
-    sync-cron: "0 0 */6 * * *"
+    # Entries per LDAP page. Every directory caps how many entries one search may return,
+    # so paging is not optional at this scale: an unpaged search silently truncates.
     page-size: 500
     paged: true
-    search-timeout: 60s
+    # Entries written per transaction.
+    batch-size: 200
+    # Zero means no client-side cap; the directory's own limits still apply per page.
+    count-limit: 0
+    search-timeout: 10m
+
+    sync:
+      enabled: true
+      # The two sweeps are staggered so they never run at once.
+      users-cron: "0 0 2 * * *"
+      servers-cron: "0 0 4 * * *"
+      # Re-evaluates cached expiry only; reads no LDAP, so it can run often.
+      refresh-cron: "0 15 * * * *"
+
+    prune:
+      # Off by default. Turn on once you have checked GET /api/v1/sync/prune/preview.
+      enabled: false
+      cron: "0 0 6 * * SUN"
+      # Wants to be comfortably longer than the sync interval, so a run of failed sweeps
+      # can never delete the directory.
+      after: 30d
 
     # ---------------------------------------------------------------------------------
-    # Attribute mapping. Defaults follow inetOrgPerson (RFC 2798) for people and device
-    # (RFC 4519) for servers. Confirm every name against your directory's schema before
-    # the first run: a wrong name silently yields a null column, not an error.
+    # Attribute mapping, following the IC FSD schema (FSD v2021-NOV). The specification
+    # leaves the actual objectClass hierarchy to the implementing IC Element, so confirm
+    # these against your directory: a wrong name yields a null column, not an error.
     # ---------------------------------------------------------------------------------
     user:
       search-base: ""
-      search-filter: "(objectClass=inetOrgPerson)"
+      search-filter: "(objectClass=icOrgPerson)"
+      # A person may hold four network addresses at once; this decides which one leads.
+      # All of them are indexed for the point-of-contact join regardless.
+      email-precedence: [icEmail, mail, internetEmail, siprnetEmail, niprnetEmail]
       uid: uid
       common-name: cn
       display-name: displayName
+      preferred-name: preferredName
       given-name: givenName
       surname: sn
-      email: mail
+      mail: mail
+      ic-email: icEmail
+      internet-email: internetEmail
+      niprnet-email: niprnetEmail
+      siprnet-email: siprnetEmail
       telephone-number: telephoneNumber
       title: title
       employee-type: employeeType
-      country: c
+      rank: rank
+      country-of-affiliation: countryOfAffiliation
+      duty-organization: dutyOrganization
+      admin-organization: adminOrganization
+      ic-member: isICMember
+      ic-networks: icNetworks
+      resource-security-mark: resourceSecurityMark
       organization: o
       organizational-unit: ou
       certificate: userCertificate
 
     server:
       search-base: ""
-      search-filter: "(objectClass=device)"
+      search-filter: "(objectClass=icOrgServer)"
       common-name: cn
-      fqdn: associatedDomain
+      uid: uid
+      given-name: givenName
       description: description
-      serial-number: serialNumber
-      operating-system: operatingSystem
-      # Joined to a user's email address to answer "which servers is this person responsible for".
-      server-poc: serverPoc
+      server-url: serverURL
+      ic-server-address: icServerAddress
+      ato-status: ATOStatus
+      life-cycle-status: lifeCycleStatus
+      employee-type: employeeType
+      country-of-affiliation: countryOfAffiliation
+      duty-organization: dutyOrganization
+      admin-organization: adminOrganization
+      ic-member: isICMember
+      ic-networks: icNetworks
+      resource-security-mark: resourceSecurityMark
+      # The point of contact. The specification defines this as the NAME of the responsible
+      # IC Person or organization; it is matched against every value that could name a
+      # person, so a directory that puts an address here works just as well.
+      server-poc: serverPOC
       organization: o
       organizational-unit: ou
       certificate: userCertificate

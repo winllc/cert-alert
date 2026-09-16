@@ -43,7 +43,7 @@ class DirectoryDataTablesControllerTest {
 
     /** Column order matches the servers table in the template. */
     private static final String[] SERVER_COLUMNS = {
-        "id", "commonName", "fqdn", "serverPocDisplay", "operatingSystem", "organization",
+        "id", "commonName", "serverUrl", "serverPocDisplay", "description", "organization",
         "organizationalUnit", "certificateCount", "certificateStatus",
         "earliestExpiry", "lastSyncedAt", "dn"
     };
@@ -221,21 +221,21 @@ class DirectoryDataTablesControllerTest {
         user.setUid(uid);
         user.setDisplayName(displayName);
         user.setCommonName(displayName);
-        user.setEmail(email);
+        user.setIcEmail(email);
         user.setOrganization("Example Agency");
         for (CachedCertificate certificate : certs) {
             user.addCertificate(certificate);
         }
+        user.refreshIdentifiers(email);
         user.markSynced(Instant.now());
         user.refreshCertificateSummary();
         return user;
     }
 
-    private DirectoryServer server(String dn, String cn, String fqdn, List<String> pocs, CachedCertificate... certs) {
+    private DirectoryServer server(String dn, String cn, String serverUrl, List<String> pocs, CachedCertificate... certs) {
         DirectoryServer server = new DirectoryServer(dn);
         server.setCommonName(cn);
-        server.setFqdn(fqdn);
-        server.setOperatingSystem("Linux");
+        server.setServerUrl(serverUrl);
         server.setServerPocs(pocs);
         server.setOrganization("Example Agency");
         for (CachedCertificate certificate : certs) {

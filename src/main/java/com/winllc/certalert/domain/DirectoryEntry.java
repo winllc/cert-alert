@@ -7,6 +7,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.MappedSuperclass;
+import jakarta.persistence.SequenceGenerator;
 import jakarta.persistence.Version;
 import java.time.Instant;
 import java.util.Collection;
@@ -24,8 +25,14 @@ import java.util.List;
 @MappedSuperclass
 public abstract class DirectoryEntry {
 
+    /**
+     * Sequence-backed rather than identity: with an identity column Hibernate has to round
+     * trip for every insert and cannot batch them, which on a directory of this size is the
+     * difference between a sync taking seconds and taking many minutes.
+     */
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "directory_entry_seq")
+    @SequenceGenerator(name = "directory_entry_seq", sequenceName = "directory_entry_seq", allocationSize = 50)
     private Long id;
 
     /** Distinguished name. The directory's own identifier, and our natural key. */

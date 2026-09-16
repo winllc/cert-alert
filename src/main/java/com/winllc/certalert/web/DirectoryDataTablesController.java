@@ -14,7 +14,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
+import java.util.Set;
 import org.springframework.data.jpa.datatables.mapping.DataTablesInput;
 import org.springframework.data.jpa.datatables.mapping.DataTablesOutput;
 import org.springframework.data.jpa.domain.Specification;
@@ -70,34 +70,39 @@ public class DirectoryDataTablesController {
             @RequestParam(required = false) Boolean expired,
             @RequestParam(required = false) Integer expiringWithinDays,
             @RequestParam(required = false) Boolean hasCertificates,
+            @RequestParam(required = false) String poc,
             @RequestParam(required = false) String pocEmail,
             @RequestParam(required = false) Long pocUserId) {
 
         Specification<DirectoryServer> filter =
                 certificateFilter(certificateStatus, expired, expiringWithinDays, hasCertificates);
-        filter = filter.and(pointOfContactFilter(pocEmail, pocUserId));
+        filter = filter.and(pointOfContactFilter(poc != null ? poc : pocEmail, pocUserId));
 
         return serverRepository.findAll(input, filter, null, DirectoryServerRow::from);
     }
 
     /**
-     * Restricts to the servers a person is the contact for. The table may name that person
-     * either by address or by id; resolving an id here means the browser never has to know
-     * that the join key is the email address.
+     * Restricts to the servers a person is the contact for.
+     *
+     * <p>The table may name that person by a literal {@code serverPOC} value, or by id. An
+     * id is resolved here into every value that could name them - their addresses and the
+     * forms of their name - because the FSD schema says {@code serverPOC} carries a name
+     * while directories in practice often carry an address. Resolving server-side also
+     * means the browser never has to know what the join key is.
      */
-    private Specification<DirectoryServer> pointOfContactFilter(String pocEmail, Long pocUserId) {
-        if (pocEmail != null && !pocEmail.isBlank()) {
-            return DirectorySpecifications.pointOfContact(pocEmail);
+    private Specification<DirectoryServer> pointOfContactFilter(String poc, Long pocUserId) {
+        if (poc != null && !poc.isBlank()) {
+            return DirectorySpecifications.pointOfContact(poc);
         }
         if (pocUserId == null) {
             return DirectorySpecifications.unfiltered();
         }
-        Optional<String> email = userRepository.findById(pocUserId).map(DirectoryUser::getEmail);
-        // A user who does not exist, or holds no address, is the contact for nothing. Saying
-        // so beats dropping the filter and showing every server in the directory.
-        return email.filter(value -> !value.isBlank())
-                .map(DirectorySpecifications::pointOfContact)
-                .orElseGet(DirectorySpecifications::matchNothing);
+        Set<String> identifiers = userRepository.findIdentifiersById(pocUserId);
+        // A user who does not exist, or who the directory gives no name or address, is the
+        // contact for nothing. Saying so beats dropping the filter and showing every server.
+        return identifiers.isEmpty()
+                ? DirectorySpecifications.matchNothing()
+                : DirectorySpecifications.pointOfContactAnyOf(identifiers);
     }
 
     private <T extends DirectoryEntry> Specification<T> certificateFilter(

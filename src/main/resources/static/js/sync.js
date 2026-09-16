@@ -13,9 +13,11 @@
             $button.prop('disabled', true);
             $status.text('Syncing…');
             $.ajax({url: '/api/v1/sync', type: 'POST'})
-                .done(function (result) {
-                    $status.text(result.usersSeen + ' user(s), ' + result.serversSeen + ' server(s), '
-                        + result.certificatesCached + ' new cert(s), ' + result.errors + ' error(s)');
+                .done(function (results) {
+                    $status.text(results.map(function (result) {
+                        return result.job.toLowerCase() + ': ' + result.entriesSeen + ' seen, '
+                            + result.certificatesCached + ' new cert(s), ' + result.errors + ' error(s)';
+                    }).join(' | '));
                     $('table.directory').each(function () {
                         $(this).DataTable().ajax.reload(null, false);
                     });

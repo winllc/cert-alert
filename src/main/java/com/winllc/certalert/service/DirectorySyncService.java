@@ -1,22 +1,30 @@
 package com.winllc.certalert.service;
 
+import com.winllc.certalert.domain.SyncJob;
 import com.winllc.certalert.ldap.LdapDirectoryClient;
+import com.winllc.certalert.ldap.LdapProperties;
 import com.winllc.certalert.ldap.LdapServerEntry;
 import com.winllc.certalert.ldap.LdapUserEntry;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.function.BiFunction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
- * Scrapes the directory and hands each entry to {@link DirectoryPersistenceService}.
+ * Scrapes the directory and hands entries to {@link DirectoryPersistenceService} in
+ * batches.
  *
- * <p>The LDAP reads happen outside any transaction on purpose: holding a database
- * connection open across a directory-wide network read is a good way to exhaust the pool
- * on a large tree.
+ * <p>Nothing is collected: entries arrive from the paged search one at a time, fill a
+ * batch, and are written and discarded. Memory stays flat whether the directory holds a
+ * thousand entries or several hundred thousand.
+ *
+ * <p>The LDAP read deliberately happens outside any transaction. Holding a database
+ * connection open across a directory-wide network read is a good way to exhaust the pool.
  */
 @Service
 public class DirectorySyncService {
@@ -25,51 +33,71 @@ public class DirectorySyncService {
 
     private final LdapDirectoryClient directoryClient;
     private final DirectoryPersistenceService persistenceService;
+    private final LdapProperties properties;
+    private final SyncRunRecorder runRecorder;
     private final Clock clock;
 
     public DirectorySyncService(
-            LdapDirectoryClient directoryClient, DirectoryPersistenceService persistenceService, Clock clock) {
+            LdapDirectoryClient directoryClient,
+            DirectoryPersistenceService persistenceService,
+            LdapProperties properties,
+            SyncRunRecorder runRecorder,
+            Clock clock) {
         this.directoryClient = directoryClient;
         this.persistenceService = persistenceService;
+        this.properties = properties;
+        this.runRecorder = runRecorder;
         this.clock = clock;
     }
 
-    /** Runs a full sync of users and servers. */
-    public DirectorySyncResult sync() {
-        long startedAt = System.nanoTime();
-        Instant now = Instant.now(clock);
+    /** Scrapes every IC Person. */
+    public DirectorySyncResult syncUsers() {
+        return run(SyncJob.USERS, (collector, now) ->
+                directoryClient.forEachUser(entry -> collector.accept(entry)));
+    }
 
-        List<LdapUserEntry> users = directoryClient.fetchUsers();
-        List<LdapServerEntry> servers = directoryClient.fetchServers();
-        log.info("Directory scrape returned {} user(s) and {} server(s)", users.size(), servers.size());
+    /** Scrapes every IC Non-Person Entity. */
+    public DirectorySyncResult syncServers() {
+        return run(SyncJob.SERVERS, (collector, now) ->
+                directoryClient.forEachServer(entry -> collector.accept(entry)));
+    }
 
-        Totals totals = new Totals();
-        for (LdapUserEntry user : users) {
-            totals.usersCreated += apply(totals, user.dn(), () -> persistenceService.upsertUser(user, now));
-        }
-        for (LdapServerEntry server : servers) {
-            totals.serversCreated += apply(totals, server.dn(), () -> persistenceService.upsertServer(server, now));
+    private <T> DirectorySyncResult run(SyncJob job, BiFunction<BatchCollector<T>, Instant, Integer> scrape) {
+        Instant startedAt = Instant.now(clock);
+        long startedNanos = System.nanoTime();
+        Long runId = runRecorder.started(job, startedAt);
+        log.info("{} sync starting", job);
+
+        BatchCollector<T> collector = new BatchCollector<>(job, startedAt);
+        int seen;
+        try {
+            seen = scrape.apply(collector, startedAt);
+            collector.flush();
+        } catch (RuntimeException e) {
+            runRecorder.failed(runId, Instant.now(clock), e.toString());
+            log.error("{} sync failed", job, e);
+            throw e;
         }
 
         DirectorySyncResult result = new DirectorySyncResult(
-                users.size(),
-                totals.usersCreated,
-                servers.size(),
-                totals.serversCreated,
-                totals.certificatesCached,
-                totals.certificatesRemoved,
-                totals.alertsRaised,
-                totals.errors,
-                Duration.ofNanos(System.nanoTime() - startedAt));
+                job,
+                seen,
+                collector.outcome.created(),
+                collector.outcome.certificatesCached(),
+                collector.outcome.certificatesRemoved(),
+                collector.outcome.alertsRaised(),
+                0,
+                collector.errors,
+                Duration.ofNanos(System.nanoTime() - startedNanos));
 
+        runRecorder.finished(runId, Instant.now(clock), result);
         log.info(
-                "Directory sync finished in {} ms: {} user(s) ({} new), {} server(s) ({} new), "
-                        + "{} certificate(s) cached, {} removed, {} alert(s), {} error(s)",
+                "{} sync finished in {} ms: {} entries ({} new), {} certificate(s) cached, {} removed, "
+                        + "{} alert(s), {} failed batch(es)",
+                job,
                 result.duration().toMillis(),
-                result.usersSeen(),
-                result.usersCreated(),
-                result.serversSeen(),
-                result.serversCreated(),
+                result.entriesSeen(),
+                result.entriesCreated(),
                 result.certificatesCached(),
                 result.certificatesRemoved(),
                 result.alertsRaised(),
@@ -77,28 +105,51 @@ public class DirectorySyncService {
         return result;
     }
 
-    /** Runs one upsert, folding its counts into the totals and isolating its failures. */
-    private int apply(Totals totals, String dn, java.util.function.Supplier<UpsertOutcome> upsert) {
-        try {
-            UpsertOutcome outcome = upsert.get();
-            totals.certificatesCached += outcome.certificatesCached();
-            totals.certificatesRemoved += outcome.certificatesRemoved();
-            totals.alertsRaised += outcome.alertsRaised();
-            return outcome.created() ? 1 : 0;
-        } catch (RuntimeException e) {
-            totals.errors++;
-            log.error("Failed to sync directory entry '{}'", dn, e);
-            return 0;
-        }
-    }
+    /**
+     * Fills a batch, writes it, and forgets it. A batch that blows up is logged and
+     * skipped: on a directory this size, one malformed entry must not cost the sweep.
+     */
+    private final class BatchCollector<T> {
 
-    /** Mutable accumulator; the sync touches it from a single thread. */
-    private static final class Totals {
-        private int usersCreated;
-        private int serversCreated;
-        private int certificatesCached;
-        private int certificatesRemoved;
-        private int alertsRaised;
+        private final SyncJob job;
+        private final Instant now;
+        private final List<T> batch;
+        private BatchOutcome outcome = BatchOutcome.EMPTY;
         private int errors;
+        private int written;
+
+        private BatchCollector(SyncJob job, Instant now) {
+            this.job = job;
+            this.now = now;
+            this.batch = new ArrayList<>(properties.getBatchSize());
+        }
+
+        private void accept(T entry) {
+            batch.add(entry);
+            if (batch.size() >= properties.getBatchSize()) {
+                flush();
+            }
+        }
+
+        @SuppressWarnings("unchecked")
+        private void flush() {
+            if (batch.isEmpty()) {
+                return;
+            }
+            List<T> pending = List.copyOf(batch);
+            batch.clear();
+            try {
+                outcome = outcome.plus(job == SyncJob.USERS
+                        ? persistenceService.upsertUsers((List<LdapUserEntry>) pending, now)
+                        : persistenceService.upsertServers((List<LdapServerEntry>) pending, now));
+            } catch (RuntimeException e) {
+                errors++;
+                log.error("Failed to write a batch of {} {} entries", pending.size(), job, e);
+            }
+            written += pending.size();
+            if (written % 10_000 < properties.getBatchSize()) {
+                log.info("{} sync progress: {} entries written", job, written);
+            }
+        }
     }
 }

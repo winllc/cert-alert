@@ -35,8 +35,12 @@ management:
 
 cert-alert:
   ldap:
-    # Sync on demand from the UI rather than on a timer while developing.
-    sync-enabled: false
+    # Small pages and batches, so the sample directory still exercises the paging loop.
+    page-size: 2
+    batch-size: 3
+    sync:
+      # Sync on demand from the UI rather than on a timer while developing.
+      enabled: false
     user:
       search-base: ou=people
     server:

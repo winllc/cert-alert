@@ -12,6 +12,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
+import org.hibernate.annotations.BatchSize;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;
@@ -20,13 +21,13 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * A server from the directory, with the certificates it publishes.
+ * An IC Non-Person Entity ({@code icOrgServer}), with the certificates it publishes.
  *
- * <p>{@code serverPoc} is multi-valued in the directory, so the points of contact are held
- * as a collection and joined against {@link DirectoryUser#getEmail()} to answer "which
- * servers is this person responsible for". {@code serverPocDisplay} is the same list
- * flattened onto the row, purely so the search table can show and globally search the
- * contacts without a join.
+ * <p>{@code serverPOC} is defined as the <em>name</em> of the person or organizational
+ * point of contact responsible for the server, and as single-valued. It is held as a set
+ * anyway: a name is not a reliable key, directories do deviate from the specification, and
+ * tolerating several costs nothing. Whatever it holds - a name or an address - is matched
+ * against {@link DirectoryUser#getIdentifiers()}, which carries both.
  */
 @Entity
 @Table(
@@ -34,9 +35,10 @@ import java.util.Set;
         uniqueConstraints = @UniqueConstraint(name = "uk_directory_server_dn", columnNames = "dn"),
         indexes = {
             @Index(name = "idx_directory_server_cn", columnList = "common_name"),
-            @Index(name = "idx_directory_server_fqdn", columnList = "fqdn"),
+            @Index(name = "idx_directory_server_url", columnList = "server_url"),
             @Index(name = "idx_directory_server_cert_status", columnList = "certificate_status"),
-            @Index(name = "idx_directory_server_earliest_expiry", columnList = "earliest_expiry")
+            @Index(name = "idx_directory_server_earliest_expiry", columnList = "earliest_expiry"),
+            @Index(name = "idx_directory_server_last_synced", columnList = "last_synced_at")
         })
 public class DirectoryServer extends DirectoryEntry {
 
@@ -44,26 +46,59 @@ public class DirectoryServer extends DirectoryEntry {
     private String commonName;
 
     @Column(length = 255)
-    private String fqdn;
+    private String uid;
+
+    @Column(name = "given_name", length = 255)
+    private String givenName;
 
     @Column(length = 1000)
     private String description;
 
-    @Column(name = "serial_number", length = 128)
-    private String serialNumber;
+    /** {@code serverURL}: the server's URL, where it has one. */
+    @Column(name = "server_url", length = 500)
+    private String serverUrl;
 
-    @Column(name = "operating_system", length = 255)
-    private String operatingSystem;
+    /** {@code icServerAddress}: the server's IPv4 or IPv6 address. */
+    @Column(name = "ic_server_address", length = 128)
+    private String icServerAddress;
 
-    /** Points of contact, by email address, lowercased. Joined to {@code DirectoryUser.email}. */
+    @Column(name = "ato_status", length = 128)
+    private String atoStatus;
+
+    @Column(name = "life_cycle_status", length = 128)
+    private String lifeCycleStatus;
+
+    @Column(name = "employee_type", length = 128)
+    private String employeeType;
+
+    @Column(name = "country_of_affiliation", length = 128)
+    private String countryOfAffiliation;
+
+    @Column(name = "duty_organization", length = 255)
+    private String dutyOrganization;
+
+    @Column(name = "admin_organization", length = 255)
+    private String adminOrganization;
+
+    @Column(name = "is_ic_member")
+    private Boolean icMember;
+
+    @Column(name = "ic_networks", length = 500)
+    private String icNetworks;
+
+    @Column(name = "resource_security_mark", length = 500)
+    private String resourceSecurityMark;
+
+    /** Points of contact, lowercased. Matched against {@code DirectoryUser.identifiers}. */
+    @BatchSize(size = 200)
     @ElementCollection(fetch = FetchType.LAZY)
     @CollectionTable(
             name = "directory_server_poc",
             joinColumns = @JoinColumn(
                     name = "server_id",
                     foreignKey = @ForeignKey(name = "fk_server_poc_server")),
-            indexes = @Index(name = "idx_server_poc_email", columnList = "poc_email"))
-    @Column(name = "poc_email", length = 320, nullable = false)
+            indexes = @Index(name = "idx_server_poc_value", columnList = "poc_value"))
+    @Column(name = "poc_value", length = 320, nullable = false)
     private Set<String> serverPocs = new LinkedHashSet<>();
 
     /** The same contacts flattened for display and global search. */
@@ -101,14 +136,19 @@ public class DirectoryServer extends DirectoryEntry {
 
     /** Replaces the contact list, normalising case and refreshing the display column. */
     public void setServerPocs(Collection<String> pocs) {
-        this.serverPocs.clear();
+        Set<String> refreshed = new LinkedHashSet<>();
         if (pocs != null) {
             pocs.stream()
                     .filter(poc -> poc != null && !poc.isBlank())
                     .map(poc -> poc.trim().toLowerCase(Locale.ROOT))
-                    .forEach(this.serverPocs::add);
+                    .forEach(refreshed::add);
         }
-        this.serverPocDisplay = this.serverPocs.isEmpty() ? null : String.join(", ", this.serverPocs);
+        // Replace in place so Hibernate does not re-insert every row on every sync.
+        if (!refreshed.equals(this.serverPocs)) {
+            this.serverPocs.clear();
+            this.serverPocs.addAll(refreshed);
+        }
+        this.serverPocDisplay = refreshed.isEmpty() ? null : String.join(", ", refreshed);
     }
 
     public String getServerPocDisplay() {
@@ -123,12 +163,20 @@ public class DirectoryServer extends DirectoryEntry {
         this.commonName = commonName;
     }
 
-    public String getFqdn() {
-        return fqdn;
+    public String getUid() {
+        return uid;
     }
 
-    public void setFqdn(String fqdn) {
-        this.fqdn = fqdn == null ? null : fqdn.trim().toLowerCase(Locale.ROOT);
+    public void setUid(String uid) {
+        this.uid = uid;
+    }
+
+    public String getGivenName() {
+        return givenName;
+    }
+
+    public void setGivenName(String givenName) {
+        this.givenName = givenName;
     }
 
     public String getDescription() {
@@ -139,19 +187,91 @@ public class DirectoryServer extends DirectoryEntry {
         this.description = description;
     }
 
-    public String getSerialNumber() {
-        return serialNumber;
+    public String getServerUrl() {
+        return serverUrl;
     }
 
-    public void setSerialNumber(String serialNumber) {
-        this.serialNumber = serialNumber;
+    public void setServerUrl(String serverUrl) {
+        this.serverUrl = serverUrl == null ? null : serverUrl.trim();
     }
 
-    public String getOperatingSystem() {
-        return operatingSystem;
+    public String getIcServerAddress() {
+        return icServerAddress;
     }
 
-    public void setOperatingSystem(String operatingSystem) {
-        this.operatingSystem = operatingSystem;
+    public void setIcServerAddress(String icServerAddress) {
+        this.icServerAddress = icServerAddress == null ? null : icServerAddress.trim();
+    }
+
+    public String getAtoStatus() {
+        return atoStatus;
+    }
+
+    public void setAtoStatus(String atoStatus) {
+        this.atoStatus = atoStatus;
+    }
+
+    public String getLifeCycleStatus() {
+        return lifeCycleStatus;
+    }
+
+    public void setLifeCycleStatus(String lifeCycleStatus) {
+        this.lifeCycleStatus = lifeCycleStatus;
+    }
+
+    public String getEmployeeType() {
+        return employeeType;
+    }
+
+    public void setEmployeeType(String employeeType) {
+        this.employeeType = employeeType;
+    }
+
+    public String getCountryOfAffiliation() {
+        return countryOfAffiliation;
+    }
+
+    public void setCountryOfAffiliation(String countryOfAffiliation) {
+        this.countryOfAffiliation = countryOfAffiliation;
+    }
+
+    public String getDutyOrganization() {
+        return dutyOrganization;
+    }
+
+    public void setDutyOrganization(String dutyOrganization) {
+        this.dutyOrganization = dutyOrganization;
+    }
+
+    public String getAdminOrganization() {
+        return adminOrganization;
+    }
+
+    public void setAdminOrganization(String adminOrganization) {
+        this.adminOrganization = adminOrganization;
+    }
+
+    public Boolean getIcMember() {
+        return icMember;
+    }
+
+    public void setIcMember(Boolean icMember) {
+        this.icMember = icMember;
+    }
+
+    public String getIcNetworks() {
+        return icNetworks;
+    }
+
+    public void setIcNetworks(String icNetworks) {
+        this.icNetworks = icNetworks;
+    }
+
+    public String getResourceSecurityMark() {
+        return resourceSecurityMark;
+    }
+
+    public void setResourceSecurityMark(String resourceSecurityMark) {
+        this.resourceSecurityMark = resourceSecurityMark;
     }
 }

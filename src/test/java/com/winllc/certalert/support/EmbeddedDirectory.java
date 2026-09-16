@@ -9,14 +9,16 @@ import com.unboundid.ldap.sdk.LDAPException;
 import com.unboundid.ldap.sdk.Modification;
 import com.unboundid.ldap.sdk.ModificationType;
 import com.unboundid.ldap.sdk.ModifyRequest;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
- * An in-memory LDAP server for the sync tests.
+ * An in-memory LDAP server holding IC FSD shaped entries.
  *
  * <p>Schema checking is switched off deliberately. The point of these tests is the
- * scraping and reconciliation logic, and a real IdAM directory carries attributes such as
- * {@code serverPoc} that no stock schema defines; loading a schema here would test the
- * fixture rather than the code.
+ * scraping and reconciliation logic, and the IC FSD attributes ({@code serverPOC},
+ * {@code icEmail}, {@code ATOStatus} and the rest) are IC-defined; loading a schema here
+ * would test the fixture rather than the code.
  */
 public final class EmbeddedDirectory implements AutoCloseable {
 
@@ -43,6 +45,10 @@ public final class EmbeddedDirectory implements AutoCloseable {
         return "ldap://localhost:" + server.getListenPort();
     }
 
+    public int entryCount() {
+        return server.countEntries();
+    }
+
     private void seedStructure() throws LDAPException {
         server.add(new Entry(BASE_DN, new Attribute("objectClass", "top", "domain"), new Attribute("dc", "example")));
         server.add(new Entry(
@@ -55,46 +61,100 @@ public final class EmbeddedDirectory implements AutoCloseable {
                 new Attribute("ou", "servers")));
     }
 
-    /** Adds a person. Certificates are stored under the binary attribute option. */
-    public String addUser(String uid, String displayName, String email, byte[]... certificates) {
-        String dn = "uid=" + uid + "," + PEOPLE_DN;
+    /** Adds an IC Person. Certificates are stored under the binary attribute option. */
+    public String addUser(String uid, String displayName, String icEmail, byte[]... certificates) {
+        add(userEntry(uid, displayName, icEmail, certificates));
+        return "uid=" + uid + "," + PEOPLE_DN;
+    }
+
+    /** Adds an IC Non-Person Entity. {@code serverPOC} names the responsible person. */
+    public String addServer(String cn, String serverUrl, String[] pocs, byte[]... certificates) {
+        add(serverEntry(cn, serverUrl, pocs, certificates));
+        return "cn=" + cn + "," + SERVERS_DN;
+    }
+
+    /**
+     * Adds many people in one go, for exercising the paged and batched scrape. Every
+     * tenth one carries a certificate, so the cache has something to reconcile without
+     * the fixture costing thousands of signatures.
+     */
+    public void addUsers(int count, byte[] sharedCertificate) {
+        List<Entry> entries = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            byte[][] certificates = i % 10 == 0 ? new byte[][] {sharedCertificate} : new byte[0][];
+            entries.add(userEntry("bulk%05d".formatted(i), "Bulk Person %05d".formatted(i),
+                    "bulk%05d@example.gov".formatted(i), certificates));
+        }
+        entries.forEach(this::add);
+    }
+
+    /** Adds many servers, every fifth one pointing at a person added by {@link #addUsers}. */
+    public void addServers(int count, byte[] sharedCertificate) {
+        List<Entry> entries = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            byte[][] certificates = i % 10 == 0 ? new byte[][] {sharedCertificate} : new byte[0][];
+            String[] pocs = i % 5 == 0
+                    ? new String[] {"bulk%05d@example.gov".formatted(i)}
+                    : new String[] {"ops@example.gov"};
+            entries.add(serverEntry("bulksrv%05d".formatted(i), "https://bulk%05d.example.gov".formatted(i),
+                    pocs, certificates));
+        }
+        entries.forEach(this::add);
+    }
+
+    private Entry userEntry(String uid, String displayName, String icEmail, byte[]... certificates) {
         Entry entry = new Entry(
-                dn,
-                new Attribute("objectClass", "top", "person", "organizationalPerson", "inetOrgPerson"),
+                "uid=" + uid + "," + PEOPLE_DN,
+                new Attribute("objectClass", "top", "person", "organizationalPerson", "inetOrgPerson", "icOrgPerson"),
                 new Attribute("uid", uid),
                 new Attribute("cn", displayName),
                 new Attribute("sn", displayName.substring(displayName.lastIndexOf(' ') + 1)),
+                new Attribute("givenName", displayName.substring(0, displayName.indexOf(' '))),
                 new Attribute("displayName", displayName),
-                new Attribute("mail", email),
+                new Attribute("icEmail", icEmail),
+                new Attribute("employeeType", "Civilian"),
+                new Attribute("countryOfAffiliation", "USA"),
+                new Attribute("dutyOrganization", "Example Agency"),
+                new Attribute("adminOrganization", "Example Agency"),
+                new Attribute("isICMember", "TRUE"),
+                new Attribute("icNetworks", "JWICS"),
+                new Attribute("resourceSecurityMark", "UNCLASSIFIED"),
                 new Attribute("o", "Example Agency"),
                 new Attribute("ou", "people"));
         if (certificates.length > 0) {
             entry.addAttribute(new Attribute("userCertificate;binary", certificates));
         }
-        add(entry);
-        return dn;
+        return entry;
     }
 
-    /** Adds a server. {@code serverPoc} is multi-valued, as it is in the real directory. */
-    public String addServer(String cn, String fqdn, String[] pocs, byte[]... certificates) {
-        String dn = "cn=" + cn + "," + SERVERS_DN;
+    private Entry serverEntry(String cn, String serverUrl, String[] pocs, byte[]... certificates) {
         Entry entry = new Entry(
-                dn,
-                new Attribute("objectClass", "top", "device"),
+                "cn=" + cn + "," + SERVERS_DN,
+                new Attribute("objectClass", "top", "icOrgServer"),
                 new Attribute("cn", cn),
-                new Attribute("associatedDomain", fqdn),
-                new Attribute("description", cn + " host"),
-                new Attribute("operatingSystem", "Linux"),
+                new Attribute("uid", cn),
+                new Attribute("givenName", cn),
+                new Attribute("serverURL", serverUrl),
+                new Attribute("icServerAddress", "10.1.2.3"),
+                new Attribute("description", cn + " application host"),
+                new Attribute("ATOStatus", "Authorized"),
+                new Attribute("lifeCycleStatus", "Production"),
+                new Attribute("employeeType", "NPE"),
+                new Attribute("countryOfAffiliation", "USA"),
+                new Attribute("dutyOrganization", "Example Agency"),
+                new Attribute("adminOrganization", "Example Agency"),
+                new Attribute("isICMember", "TRUE"),
+                new Attribute("icNetworks", "JWICS"),
+                new Attribute("resourceSecurityMark", "UNCLASSIFIED"),
                 new Attribute("o", "Example Agency"),
                 new Attribute("ou", "servers"));
         if (pocs.length > 0) {
-            entry.addAttribute(new Attribute("serverPoc", pocs));
+            entry.addAttribute(new Attribute("serverPOC", pocs));
         }
         if (certificates.length > 0) {
             entry.addAttribute(new Attribute("userCertificate;binary", certificates));
         }
-        add(entry);
-        return dn;
+        return entry;
     }
 
     public void delete(String dn) {
@@ -109,8 +169,7 @@ public final class EmbeddedDirectory implements AutoCloseable {
     public void replaceCertificates(String dn, byte[]... certificates) {
         try {
             server.modify(new ModifyRequest(
-                    dn,
-                    new Modification(ModificationType.REPLACE, "userCertificate;binary", certificates)));
+                    dn, new Modification(ModificationType.REPLACE, "userCertificate;binary", certificates)));
         } catch (LDAPException e) {
             throw new IllegalStateException("Could not replace certificates on " + dn, e);
         }

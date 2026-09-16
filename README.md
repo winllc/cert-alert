@@ -14,18 +14,29 @@ The framework is in place and covered by tests: the scrape, the cached certifica
 the search tables and their filters, and the alert channels. Authentication is **not**
 implemented — see [Next steps](#next-steps).
 
-### On the directory schema
+### Directory schema
 
-This is built for the
-[IC IdAM Full Service Directory](https://www.odni.gov/index.php/who-we-are/organizations/ic-cio/ic-technical-specifications/idam-full-service-directory)
-schema. That specification was not reachable from the environment this was written in, so
-**every LDAP attribute name is configuration, not code**. The defaults follow
-inetOrgPerson (RFC 2798) for people and the device object class (RFC 4519) for servers,
-with `serverPoc` as the point-of-contact attribute. Confirm each name against the real
-schema before the first run against a live directory and correct it in
-`application.yml` — a wrong attribute name yields a null column rather than an error.
-The two names that matter most are `cert-alert.ldap.user.email` and
-`cert-alert.ldap.server.server-poc`, because those two are the join.
+Built against the **IC IdAM Full Service Directory, FSD v2021-NOV** (`DesFsdXml.pdf`). The
+two object classes it defines are:
+
+| Object class   | OID                          | What it is                          |
+|----------------|------------------------------|-------------------------------------|
+| `icOrgPerson`  | 2.16.840.1.101.2.2.3.73      | An IC Person, deriving from inetOrgPerson |
+| `icOrgServer`  | 2.16.840.1.101.2.2.3.74      | An IC Non-Person Entity             |
+
+The specification leaves the actual objectClass hierarchy "to the discretion of the
+implementing IC Element", so every attribute name remains configurable in
+`application.yml` — but the defaults are now the specification's own names, not guesses.
+
+Two details from the spec shape the design:
+
+- **A person has up to four addresses.** `icEmail`, `internetEmail`, `niprnetEmail` and
+  `siprnetEmail` are all single-valued and all optional, on top of inetOrgPerson's `mail`.
+  Each is stored in its own column; `cert-alert.ldap.user.email-precedence` decides which
+  is shown as primary.
+- **`serverPOC` holds a name, not an address**, and is single-valued: *"Name of an IC
+  Person or IC Element organizational point of contact responsible for an IC Non-Person
+  Entity"*. See [the user ↔ server join](#the-user--server-join) for how that is handled.
 
 ## Tech stack
 
@@ -86,11 +97,14 @@ DirectoryUser ──< CachedCertificate >── DirectoryServer
        └──────────────── join ─────────────────┘
 ```
 
-**`directory_user`** — a person: `uid`, `cn`, `sn`, `givenName`, `displayName`, `mail`,
-`telephoneNumber`, `title`, `employeeType`, `c`, `o`, `ou`.
+**`directory_user`** — an IC Person: `uid`, `cn`, `sn`, `givenName`, `displayName`,
+`preferredName`, the four network addresses, `telephoneNumber`, `title`, `employeeType`,
+`rank`, and the IC-mandatory `countryOfAffiliation`, `dutyOrganization`,
+`adminOrganization`, `isICMember`, `icNetworks`, `resourceSecurityMark`.
 
-**`directory_server`** — a server: `cn`, its FQDN, description, serial number, operating
-system, `o`, `ou`, and its points of contact.
+**`directory_server`** — an IC Non-Person Entity: `cn`, `uid`, `givenName`, `description`,
+`serverURL`, `icServerAddress`, `ATOStatus`, `lifeCycleStatus`, `employeeType`, the same IC
+attributes as a person, and its `serverPOC` contacts.
 
 **`cached_certificate`** — everything parsed out of a published certificate: subject,
 issuer, serial, validity window, signature and key algorithm, key size, SANs, and the
@@ -127,11 +141,11 @@ The filters this application adds ride along as query parameters and become an a
 | `certificateStatus=`  | both          | One or more of `NONE,VALID,EXPIRING_SOON,EXPIRED`          |
 | `expiringWithinDays=` | both          | Next expiry falls inside that window                       |
 | `hasCertificates=`    | both          | Publishes any certificate at all                           |
-| `pocEmail=`           | servers       | Servers whose `serverPoc` names this address               |
-| `pocUserId=`          | servers       | The same, resolving the address from a user id             |
+| `poc=`                | servers       | Servers whose `serverPOC` holds this literal value          |
+| `pocUserId=`          | servers       | Servers naming this person, by any of their identifiers     |
 
 ```bash
-curl -X POST 'http://localhost:8080/api/v1/datatables/servers?pocEmail=alice@example.gov&expired=true' \
+curl -X POST 'http://localhost:8080/api/v1/datatables/servers?pocUserId=2&expired=true' \
   -H 'Content-Type: application/json' \
   -d '{"draw":1,"start":0,"length":10,"search":{"value":"","regex":false},"order":[],
        "columns":[{"data":"commonName","searchable":true,"orderable":true,
@@ -140,20 +154,30 @@ curl -X POST 'http://localhost:8080/api/v1/datatables/servers?pocEmail=alice@exa
 
 ### The user ↔ server join
 
-A server names its points of contact by email in `serverPoc`; that address is a person's
-`mail`. `serverPoc` is multi-valued, so contacts live in their own table and the filter is
-an indexed join against it. Both sides are stored lowercased, so the match never depends
-on how the directory happened to case either one.
+A server names whoever is responsible for it in `serverPOC`. The specification says that
+attribute carries a **name**; directories in practice often put an **address** there
+instead. Rather than pick one and be wrong half the time, every person is indexed under
+every value that could name them — each of their four addresses, their `cn`, `displayName`,
+`preferredName` and `uid`, all lowercased, in `directory_user_identifier`. The filter is an
+indexed join against that table, so both conventions resolve.
 
-In the UI, every user row carries a **servers →** link that opens the servers table
-already filtered to the servers that person is responsible for.
+In the UI, every user row carries a **servers →** link. It passes the person's **id**, not
+their address, and the server resolves it to the full identifier set — so following the
+link finds servers named either way. The free-text box next to it matches a literal
+`serverPOC` value.
 
 ### Other endpoints
 
 | Method | Path                                | Purpose                                  |
 |--------|-------------------------------------|------------------------------------------|
-| `POST` | `/api/v1/sync`                      | Run a directory sync now                 |
-| `GET`  | `/api/v1/users/{id}/certificates`   | Cached certificate detail for a user     |
+| `POST` | `/api/v1/sync`                      | Run both sweeps now                      |
+| `POST` | `/api/v1/sync/users`                | Scrape IC Persons now                    |
+| `POST` | `/api/v1/sync/servers`              | Scrape IC Non-Person Entities now        |
+| `POST` | `/api/v1/sync/refresh`              | Re-evaluate cached expiry                |
+| `POST` | `/api/v1/sync/prune`                | Remove entries unseen past the window     |
+| `GET`  | `/api/v1/sync/prune/preview`        | How many the next prune would remove      |
+| `GET`  | `/api/v1/sync/runs`                 | The run log, newest first                |
+| `GET`  | `/api/v1/users/{id}/certificates`   | Cached certificate detail for a person   |
 | `GET`  | `/api/v1/servers/{id}/certificates` | Cached certificate detail for a server   |
 | `GET`  | `/api/v1/servers/{id}/contacts`     | A server's points of contact             |
 
@@ -161,33 +185,69 @@ Errors come back as RFC 7807 problem details. Actuator is at `/actuator`
 (`health`, `info`, `metrics`, `loggers`); the LDAP health indicator reports the
 directory connection.
 
+## The scheduled jobs
+
+Four schedules, because they are four different kinds of work. All are configured under
+`cert-alert.ldap` and evaluated in UTC.
+
+| Job         | Default cron      | What it does                                             |
+|-------------|-------------------|----------------------------------------------------------|
+| **users**   | `0 0 2 * * *`     | Scrapes IC Persons                                        |
+| **servers** | `0 0 4 * * *`     | Scrapes IC Non-Person Entities, staggered from the above  |
+| **refresh** | `0 15 * * * *`    | Re-evaluates cached expiry; reads no LDAP                 |
+| **prune**   | `0 0 6 * * SUN`   | Removes entries the directory has stopped publishing      |
+
+**Why refresh is its own job.** A certificate moves from valid to expiring to expired purely
+because time passes — nothing in the directory changes. Without it, a status would only be
+corrected when its entry happened to be re-scraped, so a nightly sweep would mean expiry
+alerts up to a day late. It walks only certificates that could plausibly have moved (not
+already expired, notAfter inside the warning window), which is a small indexed slice.
+
+**Why prune is off by default.** Deleting directory records is not something to start doing
+silently. It works on how long an entry has gone unseen rather than by diffing a sweep's
+results, because a sweep that died halfway through looks exactly like a directory that lost
+half its entries; with `after` set well beyond the sync interval, several consecutive
+failed sweeps still cannot delete anything. Check `GET /api/v1/sync/prune/preview` before
+turning it on.
+
+Every job is guarded against overlapping itself — a sweep of a large directory can outlast
+its own interval — and every run is recorded in `sync_run`, readable at
+`GET /api/v1/sync/runs`.
+
 ## How the sync works
 
 ```
-DirectorySyncScheduler  (cron)
+DirectoryJobScheduler  (four crons, each guarded against overlap)
         |
-DirectorySyncService        scrapes LDAP outside any transaction
+DirectorySyncService        streams LDAP pages, outside any transaction
         |
-DirectoryPersistenceService one transaction per entry, so one bad entry
-        |                   cannot roll back the whole run
+DirectoryPersistenceService one transaction per batch of entries
         |-- CertificateParser           DER -> cached detail + SHA-256 identity
         |-- CertificateStatusEvaluator  expiry -> status + severity
         `-- AlertDispatcher --> AlertNotifier beans (log, email, ...)
 ```
 
-Searches are paged (the control is stateful, so every page travels down one connection).
-A directory of any size enforces a size limit, and an unpaged search just stops there —
-which here would mean quietly forgetting certificates.
+### Built for 100,000+ entries
 
-Reconciliation matches on fingerprint: certificates already cached are left alone,
-fingerprints the directory no longer publishes are dropped, new ones are parsed and
-stored. Re-syncing an unchanged directory writes nothing but the refreshed expiry state.
+| Concern | How it is handled |
+|---------|-------------------|
+| Directory size limits | Paged searches (`page-size`, default 500). An unpaged search silently stops at the server's limit, which here would mean quietly forgetting certificates. |
+| Memory | Entries are streamed to a consumer a page at a time and never collected. Materialising a six-figure result set, each entry carrying certificates, would cost hundreds of megabytes before a row reached the database. |
+| Round trips | Entries are written in batches (`batch-size`, default 200): one query to load what is already held, one flush. Per entry it would be two round trips each. |
+| Insert batching | Ids come from sequences, not identity columns — Hibernate cannot batch inserts behind an identity column, since it has to round trip for each generated key. |
+| Session growth | The persistence context is cleared after every batch, so it never grows to hold the directory. |
+| Lazy collections | `@BatchSize` on the contact and identifier collections, so a batch costs a couple of extra queries rather than one per entry. |
+| Failure isolation | A batch that fails is logged and skipped; the sweep continues and the run records the count. |
+
+Reconciliation matches on the SHA-256 fingerprint of the DER: certificates already cached
+are left alone, fingerprints the directory no longer publishes are dropped, new ones are
+parsed and stored. Re-syncing an unchanged directory writes nothing.
 
 **Alerting fires on transitions, not on discovery.** A certificate seen for the first time
-is not news, it is just the first time we looked — so a first sync of a large directory
-does not produce thousands of alerts. When a certificate already in the cache moves into
-`EXPIRING_SOON` or `EXPIRED`, that is an alert, carrying the owner and the contact to
-chase (the user's own address, or the server's points of contact).
+is not news, it is just the first time we looked — so a first sync of a 100,000-entry
+directory does not produce a flood. When a certificate already in the cache moves into
+`EXPIRING_SOON` or `EXPIRED` — whether noticed by a sweep or by the refresh job — that is an
+alert, carrying the owner and the contact to chase.
 
 ## Configuration
 
@@ -200,15 +260,21 @@ Expiry thresholds, under `cert-alert`:
 
 Scraping, under `cert-alert.ldap`:
 
-| Property         | Default         | Purpose                                     |
-|------------------|-----------------|---------------------------------------------|
-| `sync-enabled`   | `true`          | Set false to drive syncs through the API     |
-| `sync-cron`      | `0 0 */6 * * *` | Sync schedule, evaluated in UTC              |
-| `page-size`      | `500`           | Paged search page size                       |
-| `paged`          | `true`          | Turn off for servers without the control     |
-| `search-timeout` | `60s`           | Per-search time limit                        |
-| `user.*`         | see above       | Search base, filter, and attribute names     |
-| `server.*`       | see above       | Search base, filter, and attribute names     |
+| Property             | Default | Purpose                                        |
+|----------------------|---------|------------------------------------------------|
+| `page-size`          | `500`   | Entries per LDAP page                           |
+| `paged`              | `true`  | Turn off only for servers without the control   |
+| `batch-size`         | `200`   | Entries written per transaction                 |
+| `count-limit`        | `0`     | Client-side cap on entries; 0 means none        |
+| `search-timeout`     | `10m`   | Per-search time limit                           |
+| `sync.enabled`       | `true`  | Set false to drive every job through the API    |
+| `sync.users-cron`    | `0 0 2 * * *`  | IC Person sweep                          |
+| `sync.servers-cron`  | `0 0 4 * * *`  | IC Non-Person Entity sweep               |
+| `sync.refresh-cron`  | `0 15 * * * *` | Expiry re-evaluation                     |
+| `prune.enabled`      | `false` | Whether stale entries are deleted at all        |
+| `prune.cron`         | `0 0 6 * * SUN` | Prune schedule                          |
+| `prune.after`        | `30d`   | How long an entry may go unseen before deletion |
+| `user.*`, `server.*` | FSD names | Search base, filter, and attribute names      |
 
 Alert channels, under `cert-alert.alerts`:
 
@@ -241,9 +307,9 @@ src/main/java/com/winllc/certalert/
 ├── alert/       notifier SPI, dispatcher, log and email channels
 ├── config/      expiry thresholds, clock, DataTables repository factory
 ├── domain/      DirectoryUser, DirectoryServer, CachedCertificate
-├── ldap/        attribute mapping, paged directory client
+├── ldap/        attribute mapping, paged streaming directory client
 ├── repository/  DataTables repositories and the filter specifications
-├── scheduling/  cron-driven sync
+├── scheduling/  the four cron jobs
 ├── service/     certificate parsing, status evaluation, sync
 └── web/         DataTables endpoints, REST API, page controllers
 src/main/resources/
@@ -256,8 +322,8 @@ src/main/resources/
 ## Next steps
 
 - **Secure the application** — nothing is authenticated today
-- Prune entries the directory no longer publishes (they currently linger, with a stale
-  `last_synced_at`)
 - Incremental sync, driven by the directory's change log rather than a full sweep
+- Distributed locking (ShedLock or similar) if more than one instance will run the jobs;
+  the overlap guard is per-process
 - Certificate chain and revocation status, not just the leaf
 - More alert channels (Slack, PagerDuty, webhooks)

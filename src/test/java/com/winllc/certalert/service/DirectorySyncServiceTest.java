@@ -15,6 +15,7 @@ import com.winllc.certalert.domain.OwnerType;
 import com.winllc.certalert.domain.Severity;
 import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.DirectoryUserRepository;
+import com.winllc.certalert.repository.SyncRunRepository;
 import com.winllc.certalert.support.EmbeddedDirectory;
 import com.winllc.certalert.support.TestCertificates;
 import java.time.Duration;
@@ -88,15 +89,18 @@ class DirectorySyncServiceTest {
         directory.addUser(
                 "jsmith", "Jane Smith", "Jane.Smith@example.gov", TestCertificates.expiringIn("jsmith", Duration.ofDays(200)));
 
-        DirectorySyncResult result = syncService.sync();
+        DirectorySyncResult result = syncService.syncUsers();
 
-        assertThat(result.usersSeen()).isPositive();
-        DirectoryUser user = userRepository.findByDn("uid=jsmith," + EmbeddedDirectory.PEOPLE_DN).orElseThrow();
+        assertThat(result.entriesSeen()).isPositive();
+        DirectoryUser user = userByDn("uid=jsmith," + EmbeddedDirectory.PEOPLE_DN);
         assertThat(user.getUid()).isEqualTo("jsmith");
         assertThat(user.getDisplayName()).isEqualTo("Jane Smith");
         // Stored lowercased, because it is the join key to serverPoc.
         assertThat(user.getEmail()).isEqualTo("jane.smith@example.gov");
-        assertThat(user.getOrganization()).isEqualTo("Example Agency");
+        assertThat(user.getIcEmail()).isEqualTo("Jane.Smith@example.gov");
+        assertThat(user.getCountryOfAffiliation()).isEqualTo("USA");
+        assertThat(user.getIcMember()).isTrue();
+        assertThat(user.getDutyOrganization()).isEqualTo("Example Agency");
         assertThat(user.getCertificateCount()).isEqualTo(1);
         assertThat(user.getCertificateStatus()).isEqualTo(CertificateStatus.VALID);
 
@@ -115,11 +119,11 @@ class DirectorySyncServiceTest {
     void scrapesServersWithTheirPointsOfContact() {
         directory.addServer(
                 "web01",
-                "web01.example.gov",
+                "https://web01.example.gov",
                 new String[] {"Jane.Smith@example.gov", "ops@example.gov"},
                 TestCertificates.expiringIn("web01.example.gov", Duration.ofDays(100)));
 
-        syncService.sync();
+        syncAll();
 
         DirectoryServer server = inTransaction(() -> {
             DirectoryServer loaded =
@@ -128,8 +132,11 @@ class DirectorySyncServiceTest {
             return loaded;
         });
         assertThat(server.getCommonName()).isEqualTo("web01");
-        assertThat(server.getFqdn()).isEqualTo("web01.example.gov");
-        assertThat(server.getOperatingSystem()).isEqualTo("Linux");
+        assertThat(server.getServerUrl()).isEqualTo("https://web01.example.gov");
+        assertThat(server.getIcServerAddress()).isEqualTo("10.1.2.3");
+        assertThat(server.getAtoStatus()).isEqualTo("Authorized");
+        assertThat(server.getLifeCycleStatus()).isEqualTo("Production");
+        
         // Multi-valued, and lowercased so the join to a user's email always matches.
         assertThat(server.getServerPocs()).containsExactlyInAnyOrder("jane.smith@example.gov", "ops@example.gov");
         assertThat(server.getServerPocDisplay()).contains("jane.smith@example.gov");
@@ -145,9 +152,9 @@ class DirectorySyncServiceTest {
                 TestCertificates.expiringIn("mixed-valid", Duration.ofDays(300)),
                 TestCertificates.expired("mixed-expired", Duration.ofDays(3)));
 
-        syncService.sync();
+        syncAll();
 
-        DirectoryUser user = userRepository.findByDn("uid=mixed," + EmbeddedDirectory.PEOPLE_DN).orElseThrow();
+        DirectoryUser user = userByDn("uid=mixed," + EmbeddedDirectory.PEOPLE_DN);
         assertThat(user.getCertificateCount()).isEqualTo(2);
         // One expired certificate is what matters, even alongside a healthy one.
         assertThat(user.getCertificateStatus()).isEqualTo(CertificateStatus.EXPIRED);
@@ -162,7 +169,7 @@ class DirectorySyncServiceTest {
         directory.addUser("soon", "Soon Expiring", "soon@example.gov",
                 TestCertificates.expiringIn("soon", Duration.ofDays(10)));
 
-        syncService.sync();
+        syncAll();
 
         DirectoryUser user = userRepository.findByDn("uid=soon," + EmbeddedDirectory.PEOPLE_DN).orElseThrow();
         assertThat(user.getCertificateStatus()).isEqualTo(CertificateStatus.EXPIRING_SOON);
@@ -173,14 +180,14 @@ class DirectorySyncServiceTest {
         String dn = directory.addUser("rotating", "Rotating Holder", "rotating@example.gov",
                 TestCertificates.expiringIn("rotating", Duration.ofDays(300)));
 
-        syncService.sync();
+        syncAll();
         // A first sighting is not news, it is just the first time we looked.
         verify(alertDispatcher, never()).dispatch(any());
 
         // Swapping in a different certificate replaces one first sighting with another:
         // still nothing anyone needs to be woken for.
         directory.replaceCertificates(dn, TestCertificates.expiringIn("rotating", Duration.ofDays(500)));
-        DirectorySyncResult result = syncService.sync();
+        DirectorySyncResult result = syncService.syncUsers();
 
         assertThat(result.certificatesCached()).isEqualTo(1);
         assertThat(result.certificatesRemoved()).isEqualTo(1);
@@ -193,13 +200,13 @@ class DirectorySyncServiceTest {
         String dn = directory.addUser("crossing", "Crossing Holder", "crossing@example.gov",
                 TestCertificates.expiringIn("crossing", Duration.ofSeconds(2)));
 
-        syncService.sync();
+        syncAll();
         DirectoryUser afterFirst = userRepository.findByDn(dn).orElseThrow();
         assertThat(afterFirst.getCertificateStatus()).isEqualTo(CertificateStatus.EXPIRING_SOON);
         verify(alertDispatcher, never()).dispatch(any());
 
         await(Duration.ofSeconds(3));
-        syncService.sync();
+        syncAll();
 
         ArgumentCaptor<CertificateAlert> alert = ArgumentCaptor.forClass(CertificateAlert.class);
         verify(alertDispatcher).dispatch(alert.capture());
@@ -215,10 +222,10 @@ class DirectorySyncServiceTest {
         directory.addUser("stable", "Stable Holder", "stable@example.gov",
                 TestCertificates.expiringIn("stable", Duration.ofDays(400)));
 
-        syncService.sync();
+        syncAll();
         Long firstId = certificateIdOf("uid=stable," + EmbeddedDirectory.PEOPLE_DN);
 
-        DirectorySyncResult second = syncService.sync();
+        DirectorySyncResult second = syncAll();
 
         assertThat(second.certificatesCached()).isZero();
         assertThat(certificateIdOf("uid=stable," + EmbeddedDirectory.PEOPLE_DN)).isEqualTo(firstId);
@@ -232,17 +239,17 @@ class DirectorySyncServiceTest {
         byte[] dropped = TestCertificates.expiringIn("dropping-b", Duration.ofDays(200));
         String dn = directory.addUser("dropping", "Dropping Holder", "dropping@example.gov", kept, dropped);
 
-        syncService.sync();
-        DirectoryUser before = userRepository.findByDn(dn).orElseThrow();
+        syncAll();
+        DirectoryUser before = userByDn(dn);
         assertThat(before.getCertificateCount()).isEqualTo(2);
         Long keptId = fingerprintToId(before, TestCertificates.sha256(kept));
 
         directory.replaceCertificates(dn, kept);
-        DirectorySyncResult result = syncService.sync();
+        DirectorySyncResult result = syncService.syncUsers();
 
         assertThat(result.certificatesRemoved()).isEqualTo(1);
         assertThat(result.certificatesCached()).isZero();
-        DirectoryUser user = userRepository.findByDn(dn).orElseThrow();
+        DirectoryUser user = userByDn(dn);
         assertThat(user.getCertificateCount()).isEqualTo(1);
         // The surviving certificate is the same cached row, not a re-created one.
         assertThat(user.getCertificates().getFirst().getId()).isEqualTo(keptId);
@@ -260,7 +267,7 @@ class DirectorySyncServiceTest {
     void anEntryWithNoCertificateIsStillTracked() {
         directory.addUser("bare", "Bare Holder", "bare@example.gov");
 
-        syncService.sync();
+        syncAll();
 
         DirectoryUser user = userRepository.findByDn("uid=bare," + EmbeddedDirectory.PEOPLE_DN).orElseThrow();
         assertThat(user.getCertificateCount()).isZero();
@@ -269,9 +276,34 @@ class DirectorySyncServiceTest {
         assertThat(user.getLastSyncedAt()).isNotNull();
     }
 
+    /** Runs both sweeps, as the schedule does. */
+    private DirectorySyncResult syncAll() {
+        DirectorySyncResult users = syncService.syncUsers();
+        DirectorySyncResult servers = syncService.syncServers();
+        return new DirectorySyncResult(
+                users.job(),
+                users.entriesSeen() + servers.entriesSeen(),
+                users.entriesCreated() + servers.entriesCreated(),
+                users.certificatesCached() + servers.certificatesCached(),
+                users.certificatesRemoved() + servers.certificatesRemoved(),
+                users.alertsRaised() + servers.alertsRaised(),
+                0,
+                users.errors() + servers.errors(),
+                users.duration().plus(servers.duration()));
+    }
+
     private Long certificateIdOf(String dn) {
-        List<CachedCertificate> certificates = userRepository.findByDn(dn).orElseThrow().getCertificates();
+        List<CachedCertificate> certificates = userByDn(dn).getCertificates();
         return certificates.getFirst().getId();
+    }
+
+    /** Loads a user with its certificates initialised, for assertions outside a transaction. */
+    private DirectoryUser userByDn(String dn) {
+        return inTransaction(() -> {
+            DirectoryUser user = userRepository.findByDn(dn).orElseThrow();
+            user.getCertificates().size();
+            return user;
+        });
     }
 
     /** Runs a read inside a transaction, for assertions that touch lazy state. */

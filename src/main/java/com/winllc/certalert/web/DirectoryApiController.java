@@ -4,40 +4,102 @@ import com.winllc.certalert.domain.DirectoryServer;
 import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.DirectoryUserRepository;
+import com.winllc.certalert.repository.SyncRunRepository;
+import com.winllc.certalert.service.CertificateRefreshService;
+import com.winllc.certalert.service.DirectoryPruneService;
 import com.winllc.certalert.service.DirectorySyncService;
 import com.winllc.certalert.service.ResourceNotFoundException;
 import com.winllc.certalert.web.dto.CachedCertificateRow;
 import com.winllc.certalert.web.dto.SyncResponse;
+import com.winllc.certalert.web.dto.SyncRunRow;
 import java.util.List;
+import java.util.Map;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-/** Directory sync control, and the cached certificate detail behind a table row. */
+/**
+ * Manual triggers for the scheduled jobs, the run log, and the cached certificate detail
+ * behind a table row.
+ */
 @RestController
 @RequestMapping("/api/v1")
 public class DirectoryApiController {
 
+    private static final int MAX_RUN_HISTORY = 100;
+
     private final DirectorySyncService syncService;
+    private final CertificateRefreshService refreshService;
+    private final DirectoryPruneService pruneService;
     private final DirectoryUserRepository userRepository;
     private final DirectoryServerRepository serverRepository;
+    private final SyncRunRepository syncRunRepository;
 
     public DirectoryApiController(
             DirectorySyncService syncService,
+            CertificateRefreshService refreshService,
+            DirectoryPruneService pruneService,
             DirectoryUserRepository userRepository,
-            DirectoryServerRepository serverRepository) {
+            DirectoryServerRepository serverRepository,
+            SyncRunRepository syncRunRepository) {
         this.syncService = syncService;
+        this.refreshService = refreshService;
+        this.pruneService = pruneService;
         this.userRepository = userRepository;
         this.serverRepository = serverRepository;
+        this.syncRunRepository = syncRunRepository;
     }
 
-    /** Runs a directory sync now, rather than waiting for the schedule. */
+    /** Scrapes IC Persons now, rather than waiting for the schedule. */
+    @PostMapping("/sync/users")
+    public SyncResponse syncUsers() {
+        return SyncResponse.from(syncService.syncUsers());
+    }
+
+    /** Scrapes IC Non-Person Entities now. */
+    @PostMapping("/sync/servers")
+    public SyncResponse syncServers() {
+        return SyncResponse.from(syncService.syncServers());
+    }
+
+    /** Runs both sweeps, in the order the schedule would. */
     @PostMapping("/sync")
-    public SyncResponse sync() {
-        return SyncResponse.from(syncService.sync());
+    public List<SyncResponse> sync() {
+        return List.of(
+                SyncResponse.from(syncService.syncUsers()), SyncResponse.from(syncService.syncServers()));
+    }
+
+    /** Re-evaluates cached expiry without reading the directory. */
+    @PostMapping("/sync/refresh")
+    public SyncResponse refresh() {
+        return SyncResponse.from(refreshService.refresh());
+    }
+
+    /** Removes entries the directory has stopped publishing. */
+    @PostMapping("/sync/prune")
+    public SyncResponse prune() {
+        return SyncResponse.from(pruneService.prune());
+    }
+
+    /** How many entries the next prune would remove, for checking before enabling it. */
+    @GetMapping("/sync/prune/preview")
+    public Map<String, Long> prunePreview() {
+        return Map.of("prunable", pruneService.countPrunable());
+    }
+
+    /** The most recent runs, newest first. */
+    @GetMapping("/sync/runs")
+    @Transactional(readOnly = true)
+    public List<SyncRunRow> runs(@RequestParam(defaultValue = "20") int limit) {
+        return syncRunRepository.findByOrderByStartedAtDesc(PageRequest.of(0, Math.clamp(limit, 1, MAX_RUN_HISTORY)))
+                .stream()
+                .map(SyncRunRow::from)
+                .toList();
     }
 
     @GetMapping("/users/{id}/certificates")

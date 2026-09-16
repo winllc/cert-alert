@@ -87,6 +87,11 @@
         };
     }
 
+    /** Re-points a built table at a new filter set. */
+    function reload(table, filters) {
+        table.ajax.url(buildUrl(table.certAlertEndpoint, filters)).load();
+    }
+
     function buildUrl(endpoint, filters) {
         var params = new URLSearchParams();
         Object.keys(filters).forEach(function (key) {
@@ -213,14 +218,30 @@
                 });
         });
 
+        // Kept on the table so a caller can re-point it without holding the config.
+        table.certAlertEndpoint = config.endpoint;
+
         if (config.onFiltersApplied) {
             config.onFiltersApplied(config.readFilters());
         }
         return table;
     }
 
+    /** Renders the applied-filter summary shown beside the filter controls. */
+    function describeFilters(filters) {
+        var keys = Object.keys(filters);
+        if (keys.length === 0) {
+            return 'No extra filters';
+        }
+        return 'Filtered by <strong>' + keys.map(function (key) {
+            return escapeHtml(key + '=' + filters[key]);
+        }).join('</strong>, <strong>') + '</strong>';
+    }
+
     window.CertAlert = {
         initTable: initTable,
+        describeFilters: describeFilters,
+        reload: reload,
         escapeHtml: escapeHtml,
         text: text,
         formatDate: formatDate,

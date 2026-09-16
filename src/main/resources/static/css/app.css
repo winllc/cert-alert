@@ -241,3 +241,30 @@ a.poc-link:hover {
     color: var(--muted);
     margin-left: 6px;
 }
+
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #e8eefc;
+    color: var(--accent);
+    border: 1px solid #c6d6f3;
+    border-radius: 12px;
+    padding: 4px 6px 4px 10px;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.chip button {
+    border: 0;
+    background: transparent;
+    color: var(--accent);
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    padding: 2px 4px;
+}
+
+.chip button:hover {
+    color: var(--bad);
+}

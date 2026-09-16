@@ -7,8 +7,13 @@ spring:
 
 cert-alert:
   ldap:
-    # Tests drive the sync explicitly; nothing should fire on a timer.
-    sync-enabled: false
+    # Deliberately tiny, so even a handful of fixture entries cross page and batch
+    # boundaries and the streaming path is what the tests actually exercise.
+    page-size: 3
+    batch-size: 2
+    sync:
+      # Tests drive the jobs explicitly; nothing should fire on a timer.
+      enabled: false
 
 logging:
   level:

@@ -7,6 +7,7 @@ import jakarta.persistence.criteria.Join;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Collection;
+import java.util.List;
 import java.util.Locale;
 import org.springframework.data.jpa.domain.Specification;
 
@@ -62,22 +63,45 @@ public final class DirectorySpecifications {
     }
 
     /**
-     * Servers whose {@code serverPoc} names this email address - the join between a person
-     * and the servers they are responsible for.
+     * Servers whose {@code serverPOC} holds this value - one half of the join between a
+     * person and the servers they are responsible for.
      *
-     * <p>Contacts are stored lowercased, and the address is lowercased here too, so the
-     * match never depends on how the directory cased either side. No {@code distinct} is
-     * needed: contacts are a set, so a server can match a given address at most once, and
-     * the count query the search table issues alongside this stays accurate.
+     * <p>Contacts are stored lowercased and the value is lowercased here too, so the match
+     * never depends on how the directory cased either side. No {@code distinct} is needed:
+     * contacts are a set, so a server matches a given value at most once, and the count
+     * query the search table issues alongside this stays accurate.
      */
-    public static Specification<DirectoryServer> pointOfContact(String email) {
-        if (email == null || email.isBlank()) {
+    public static Specification<DirectoryServer> pointOfContact(String value) {
+        if (value == null || value.isBlank()) {
             return unfiltered();
         }
-        String normalised = email.trim().toLowerCase(Locale.ROOT);
+        return pointOfContactAnyOf(List.of(value));
+    }
+
+    /**
+     * Servers whose {@code serverPOC} matches any of these values.
+     *
+     * <p>This is how a person is resolved to their servers. The FSD schema defines
+     * {@code serverPOC} as the <em>name</em> of the responsible person or organization, but
+     * directories in practice put an address there instead, so a person is matched against
+     * every value that could name them: each of their addresses and each form of their
+     * name. See {@code DirectoryUser.identifiers}.
+     */
+    public static Specification<DirectoryServer> pointOfContactAnyOf(Collection<String> values) {
+        if (values == null || values.isEmpty()) {
+            return unfiltered();
+        }
+        List<String> normalised = values.stream()
+                .filter(value -> value != null && !value.isBlank())
+                .map(value -> value.trim().toLowerCase(Locale.ROOT))
+                .distinct()
+                .toList();
+        if (normalised.isEmpty()) {
+            return unfiltered();
+        }
         return (root, query, builder) -> {
             Join<DirectoryServer, String> contacts = root.join("serverPocs");
-            return builder.equal(builder.lower(contacts), normalised);
+            return builder.lower(contacts).in(normalised);
         };
     }
 }

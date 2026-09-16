@@ -1,12 +1,18 @@
 package com.winllc.certalert.repository;
 
 import com.winllc.certalert.domain.DirectoryServer;
+import java.time.Instant;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.datatables.repository.DataTablesRepository;
 import org.springframework.data.jpa.repository.EntityGraph;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 /**
- * Servers, exposed to the search tables through {@link DataTablesRepository}.
+ * IC Non-Person Entities, exposed to the search tables through {@link DataTablesRepository}.
  *
  * <p>The two collections are fetched by separate methods on purpose. Joining both in one
  * query multiplies the rows together, and a {@code List} of certificates would come back
@@ -14,13 +20,21 @@ import org.springframework.data.jpa.repository.EntityGraph;
  */
 public interface DirectoryServerRepository extends DataTablesRepository<DirectoryServer, Long> {
 
-    /** Used by the sync, which always goes on to reconcile the certificates. */
-    @EntityGraph(attributePaths = "certificates")
     Optional<DirectoryServer> findByDn(String dn);
+
+    @EntityGraph(attributePaths = "certificates")
+    List<DirectoryServer> findAllByDnIn(Collection<String> dns);
 
     @EntityGraph(attributePaths = "certificates")
     Optional<DirectoryServer> findWithCertificatesById(Long id);
 
     @EntityGraph(attributePaths = "serverPocs")
     Optional<DirectoryServer> findWithPocsById(Long id);
+
+    long countByLastSyncedAtBefore(Instant cutoff);
+
+    /** Used by the prune job; the cascade takes the certificates and contacts with it. */
+    @Modifying
+    @Query("delete from DirectoryServer s where s.lastSyncedAt < :cutoff")
+    int deleteByLastSyncedAtBefore(@Param("cutoff") Instant cutoff);
 }

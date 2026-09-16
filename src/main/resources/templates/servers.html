@@ -22,10 +22,17 @@
             <input type="number" id="within-days" min="1" max="3650" placeholder="any">
         </div>
         <div class="field">
-            <!-- The join the directory itself defines: a server names its points of
-                 contact by email, and that is a user's mail attribute. -->
-            <label for="poc-email">Point of contact (user email)</label>
-            <input type="text" id="poc-email" placeholder="user@example.gov">
+            <!-- The FSD schema defines serverPOC as the NAME of the responsible person or
+                 organization; directories often hold an address instead. Either matches. -->
+            <label for="poc-email">Point of contact (serverPOC)</label>
+            <input type="text" id="poc-email" placeholder="name or address">
+        </div>
+        <div class="field" id="poc-user-field" hidden>
+            <label>Responsible for</label>
+            <span class="chip">
+                <span id="poc-user-label"></span>
+                <button type="button" id="poc-user-clear" title="Clear">x</button>
+            </span>
         </div>
         <div class="applied" id="applied-filters"></div>
     </section>
@@ -36,11 +43,12 @@
             <tr>
                 <th></th>
                 <th>Name</th>
-                <th>FQDN</th>
+                <th>URL</th>
+                <th>IP address</th>
                 <th>Points of contact</th>
-                <th>OS</th>
-                <th>Organization</th>
-                <th>Org unit</th>
+                <th>Lifecycle</th>
+                <th>ATO</th>
+                <th>Duty organization</th>
                 <th>Certs</th>
                 <th>Status</th>
                 <th>Expires</th>
@@ -52,11 +60,12 @@
             <tr>
                 <th></th>
                 <th><input type="text" placeholder="Name"></th>
-                <th><input type="text" placeholder="FQDN"></th>
+                <th><input type="text" placeholder="URL"></th>
+                <th><input type="text" placeholder="IP address"></th>
                 <th><input type="text" placeholder="Contact"></th>
-                <th><input type="text" placeholder="OS"></th>
-                <th><input type="text" placeholder="Organization"></th>
-                <th><input type="text" placeholder="Org unit"></th>
+                <th><input type="text" placeholder="Lifecycle"></th>
+                <th><input type="text" placeholder="ATO"></th>
+                <th><input type="text" placeholder="Duty organization"></th>
                 <th></th>
                 <th></th>
                 <th></th>
