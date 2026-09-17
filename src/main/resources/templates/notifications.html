@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Notifications')}"></head>
+<body>
+<svg th:replace="~{fragments/icons :: sprite}"></svg>
+
+<div class="page">
+    <header th:replace="~{fragments/layout :: navbar('notifications')}"></header>
+
+    <div class="page-wrapper">
+        <div class="page-header d-print-none">
+            <div class="container-xl">
+                <div class="row g-2 align-items-center">
+                    <div class="col">
+                        <div class="page-pretitle">IC Full Service Directory</div>
+                        <h2 class="page-title">Notifications</h2>
+                        <div class="text-secondary mt-1">
+                            Certificates you are the point of contact for, and what has happened to them
+                        </div>
+                    </div>
+                    <div class="col-auto ms-auto">
+                        <div class="btn-list align-items-center">
+                            <span id="notifications-digest-status" class="text-secondary small"></span>
+                            <!--/* The round-up runs on a schedule; this is for seeing it work. */-->
+                            <button type="button" id="notifications-digest" class="btn" th:if="${isAdmin}">
+                                <svg class="icon"><use href="#icon-refresh"></use></svg>
+                                Run the expiry round-up
+                            </button>
+                            <button type="button" id="notifications-read-all" class="btn btn-primary">
+                                Mark all read
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="page-body">
+            <div class="container-xl">
+                <div class="card">
+                    <div class="table-responsive">
+                        <table class="table card-table table-vcenter">
+                            <thead>
+                            <tr>
+                                <th>When</th>
+                                <th>Severity</th>
+                                <th>Kind</th>
+                                <th>What</th>
+                                <th>About</th>
+                                <th>Email</th>
+                                <th></th>
+                            </tr>
+                            </thead>
+                            <tbody id="notifications-body">
+                            <tr><td colspan="7" class="text-secondary">Loading…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="card-footer d-flex align-items-center gap-2">
+                        <button type="button" class="btn btn-sm" id="notifications-previous" disabled>Previous</button>
+                        <button type="button" class="btn btn-sm" id="notifications-next" disabled>Next</button>
+                        <span class="text-secondary small" id="notifications-range"></span>
+                    </div>
+                </div>
+
+                <p class="text-secondary mt-3 small">
+                    A certificate crossing into a bad state is reported here the moment a sweep notices it.
+                    Everything expiring goes out once a day as a round-up, by email, to the address the
+                    directory holds for each point of contact.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div th:replace="~{fragments/layout :: scripts}"></div>
+</body>
+</html>

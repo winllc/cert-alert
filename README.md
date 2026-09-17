@@ -495,6 +495,36 @@ turning it on removes records older than `cert-alert.audit.retention.after` (a y
 default) on a weekly schedule. `cert-alert.audit.enabled: false` stops new records being
 written without deleting or hiding what is already there.
 
+### Notifications
+
+An alert is raised once about a certificate. A **notification** is one person's copy of it,
+because being told is something that happens to a person, and so is having read it. A
+server with four points of contact produces four.
+
+Two paths, deliberately different:
+
+| | When | Where |
+|---|---|---|
+| **Certificate status** | the moment a sweep or the hourly re-evaluation notices a certificate crossing into a bad state | the page, one per contact |
+| **Expiry round-up** | daily, on a cron | the page *and* an email to each contact |
+
+The alert channels (`cert-alert.alerts.*`) are a different thing again: they tell a fixed
+list of operators about every alert as it happens. The round-up writes to the person who
+has to renew the certificate.
+
+Recipients are resolved through everything this application knows about who is responsible:
+a person's own certificate is theirs, and a server's is its points of contact's — the
+directory's `serverPOC` values resolved to people, which now includes group addresses, plus
+the contacts added here. An address nobody has claimed is still a recipient by email; it
+just has nobody to show a notification to.
+
+Nobody hears the same thing twice inside `cert-alert.notifications.repeat-after` (a week by
+default). A nightly sweep and a certificate that stays expiring for a month would otherwise
+mean thirty notifications.
+
+Email is off until `cert-alert.notifications.email.enabled` is set and `spring.mail.*` is
+configured. The notifications are written and shown on the page either way.
+
 ### The details pages
 
 `/users/{id}` and `/servers/{id}` are a page per entry, reached by clicking its name in
@@ -531,6 +561,11 @@ for.
 | `POST` | `/api/v1/servers/{id}/contacts`     | Add one: `{"userId":…}` or `{"email":…}` |
 | `DELETE` | `/api/v1/servers/{id}/contacts/{contactId}` | Remove one                   |
 | `GET`  | `/api/v1/users/search?q=`           | People matching, for the contact picker  |
+| `GET`  | `/api/v1/notifications`             | Your notifications, `?page=&size=`       |
+| `GET`  | `/api/v1/notifications/unread-count` | What the bell counts                    |
+| `POST` | `/api/v1/notifications/{id}/read`   | Mark one read                            |
+| `POST` | `/api/v1/notifications/read-all`    | Mark them all read                       |
+| `POST` | `/api/v1/notifications/digest`      | Run the expiry round-up now              |
 | `GET`  | `/api/v1/users/{id}/addresses`      | Both lists of addresses                  |
 | `POST` | `/api/v1/users/{id}/addresses`      | Add one: `{"address":…,"kind":"GROUP"}`  |
 | `DELETE` | `/api/v1/users/{id}/addresses/{aliasId}` | Remove one                       |
@@ -554,6 +589,7 @@ first four are configured under `cert-alert.ldap` and the last under `cert-alert
 | **refresh** | `0 15 * * * *`    | Re-evaluates cached expiry; reads no LDAP                 |
 | **prune**   | `0 0 6 * * SUN`   | Removes entries the directory has stopped publishing      |
 | **audit retention** | `0 30 3 * * SUN` | Trims the audit trail; off unless turned on        |
+| **expiry round-up** | `0 0 7 * * *` | Tells each point of contact what of theirs is expiring |
 
 Alongside them, the [changelog connector](#following-the-changelog) follows the directory
 continuously, so the sweeps are a backstop rather than the only way a change arrives.

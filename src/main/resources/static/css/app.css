@@ -261,3 +261,12 @@ td.audit-actor {
         white-space: normal;
     }
 }
+
+/* An unread notification, which is most of what somebody is looking for on that page. */
+tr.notification-unread td {
+    font-weight: 500;
+}
+
+tr.notification-unread td:first-child {
+    box-shadow: inset 2px 0 0 0 var(--tblr-primary);
+}

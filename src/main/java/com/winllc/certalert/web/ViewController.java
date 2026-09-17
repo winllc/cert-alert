@@ -74,6 +74,11 @@ public class ViewController {
         return "server-detail";
     }
 
+    @GetMapping("/notifications")
+    public String notifications() {
+        return "notifications";
+    }
+
     /** The password fallback, for a browser that presented no client certificate. */
     @GetMapping("/login")
     public String login() {

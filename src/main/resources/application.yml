@@ -245,6 +245,31 @@ cert-alert:
       after: 365d
       cron: "0 30 3 * * SUN"
 
+  # Telling the people concerned, as distinct from the alert channels below - those tell a
+  # fixed list of operators about everything as it happens. A certificate crossing into a
+  # bad state shows up on the page for each of its points of contact straight away; a daily
+  # round-up of what is expiring goes to them by email.
+  notifications:
+    enabled: true
+    # Nobody hears the same thing twice inside this. A nightly sweep and a certificate that
+    # stays expiring for a month would otherwise mean thirty notifications.
+    repeat-after: 7d
+    digest:
+      enabled: true
+      cron: "0 0 7 * * *"
+      window: 30d
+      include-expired: true
+    email:
+      # Off by default, and needs spring.mail.* configured. This writes to the contact of
+      # the certificate rather than to a fixed list.
+      enabled: false
+      from: cert-alert@localhost
+      subject-prefix: "[cert-alert] "
+      max-per-run: 500
+    retention:
+      enabled: false
+      after: 90d
+
   alerts:
     logging:
       enabled: true

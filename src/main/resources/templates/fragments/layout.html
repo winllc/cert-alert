@@ -29,6 +29,14 @@
         </a>
 
         <div class="navbar-nav flex-row order-md-last">
+            <!--/* What is waiting for whoever is signed in. Hidden until the count comes
+                   back, so it never flashes a zero at somebody who has nothing. */-->
+            <div class="nav-item d-none me-2" id="notification-bell">
+                <a class="nav-link px-2" th:href="@{/notifications}" title="Notifications">
+                    <svg class="icon"><use href="#icon-bell"></use></svg>
+                    <span class="badge bg-red text-white d-none" id="notification-count">0</span>
+                </a>
+            </div>
             <div class="nav-item dropdown" th:if="${currentUser != null}">
                 <a href="#" class="nav-link d-flex lh-1 p-0 px-2" data-bs-toggle="dropdown" aria-label="Open account menu">
                     <span class="avatar avatar-sm bg-primary-lt"
@@ -73,6 +81,14 @@
                             <svg class="icon"><use href="#icon-server"></use></svg>
                         </span>
                         <span class="nav-link-title">Servers</span>
+                    </a>
+                </li>
+                <li class="nav-item" th:classappend="${active == 'notifications'} ? 'active'">
+                    <a class="nav-link" th:href="@{/notifications}">
+                        <span class="nav-link-icon d-md-none d-lg-inline-block">
+                            <svg class="icon"><use href="#icon-bell"></use></svg>
+                        </span>
+                        <span class="nav-link-title">Notifications</span>
                     </a>
                 </li>
             </ul>
@@ -167,6 +183,7 @@
     <script th:src="@{/webjars/tabler__core/dist/js/tabler.min.js}"></script>
     <script th:src="@{/js/directory-table.js}"></script>
     <script th:src="@{/js/sync.js}"></script>
+    <script th:src="@{/js/notifications.js}"></script>
 </div>
 </body>
 </html>

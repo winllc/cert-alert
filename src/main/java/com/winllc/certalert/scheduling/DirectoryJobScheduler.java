@@ -2,10 +2,12 @@ package com.winllc.certalert.scheduling;
 
 import com.winllc.certalert.domain.SyncJob;
 import com.winllc.certalert.ldap.LdapProperties;
+import com.winllc.certalert.config.NotificationProperties;
 import com.winllc.certalert.service.AuditService;
 import com.winllc.certalert.service.CertificateRefreshService;
 import com.winllc.certalert.service.DirectoryPruneService;
 import com.winllc.certalert.service.DirectorySyncService;
+import com.winllc.certalert.service.NotificationService;
 import java.util.EnumMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -30,6 +32,9 @@ import org.springframework.stereotype.Component;
  *       default: deleting records is not something to start doing on its own.
  *   <li><b>audit retention</b> trims the audit trail, and is off by default for the same
  *       reason - more so, since the whole point of that table is that it remembers.
+ *   <li><b>expiry digest</b> tells each point of contact what of theirs is expiring, once a
+ *       day. The alert channels tell the operators as things happen; this tells the person
+ *       who has to renew it.
  * </ul>
  *
  * <p>Every job is guarded against overlapping itself. A sweep of a directory with 100,000+
@@ -47,6 +52,8 @@ public class DirectoryJobScheduler {
     private final CertificateRefreshService refreshService;
     private final DirectoryPruneService pruneService;
     private final AuditService auditService;
+    private final NotificationService notificationService;
+    private final NotificationProperties notificationProperties;
     private final LdapProperties properties;
 
     private final Map<SyncJob, AtomicBoolean> running = new EnumMap<>(SyncJob.class);
@@ -56,11 +63,15 @@ public class DirectoryJobScheduler {
             CertificateRefreshService refreshService,
             DirectoryPruneService pruneService,
             AuditService auditService,
+            NotificationService notificationService,
+            NotificationProperties notificationProperties,
             LdapProperties properties) {
         this.syncService = syncService;
         this.refreshService = refreshService;
         this.pruneService = pruneService;
         this.auditService = auditService;
+        this.notificationService = notificationService;
+        this.notificationProperties = notificationProperties;
         this.properties = properties;
         for (SyncJob job : SyncJob.values()) {
             running.put(job, new AtomicBoolean(false));
@@ -80,6 +91,24 @@ public class DirectoryJobScheduler {
     @Scheduled(cron = "${cert-alert.ldap.sync.refresh-cron}", zone = "UTC")
     public void refreshExpiry() {
         runOnce(SyncJob.REFRESH, refreshService::refresh);
+    }
+
+    /**
+     * The daily round-up of what is expiring, to the people who are the contacts for it.
+     * Separate from the alert channels, which tell a fixed list of operators as things
+     * happen; this is the message somebody can act on, and it goes to them.
+     */
+    @Scheduled(cron = "${cert-alert.notifications.digest.cron}", zone = "UTC")
+    public void expiryDigest() {
+        if (!notificationProperties.getDigest().isEnabled()) {
+            return;
+        }
+        try {
+            notificationService.digest();
+            notificationService.trim();
+        } catch (RuntimeException e) {
+            log.error("The expiry digest failed", e);
+        }
     }
 
     /**

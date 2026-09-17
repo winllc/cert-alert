@@ -79,7 +79,11 @@ public class SecurityConfig {
                 .hasRole("ADMIN")
                 // Triggering a sweep of the whole directory, and above all pruning it, is
                 // not something a reader gets to do.
-                .requestMatchers(HttpMethod.POST, "/api/v1/sync/**", "/api/v1/changelog/**")
+                .requestMatchers(
+                        HttpMethod.POST,
+                        "/api/v1/sync/**",
+                        "/api/v1/changelog/**",
+                        "/api/v1/notifications/digest")
                 .hasRole("ADMIN")
                 // Editing a server's points of contact, or the addresses a person answers
                 // to, decides who hears about an expiry - the addresses because they are

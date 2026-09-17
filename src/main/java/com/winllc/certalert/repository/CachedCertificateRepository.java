@@ -38,6 +38,26 @@ public interface CachedCertificateRepository extends JpaRepository<CachedCertifi
     @Query("select c from CachedCertificate c left join fetch c.user where c.sha256Fingerprint = :fingerprint")
     List<CachedCertificate> findByFingerprint(@Param("fingerprint") String fingerprint);
 
+    /**
+     * What the digest reports: everything in one of these states that expires before the
+     * horizon, owner attached so the round-up can name what it is about. Already-expired
+     * certificates come along with it - their notAfter is in the past, which is before any
+     * horizon - unless the caller leaves EXPIRED out of the statuses.
+     */
+    @Query("""
+            select c from CachedCertificate c
+            left join fetch c.user
+            left join fetch c.server
+            where c.status in :statuses
+              and c.notAfter is not null
+              and c.notAfter <= :horizon
+            order by c.notAfter
+            """)
+    List<CachedCertificate> findExpiringBefore(
+            @Param("statuses") Collection<CertificateStatus> statuses,
+            @Param("horizon") Instant horizon,
+            Pageable pageable);
+
     @Query("select distinct c.user.id from CachedCertificate c where c.id in :ids and c.user is not null")
     List<Long> findUserIdsByCertificateIds(@Param("ids") Collection<Long> ids);
 
