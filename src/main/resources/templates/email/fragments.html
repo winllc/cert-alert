@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<!--/*
+  The parts both round-up emails are built from.
+
+  Everything is inline: no stylesheet, no webfont, no tracking pixel, nothing fetched when
+  the message is opened. Mail clients strip most of a <style> block anyway, and this has to
+  work on a network that can reach nothing.
+*/-->
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+
+<!--/* The bar across the top, coloured by whether anything has already expired. */-->
+<table th:fragment="header(title, digest)" role="presentation" cellpadding="0" cellspacing="0" width="100%"
+       style="border-collapse:collapse;">
+    <tr>
+        <td th:style="'padding:16px 24px;border-radius:6px 6px 0 0;background:'
+                      + (${digest.expired} > 0 ? '#b32424' : '#9a6700') + ';'"
+            style="padding:16px 24px;background:#9a6700;">
+            <div style="margin:0;font-size:17px;font-weight:600;color:#ffffff;"
+                 th:text="${title}">Certificates expiring</div>
+            <div style="margin-top:4px;font-size:13px;color:#ffffff;opacity:0.85;"
+                 th:text="${digest.headline}">2 certificates are expiring</div>
+        </td>
+    </tr>
+</table>
+
+<!--/*
+  One row per certificate. The owner column is headed differently in each message - the
+  person a certificate was issued to, or the server it is installed on - so the heading is
+  passed in rather than guessed at.
+*/-->
+<table th:fragment="certificates(entries, ownerHeading)" role="presentation" cellpadding="0" cellspacing="0"
+       width="100%" style="border-collapse:collapse;font-size:13px;">
+    <thead>
+    <tr>
+        <th align="left" width="28%"
+            style="padding:8px 10px;border-bottom:2px solid #dbe0e6;color:#5a6672;font-weight:600;"
+            th:text="${ownerHeading}">Entry
+        </th>
+        <th align="left" width="50%"
+            style="padding:8px 10px;border-bottom:2px solid #dbe0e6;color:#5a6672;font-weight:600;">
+            Certificate
+        </th>
+        <th align="left" style="padding:8px 10px;border-bottom:2px solid #dbe0e6;color:#5a6672;font-weight:600;">
+            Expires
+        </th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr th:each="entry : ${entries}">
+        <td valign="top" style="padding:10px;border-bottom:1px solid #eceff2;">
+            <div style="font-weight:600;color:#1a2530;" th:text="${entry.ownerName}">Alice Archer</div>
+            <div style="color:#7b8794;font-size:12px;word-wrap:break-word;overflow-wrap:anywhere;" th:text="${entry.ownerDn}">
+                uid=alice,ou=people
+            </div>
+        </td>
+        <td valign="top" style="padding:10px;border-bottom:1px solid #eceff2;">
+            <div style="color:#1a2530;word-wrap:break-word;overflow-wrap:anywhere;" th:text="${entry.subjectDn}">CN=alice@example.gov</div>
+            <div style="color:#7b8794;font-size:12px;">
+                <span th:text="${entry.keyDescription}">RSA 2048</span>
+                <span th:if="${entry.hashAlgorithm}" th:text="'/ ' + ${entry.hashAlgorithm}">/ SHA-256</span>
+            </div>
+            <div style="color:#7b8794;font-size:12px;word-wrap:break-word;overflow-wrap:anywhere;"
+                 th:text="'Issued by ' + ${entry.issuerDn}">Issued by CN=Example CA
+            </div>
+        </td>
+        <td valign="top" style="padding:10px;border-bottom:1px solid #eceff2;white-space:nowrap;">
+            <div th:if="${entry.expired}" style="font-weight:600;color:#b32424;"
+                 th:text="${entry.daysAbsolute} + ' day(s) ago'">3 day(s) ago
+            </div>
+            <div th:unless="${entry.expired}" style="font-weight:600;color:#9a6700;"
+                 th:text="'in ' + ${entry.days} + ' day(s)'">in 5 day(s)
+            </div>
+            <div style="color:#7b8794;font-size:12px;" th:text="${entry.day}">2026-09-22</div>
+        </td>
+    </tr>
+    </tbody>
+</table>
+
+<!--/* Why this arrived, and what actually clears it. */-->
+<table th:fragment="footer(closing)" role="presentation" cellpadding="0" cellspacing="0" width="100%"
+       style="border-collapse:collapse;">
+    <tr>
+        <td style="padding:16px 24px;border-top:1px solid #eceff2;color:#7b8794;font-size:12px;line-height:1.5;">
+            <p style="margin:0 0 8px 0;" th:text="'You are receiving this because ' + ${closing} + '.'">
+                You are receiving this because ...
+            </p>
+            <p style="margin:0;">
+                This is the daily round-up from cert-alert. It reports what the directory publishes:
+                a certificate stops appearing here once the renewed one is published in its place.
+            </p>
+        </td>
+    </tr>
+</table>
+
+</body>
+</html>

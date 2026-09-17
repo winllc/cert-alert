@@ -15,7 +15,6 @@ import com.winllc.certalert.repository.CachedCertificateRepository;
 import com.winllc.certalert.repository.NotificationRepository;
 import java.time.Clock;
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -174,7 +173,7 @@ public class NotificationService {
             }
             for (NotificationRecipients.Recipient recipient : resolve(type, subject.id())) {
                 rounds.computeIfAbsent(keyOf(recipient), key -> new Round(recipient))
-                        .add(certificate, subject, now);
+                        .add(certificate, subject, type, now);
             }
         }
 
@@ -185,7 +184,7 @@ public class NotificationService {
             Notification notification = round.toNotification(now);
             notifications.save(notification);
             told++;
-            if (mailer.send(round.recipient, round.lines, notification)) {
+            if (mailer.send(round.recipient, round.entries)) {
                 notification.markEmailed(now);
                 emailed++;
             }
@@ -258,7 +257,7 @@ public class NotificationService {
     private static final class Round {
 
         private final NotificationRecipients.Recipient recipient;
-        private final List<String> lines = new ArrayList<>();
+        private final List<ExpiryDigest.Entry> entries = new ArrayList<>();
         private int expired;
         private int expiring;
         private Severity severity = Severity.INFO;
@@ -267,10 +266,11 @@ public class NotificationService {
             this.recipient = recipient;
         }
 
-        private void add(CachedCertificate certificate, AuditEvent.SubjectRef subject, Instant now) {
-            boolean isExpired = certificate.getStatus() == CertificateStatus.EXPIRED;
-            long days = ChronoUnit.DAYS.between(now, certificate.getNotAfter());
-            if (isExpired) {
+        private void add(
+                CachedCertificate certificate, AuditEvent.SubjectRef subject, OwnerType ownerType, Instant now) {
+
+            ExpiryDigest.Entry entry = ExpiryDigest.Entry.of(certificate, subject, ownerType, now);
+            if (entry.isExpired()) {
                 expired++;
                 severity = Severity.CRITICAL;
             } else {
@@ -279,25 +279,21 @@ public class NotificationService {
                     severity = Severity.WARNING;
                 }
             }
-            lines.add("%s - %s - %s"
-                    .formatted(
-                            subject.name() == null ? subject.dn() : subject.name(),
-                            certificate.getSubjectDn(),
-                            isExpired
-                                    ? "expired %d day(s) ago, on %s".formatted(Math.abs(days), day(certificate))
-                                    : "expires in %d day(s), on %s".formatted(days, day(certificate))));
+            entries.add(entry);
         }
 
         private Notification toNotification(Instant now) {
             String message = "%s %s".formatted(
                     summary(),
-                    lines.size() == 1 ? "(" + lines.getFirst() + ")" : "across " + lines.size() + " certificate(s)");
+                    entries.size() == 1
+                            ? "(" + entries.getFirst().getSummary() + ")"
+                            : "across " + entries.size() + " certificate(s)");
             return new Notification(
                     recipient.userId(),
                     recipient.address(),
                     NotificationKind.EXPIRY_DIGEST,
                     // A round-up is about everything it names, so it hangs off none of them
-                    // in particular; the lines say what.
+                    // in particular; the entries say what.
                     new AuditEvent.SubjectRef(OwnerType.USER, recipient.userId(), "digest", recipient.name()),
                     null,
                     severity,
@@ -312,10 +308,6 @@ public class NotificationService {
             return expired > 0
                     ? "%d certificate(s) expired".formatted(expired)
                     : "%d certificate(s) expiring".formatted(expiring);
-        }
-
-        private static String day(CachedCertificate certificate) {
-            return certificate.getNotAfter().toString().substring(0, 10);
         }
 
         private static String truncate(String message) {

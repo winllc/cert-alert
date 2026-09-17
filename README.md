@@ -569,6 +569,24 @@ mean thirty notifications.
 Email is off until `cert-alert.notifications.email.enabled` is set and `spring.mail.*` is
 configured. The notifications are written and shown on the page either way.
 
+The round-up is rendered from Thymeleaf templates in `src/main/resources/templates/email`,
+one per kind of thing expiring:
+
+| Template | What it says |
+|---|---|
+| `expiring-user.html` / `.txt` | the certificates issued to the person reading it, which are theirs to renew |
+| `expiring-server.html` / `.txt` | the certificates on servers they are a point of contact for, which somebody else may already be chasing |
+
+Somebody who is both gets one of each rather than a single list that mixes them: the wording,
+the subject line and what the first column names all differ. Each message goes out as HTML
+with the plain-text alternative beside it, and nothing in either half is fetched when the
+message is opened — no stylesheet, no webfont, no tracking pixel — because the network this
+runs on may be able to reach nothing at all.
+
+The text templates carry their own template resolver (`EmailTemplateConfig`), because a
+resolver carries one template mode; it answers only for `email/*.txt` and leaves every page
+to the resolver Spring Boot configures.
+
 ### The details pages
 
 `/users/{id}` and `/servers/{id}` are a page per entry, reached by clicking its name in

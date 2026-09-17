@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<!--/*
+  Certificates on servers the person reading this is a point of contact for.
+
+  A different message from the one about their own certificates: these are somebody else's
+  to install, and the reader may be one of several contacts, so it names the server on every
+  row and says why they were written to. Model: a single "digest" (see ExpiryDigest).
+*/-->
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title th:text="${digest.headline}">Server certificates are expiring</title>
+</head>
+<body style="margin:0;padding:24px 12px;background:#f5f7f9;
+             font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
+             color:#1a2530;">
+
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;">
+    <tr>
+        <td align="center">
+            <table role="presentation" cellpadding="0" cellspacing="0" width="640"
+                   style="width:100%;max-width:640px;border-collapse:collapse;background:#ffffff;
+                          border:1px solid #e3e7eb;border-radius:6px;">
+                <tr>
+                    <td style="padding:0;">
+                        <div th:replace="~{email/fragments :: header('Servers you are a contact for', ${digest})}"></div>
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding:20px 24px 4px 24px;font-size:14px;line-height:1.55;">
+                        <p style="margin:0 0 12px 0;"
+                           th:text="${digest.recipientName} != null ? 'Hello ' + ${digest.recipientName} + ',' : 'Hello,'">
+                            Hello Alice Archer,
+                        </p>
+                        <p style="margin:0 0 4px 0;"
+                           th:text="'You are a point of contact for ' +
+                                    (${digest.total} == 1 ? 'a server whose certificate needs attention.'
+                                                          : 'servers whose certificates need attention.')">
+                            You are a point of contact for servers whose certificates need attention.
+                        </p>
+                        <p style="margin:8px 0 4px 0;">
+                            Other people may be contacts for the same servers, so somebody may be on this already.
+                        </p>
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding:12px 14px 4px 14px;">
+                        <div th:replace="~{email/fragments :: certificates(${digest.entries}, 'Server')}"></div>
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding:0;">
+                        <div th:replace="~{email/fragments :: footer('you are a point of contact for these servers')}"></div>
+                    </td>
+                </tr>
+            </table>
+        </td>
+    </tr>
+</table>
+
+</body>
+</html>

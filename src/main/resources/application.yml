@@ -37,6 +37,13 @@ spring:
   jackson:
     default-property-inclusion: non_null
 
+  thymeleaf:
+    # The pages. Behind the plain-text email templates, which carry their own resolver
+    # because a resolver carries one template mode (see EmailTemplateConfig); it answers
+    # only for email/*.txt, so ordering settles which resolver sees what rather than
+    # leaving it to one of them declining the other's templates.
+    template-resolver-order: 2
+
   # Directory connection. Credentials belong in the environment, not in source control.
   ldap:
     urls: ${CERT_ALERT_LDAP_URL:ldap://localhost:389}
@@ -261,7 +268,9 @@ cert-alert:
       include-expired: true
     email:
       # Off by default, and needs spring.mail.* configured. This writes to the contact of
-      # the certificate rather than to a fixed list.
+      # the certificate rather than to a fixed list. The message is rendered from the
+      # Thymeleaf templates in templates/email: one for a person's own certificates, one
+      # for the servers they are a point of contact for, each as HTML and plain text.
       enabled: false
       from: cert-alert@localhost
       subject-prefix: "[cert-alert] "
