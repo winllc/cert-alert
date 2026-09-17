@@ -7,6 +7,7 @@ import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.DirectorySpecifications;
 import com.winllc.certalert.repository.DirectoryUserRepository;
+import com.winllc.certalert.repository.ServerContactRepository;
 import com.winllc.certalert.web.dto.DirectoryServerRow;
 import com.winllc.certalert.web.dto.DirectoryUserRow;
 import jakarta.validation.Valid;
@@ -14,6 +15,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.springframework.data.jpa.datatables.mapping.DataTablesInput;
 import org.springframework.data.jpa.datatables.mapping.DataTablesOutput;
@@ -41,12 +43,17 @@ public class DirectoryDataTablesController {
 
     private final DirectoryUserRepository userRepository;
     private final DirectoryServerRepository serverRepository;
+    private final ServerContactRepository contactRepository;
     private final Clock clock;
 
     public DirectoryDataTablesController(
-            DirectoryUserRepository userRepository, DirectoryServerRepository serverRepository, Clock clock) {
+            DirectoryUserRepository userRepository,
+            DirectoryServerRepository serverRepository,
+            ServerContactRepository contactRepository,
+            Clock clock) {
         this.userRepository = userRepository;
         this.serverRepository = serverRepository;
+        this.contactRepository = contactRepository;
         this.clock = clock;
     }
 
@@ -78,7 +85,27 @@ public class DirectoryDataTablesController {
                 certificateFilter(certificateStatus, expired, expiringWithinDays, hasCertificates);
         filter = filter.and(pointOfContactFilter(poc != null ? poc : pocEmail, pocUserId));
 
-        return serverRepository.findAll(input, filter, null, DirectoryServerRow::from);
+        return withContactCounts(serverRepository.findAll(input, filter, null, DirectoryServerRow::from));
+    }
+
+    /**
+     * Fills in how many contacts each row on this page has.
+     *
+     * <p>One query for the page, rather than a count subquery mapped onto the entity: that
+     * would be the same count, charged to every select of a server anywhere in the
+     * application, the hourly sweep of a hundred thousand of them included.
+     */
+    private DataTablesOutput<DirectoryServerRow> withContactCounts(DataTablesOutput<DirectoryServerRow> output) {
+        List<DirectoryServerRow> rows = output.getData();
+        if (rows == null || rows.isEmpty()) {
+            return output;
+        }
+        Map<Long, Integer> counts = ServerContactRepository.asMap(
+                contactRepository.countByServerIdIn(rows.stream().map(DirectoryServerRow::id).toList()));
+        output.setData(rows.stream()
+                .map(row -> row.withManagedContactCount(counts.getOrDefault(row.id(), 0)))
+                .toList());
+        return output;
     }
 
     /**
@@ -97,12 +124,10 @@ public class DirectoryDataTablesController {
         if (pocUserId == null) {
             return DirectorySpecifications.unfiltered();
         }
+        // A person with no name or address of any kind can still be a contact: one added
+        // here is linked to them by id, which is why the id goes to the specification too.
         Set<String> identifiers = userRepository.findIdentifiersById(pocUserId);
-        // A user who does not exist, or who the directory gives no name or address, is the
-        // contact for nothing. Saying so beats dropping the filter and showing every server.
-        return identifiers.isEmpty()
-                ? DirectorySpecifications.matchNothing()
-                : DirectorySpecifications.pointOfContactAnyOf(identifiers);
+        return DirectorySpecifications.pointOfContactOf(pocUserId, identifiers);
     }
 
     private <T extends DirectoryEntry> Specification<T> certificateFilter(

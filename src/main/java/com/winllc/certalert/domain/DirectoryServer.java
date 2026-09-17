@@ -10,6 +10,7 @@ import jakarta.persistence.ForeignKey;
 import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import org.hibernate.annotations.BatchSize;
@@ -108,6 +109,14 @@ public class DirectoryServer extends DirectoryEntry {
     @OneToMany(mappedBy = "server", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<CachedCertificate> certificates = new ArrayList<>();
 
+    /**
+     * Points of contact added here rather than scraped. Kept apart from {@link #serverPocs}
+     * precisely so a sweep, which replaces that set wholesale, cannot delete them.
+     */
+    @OneToMany(mappedBy = "server", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("addedAt, id")
+    private List<ServerContact> managedContacts = new ArrayList<>();
+
     protected DirectoryServer() {
         // for JPA
     }
@@ -132,6 +141,18 @@ public class DirectoryServer extends DirectoryEntry {
 
     public Set<String> getServerPocs() {
         return serverPocs;
+    }
+
+    public List<ServerContact> getManagedContacts() {
+        return managedContacts;
+    }
+
+    public void addManagedContact(ServerContact contact) {
+        managedContacts.add(contact);
+    }
+
+    public boolean removeManagedContact(ServerContact contact) {
+        return managedContacts.remove(contact);
     }
 
     /** Replaces the contact list, normalising case and refreshing the display column. */

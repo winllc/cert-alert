@@ -3,7 +3,13 @@ package com.winllc.certalert.repository;
 import com.winllc.certalert.domain.CertificateStatus;
 import com.winllc.certalert.domain.DirectoryEntry;
 import com.winllc.certalert.domain.DirectoryServer;
+import com.winllc.certalert.domain.ServerContact;
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
 import jakarta.persistence.criteria.Join;
+import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Subquery;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Collection;
@@ -79,7 +85,8 @@ public final class DirectorySpecifications {
     }
 
     /**
-     * Servers whose {@code serverPOC} matches any of these values.
+     * Servers whose contacts include any of these values, from either place a contact comes
+     * from: the directory's {@code serverPOC}, and the contacts managed here.
      *
      * <p>This is how a person is resolved to their servers. The FSD schema defines
      * {@code serverPOC} as the <em>name</em> of the responsible person or organization, but
@@ -88,20 +95,87 @@ public final class DirectorySpecifications {
      * name. See {@code DirectoryUser.identifiers}.
      */
     public static Specification<DirectoryServer> pointOfContactAnyOf(Collection<String> values) {
-        if (values == null || values.isEmpty()) {
+        List<String> normalised = normalise(values);
+        if (normalised.isEmpty()) {
             return unfiltered();
         }
-        List<String> normalised = values.stream()
+        return (root, query, builder) -> builder.or(
+                scrapedContactIn(root, query, builder, normalised),
+                managedContactIn(root, query, builder, normalised, null));
+    }
+
+    /**
+     * The servers a particular person is the point of contact for.
+     *
+     * <p>Their identifiers match a directory contact or an address somebody typed; their id
+     * matches a managed contact that was linked to them, which is the only match that stays
+     * right when they are renamed or their address changes.
+     */
+    public static Specification<DirectoryServer> pointOfContactOf(Long userId, Collection<String> identifiers) {
+        List<String> normalised = normalise(identifiers);
+        if (userId == null && normalised.isEmpty()) {
+            return matchNothing();
+        }
+        return (root, query, builder) -> builder.or(
+                normalised.isEmpty()
+                        ? builder.disjunction()
+                        : scrapedContactIn(root, query, builder, normalised),
+                managedContactIn(root, query, builder, normalised, userId));
+    }
+
+    /**
+     * Matching through an {@code exists} rather than a join, because a server can hold both
+     * a directory contact and a managed one naming the same person. A join would return
+     * that server once per match, which shows a duplicate row and inflates the count the
+     * search table renders beside it.
+     */
+    private static Predicate scrapedContactIn(
+            Root<DirectoryServer> root, CriteriaQuery<?> query, CriteriaBuilder builder, List<String> values) {
+
+        Subquery<Integer> subquery = query.subquery(Integer.class);
+        Root<DirectoryServer> server = subquery.from(DirectoryServer.class);
+        Join<DirectoryServer, String> contacts = server.join("serverPocs");
+        return builder.exists(subquery
+                .select(builder.literal(1))
+                .where(builder.equal(server, root), builder.lower(contacts).in(values)));
+    }
+
+    /** The same over the contacts managed here: by address, by the person linked, or both. */
+    private static Predicate managedContactIn(
+            Root<DirectoryServer> root,
+            CriteriaQuery<?> query,
+            CriteriaBuilder builder,
+            List<String> values,
+            Long userId) {
+
+        Subquery<Integer> subquery = query.subquery(Integer.class);
+        Root<ServerContact> contact = subquery.from(ServerContact.class);
+
+        List<Predicate> matches = new java.util.ArrayList<>();
+        if (!values.isEmpty()) {
+            matches.add(builder.lower(contact.get("email")).in(values));
+        }
+        if (userId != null) {
+            matches.add(builder.equal(contact.get("user").get("id"), userId));
+        }
+        if (matches.isEmpty()) {
+            return builder.disjunction();
+        }
+        return builder.exists(subquery
+                .select(builder.literal(1))
+                .where(
+                        builder.equal(contact.get("server"), root),
+                        builder.or(matches.toArray(new Predicate[0]))));
+    }
+
+    private static List<String> normalise(Collection<String> values) {
+        if (values == null) {
+            return List.of();
+        }
+        return values.stream()
                 .filter(value -> value != null && !value.isBlank())
                 .map(value -> value.trim().toLowerCase(Locale.ROOT))
                 .distinct()
                 .toList();
-        if (normalised.isEmpty()) {
-            return unfiltered();
-        }
-        return (root, query, builder) -> {
-            Join<DirectoryServer, String> contacts = root.join("serverPocs");
-            return builder.lower(contacts).in(normalised);
-        };
     }
 }

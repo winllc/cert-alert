@@ -211,6 +211,12 @@ cert-alert:
     # Everyone else who signs in can read the tables but cannot trigger jobs.
     admin-identifiers: []
 
+    # Who may edit a server's points of contact: ADMIN or AUTHENTICATED. A contact decides
+    # who hears that a certificate is about to expire, which is routing rather than
+    # annotation - so administrators by default. Open it up where the people who run the
+    # servers are expected to keep their own contacts current.
+    contact-editors: ADMIN
+
     x509:
       enabled: true
       # Match the presented certificate against the ones the directory publishes, by

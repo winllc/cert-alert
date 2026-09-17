@@ -15,6 +15,7 @@ import com.winllc.certalert.ldap.ServerField;
 import com.winllc.certalert.ldap.UserField;
 import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.DirectoryUserRepository;
+import com.winllc.certalert.repository.ServerContactRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import java.time.Instant;
@@ -24,6 +25,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -49,6 +51,7 @@ public class DirectoryPersistenceService {
     private final CertificateStatusEvaluator evaluator;
     private final AlertDispatcher alertDispatcher;
     private final LdapProperties ldapProperties;
+    private final ServerContactRepository contactRepository;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -59,13 +62,15 @@ public class DirectoryPersistenceService {
             CertificateParser certificateParser,
             CertificateStatusEvaluator evaluator,
             AlertDispatcher alertDispatcher,
-            LdapProperties ldapProperties) {
+            LdapProperties ldapProperties,
+            ServerContactRepository contactRepository) {
         this.userRepository = userRepository;
         this.serverRepository = serverRepository;
         this.certificateParser = certificateParser;
         this.evaluator = evaluator;
         this.alertDispatcher = alertDispatcher;
         this.ldapProperties = ldapProperties;
+        this.contactRepository = contactRepository;
     }
 
     @Transactional
@@ -92,7 +97,7 @@ public class DirectoryPersistenceService {
                     now,
                     OwnerType.USER,
                     displayNameOf(user),
-                    user.getEmail(),
+                    owner::getEmail,
                     owner::addCertificate,
                     owner::removeCertificate);
 
@@ -136,7 +141,7 @@ public class DirectoryPersistenceService {
                     now,
                     OwnerType.SERVER,
                     displayNameOf(server),
-                    server.getServerPocDisplay(),
+                    () -> contactsFor(owner),
                     owner::addCertificate,
                     owner::removeCertificate);
 
@@ -204,6 +209,28 @@ public class DirectoryPersistenceService {
     }
 
     /**
+     * Who to chase about a server: the contacts the directory publishes, and the ones added
+     * here, which are the whole reason somebody adds one.
+     *
+     * <p>Resolved only when an alert is being raised - a transition into a bad state, which
+     * is rare - rather than on every server in every batch. A sweep of a hundred thousand
+     * servers that raises four alerts issues four of these queries.
+     */
+    private String contactsFor(DirectoryServer server) {
+        List<String> contacts = new ArrayList<>();
+        if (server.getServerPocDisplay() != null && !server.getServerPocDisplay().isBlank()) {
+            contacts.add(server.getServerPocDisplay());
+        }
+        if (server.getId() != null) {
+            contactRepository.findAddressesByServerId(server.getId()).stream()
+                    .filter(address -> address != null && !address.isBlank())
+                    .filter(address -> !contacts.contains(address))
+                    .forEach(contacts::add);
+        }
+        return contacts.isEmpty() ? null : String.join(", ", contacts);
+    }
+
+    /**
      * Picks the address shown as primary. A person may hold four network addresses at
      * once, so which one leads is a policy decision, not a fact about the entry.
      */
@@ -246,7 +273,7 @@ public class DirectoryPersistenceService {
             Instant now,
             OwnerType ownerType,
             String ownerName,
-            String contact,
+            Supplier<String> contact,
             Consumer<CachedCertificate> add,
             Consumer<CachedCertificate> remove) {
 
@@ -286,7 +313,7 @@ public class DirectoryPersistenceService {
                         ownerType,
                         ownerName,
                         entity.getDn(),
-                        contact,
+                        contact.get(),
                         certificate,
                         evaluator.severityFor(current, daysUntilExpiry),
                         daysUntilExpiry,

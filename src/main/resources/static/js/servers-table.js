@@ -70,6 +70,10 @@
             detailUrl: function (row) {
                 return '/api/v1/servers/' + row.id + '/certificates';
             },
+            detailPrefix: ServerContacts.placeholder,
+            onDetailShown: function (row, $childRow) {
+                ServerContacts.attach($childRow);
+            },
             entryFields: [
                 ['DN', 'dn'],
                 ['ATO status', 'atoStatus'],
@@ -92,7 +96,16 @@
                 }},
                 {data: 'serverUrl', className: 'mono', render: renderText},
                 {data: 'icServerAddress', className: 'mono', render: renderText},
-                {data: 'serverPocDisplay', render: renderText},
+                // What the directory publishes, plus a count of what was added here. The
+                // editable list is in the expanded row; this is only the signal that it
+                // has something in it.
+                {data: 'serverPocDisplay', render: function (value, type, row) {
+                    if (type !== 'display') { return value; }
+                    var count = row.managedContactCount || 0;
+                    return CertAlert.text(value)
+                        + '<span class="badge bg-blue-lt ms-1 contact-count' + (count ? '' : ' d-none')
+                        + '">' + (count ? '+' + count + ' added' : '') + '</span>';
+                }},
                 {data: 'lifeCycleStatus', render: renderText},
                 // Hidden, not dropped: still searchable, and shown in the expanded row.
                 {data: 'atoStatus', visible: false},

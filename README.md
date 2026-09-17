@@ -223,8 +223,9 @@ tables.
 
 ```
 DirectoryUser ──< CachedCertificate >── DirectoryServer
-     email                                  serverPoc
-       └──────────────── join ─────────────────┘
+     email                                  serverPoc      (from the directory)
+       ├──────────────── join ─────────────────┤
+       └────────── ServerContact ──────────────┘           (added here)
 ```
 
 **`directory_user`** — an IC Person: `uid`, `cn`, `sn`, `givenName`, `displayName`,
@@ -235,6 +236,11 @@ DirectoryUser ──< CachedCertificate >── DirectoryServer
 **`directory_server`** — an IC Non-Person Entity: `cn`, `uid`, `givenName`, `description`,
 `serverURL`, `icServerAddress`, `ATOStatus`, `lifeCycleStatus`, `employeeType`, the same IC
 attributes as a person, and its `serverPOC` contacts.
+
+**`server_contact`** — a point of contact added here rather than scraped: a person in the
+directory, an address, or a person carrying theirs. Kept apart from `serverPOC` precisely
+so a sweep, which replaces that, cannot delete it. See [Managing points of
+contact](#managing-points-of-contact).
 
 **`cached_certificate`** — everything parsed out of a published certificate: subject,
 issuer, serial, validity window, signature and key algorithm, key size, SANs, and the
@@ -372,6 +378,37 @@ their address, and the server resolves it to the full identifier set — so foll
 link finds servers named either way. The free-text box next to it matches a literal
 `serverPOC` value.
 
+### Managing points of contact
+
+`serverPOC` is the directory's, and a sweep replaces it. That is right for a cached copy of
+somebody else's data, and no use at all when the directory's answer is wrong, missing, or
+not yours to change. So a server carries a second list — contacts added here, in
+`server_contact`, which a sweep leaves alone.
+
+Expand a server's row to edit them. A contact is **a person in the directory** or **an
+email address**, and the two meet in the middle: an address the directory knows is linked
+to whoever it belongs to on the way in, so both routes end up as the same row. What that
+link buys is everything a bare string cannot — the person keeps their contact when they are
+renamed, the alert follows their current address, and the **servers →** link finds this
+server among the ones they are responsible for.
+
+```
+directory_server_poc      what the directory publishes, replaced by every sweep
+server_contact            added here, survives a sweep
+                          user_id  → a person, matched by id
+                          email    → an address, matched by value
+```
+
+Both lists count as points of contact everywhere it matters: the contact filter and the
+person-to-servers join match either, and an expiry alert names both. The servers table
+shows the directory's value with a **+n added** badge beside it.
+
+Who may edit is `cert-alert.security.contact-editors`: `ADMIN` by default, because a
+contact decides who hears that a certificate is about to expire. Set it to `AUTHENTICATED`
+where the people who run the servers keep their own contacts current. Reading the list is
+open to anyone signed in, and says which of the two applies so the UI shows the controls
+only to somebody who may use them.
+
 ### Other endpoints
 
 | Method | Path                                | Purpose                                  |
@@ -387,7 +424,10 @@ link finds servers named either way. The free-text box next to it matches a lite
 | `GET`  | `/api/v1/stats/servers`             | Certificate roll-up across servers       |
 | `GET`  | `/api/v1/users/{id}/certificates`   | Cached certificate detail for a person   |
 | `GET`  | `/api/v1/servers/{id}/certificates` | Cached certificate detail for a server   |
-| `GET`  | `/api/v1/servers/{id}/contacts`     | A server's points of contact             |
+| `GET`  | `/api/v1/servers/{id}/contacts`     | Both lists of points of contact          |
+| `POST` | `/api/v1/servers/{id}/contacts`     | Add one: `{"userId":…}` or `{"email":…}` |
+| `DELETE` | `/api/v1/servers/{id}/contacts/{contactId}` | Remove one                   |
+| `GET`  | `/api/v1/users/search?q=`           | People matching, for the contact picker  |
 
 Errors come back as RFC 7807 problem details. Actuator is at `/actuator`
 (`health`, `info`, `metrics`, `loggers`); the LDAP health indicator reports the
@@ -616,7 +656,7 @@ scripts/                 the dummy directory generator
 src/main/java/com/winllc/certalert/
 ├── alert/       notifier SPI, dispatcher, log and email channels
 ├── config/      expiry thresholds, clock, DataTables repository factory
-├── domain/      DirectoryUser, DirectoryServer, CachedCertificate
+├── domain/      DirectoryUser, DirectoryServer, CachedCertificate, ServerContact
 ├── ldap/        attribute mapping, paged streaming directory client
 ├── repository/  DataTables repositories and the filter specifications
 ├── security/    X.509 and directory-password authentication, roles

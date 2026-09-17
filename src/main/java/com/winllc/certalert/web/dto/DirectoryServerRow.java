@@ -4,7 +4,12 @@ import com.winllc.certalert.domain.CertificateStatus;
 import com.winllc.certalert.domain.DirectoryServer;
 import java.time.Instant;
 
-/** One row of the servers table. Field names mirror the entity's property names. */
+/**
+ * One row of the servers table. Field names mirror the entity's property names.
+ *
+ * @param serverPocDisplay what the directory publishes, flattened
+ * @param managedContactCount how many contacts were added here on top of that
+ */
 public record DirectoryServerRow(
         Long id,
         String dn,
@@ -23,6 +28,7 @@ public record DirectoryServerRow(
         Boolean icMember,
         String icNetworks,
         String serverPocDisplay,
+        int managedContactCount,
         String organization,
         String organizationalUnit,
         int certificateCount,
@@ -50,6 +56,8 @@ public record DirectoryServerRow(
                 server.getIcMember(),
                 server.getIcNetworks(),
                 server.getServerPocDisplay(),
+                // Filled in per page of rows; see DirectoryDataTablesController.
+                0,
                 server.getOrganization(),
                 server.getOrganizationalUnit(),
                 server.getCertificateCount(),
@@ -57,5 +65,35 @@ public record DirectoryServerRow(
                 server.getEarliestExpiry(),
                 server.getLatestExpiry(),
                 server.getLastSyncedAt());
+    }
+
+    /** The count is not on the entity, so it arrives after the row is built. */
+    public DirectoryServerRow withManagedContactCount(int count) {
+        return new DirectoryServerRow(
+                id,
+                dn,
+                commonName,
+                uid,
+                givenName,
+                description,
+                serverUrl,
+                icServerAddress,
+                atoStatus,
+                lifeCycleStatus,
+                employeeType,
+                countryOfAffiliation,
+                dutyOrganization,
+                adminOrganization,
+                icMember,
+                icNetworks,
+                serverPocDisplay,
+                count,
+                organization,
+                organizationalUnit,
+                certificateCount,
+                certificateStatus,
+                earliestExpiry,
+                latestExpiry,
+                lastSyncedAt);
     }
 }

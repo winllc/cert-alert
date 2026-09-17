@@ -28,8 +28,34 @@ public class SecurityProperties {
      */
     private List<String> adminIdentifiers = new ArrayList<>();
 
+    /**
+     * Who may edit a server's points of contact.
+     *
+     * <p>Defaults to administrators, because a contact decides who hears that a certificate
+     * is about to expire, and that is routing, not annotation. Set it to
+     * {@code AUTHENTICATED} where the people who run the servers are expected to keep their
+     * own contacts current.
+     */
+    private ContactEditors contactEditors = ContactEditors.ADMIN;
+
     private final X509 x509 = new X509();
     private final Ldap ldap = new Ldap();
+
+    /** Who the write side of the contact endpoints is open to. */
+    public enum ContactEditors {
+        /** Only the configured administrators. */
+        ADMIN,
+        /** Anyone who has signed in. */
+        AUTHENTICATED
+    }
+
+    public ContactEditors getContactEditors() {
+        return contactEditors;
+    }
+
+    public void setContactEditors(ContactEditors contactEditors) {
+        this.contactEditors = contactEditors;
+    }
 
     public boolean isEnabled() {
         return enabled;

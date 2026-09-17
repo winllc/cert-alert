@@ -172,13 +172,4 @@ public class DirectoryApiController {
                 serverRepository.findWithCertificatesById(id).orElseThrow(() -> ResourceNotFoundException.server(id));
         return server.getCertificates().stream().map(CachedCertificateRow::from).toList();
     }
-
-    /** Points of contact for a server, so a row can link through to the people. */
-    @GetMapping("/servers/{id}/contacts")
-    @Transactional(readOnly = true)
-    public List<String> serverContacts(@PathVariable Long id) {
-        DirectoryServer server =
-                serverRepository.findWithPocsById(id).orElseThrow(() -> ResourceNotFoundException.server(id));
-        return List.copyOf(server.getServerPocs());
-    }
 }

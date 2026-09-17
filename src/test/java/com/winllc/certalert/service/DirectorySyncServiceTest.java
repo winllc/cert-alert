@@ -58,6 +58,9 @@ class DirectorySyncServiceTest {
     @Autowired
     private TransactionTemplate transactionTemplate;
 
+    @Autowired
+    private ServerContactService contactService;
+
     @BeforeAll
     static void startDirectory() {
         directory = new EmbeddedDirectory();
@@ -215,6 +218,61 @@ class DirectorySyncServiceTest {
         assertThat(alert.getValue().ownerType()).isEqualTo(OwnerType.USER);
         assertThat(alert.getValue().ownerName()).isEqualTo("Crossing Holder");
         assertThat(alert.getValue().contact()).isEqualTo("crossing@example.gov");
+    }
+
+    /**
+     * The directory owns serverPOC and a sweep replaces it wholesale. A contact added here
+     * is not the directory's to replace, which is the whole reason it lives in its own
+     * table rather than among the scraped values.
+     */
+    @Test
+    void aContactAddedHereSurvivesASweepThatRewritesTheDirectorysOwn() {
+        String userDn = directory.addUser("poc-keeper", "Poc Keeper", "poc.keeper@example.gov");
+        String serverDn = directory.addServer(
+                "poc-server", "https://poc-server.example.gov", new String[] {"first@example.gov"});
+        syncAll();
+
+        Long serverId = serverRepository.findByDn(serverDn).orElseThrow().getId();
+        Long userId = userRepository.findByDn(userDn).orElseThrow().getId();
+        contactService.addUser(serverId, userId, "tester");
+        contactService.addEmail(serverId, "duty.desk@example.gov", "tester");
+
+        // The directory changes its mind about who the contact is.
+        directory.modify(serverDn, "serverPOC", "second@example.gov");
+        syncAll();
+
+        DirectoryServer server = inTransaction(() -> {
+            DirectoryServer loaded = serverRepository.findByDn(serverDn).orElseThrow();
+            loaded.getServerPocs().size();
+            return loaded;
+        });
+        assertThat(server.getServerPocs()).containsExactly("second@example.gov");
+        assertThat(contactService.list(serverId)).hasSize(2);
+        assertThat(contactService.addressesFor(serverId))
+                .containsExactlyInAnyOrder("poc.keeper@example.gov", "duty.desk@example.gov");
+    }
+
+    /** An alert about a server goes to the contacts added here as well as the published ones. */
+    @Test
+    void anAlertNamesTheContactsAddedHereAlongsideTheDirectorys() {
+        String serverDn = directory.addServer(
+                "alerting-server",
+                "https://alerting.example.gov",
+                new String[] {"published@example.gov"},
+                TestCertificates.expiringIn("alerting.example.gov", Duration.ofSeconds(2)));
+        syncAll();
+        verify(alertDispatcher, never()).dispatch(any());
+
+        Long serverId = serverRepository.findByDn(serverDn).orElseThrow().getId();
+        contactService.addEmail(serverId, "on.call@example.gov", "tester");
+
+        await(Duration.ofSeconds(3));
+        syncAll();
+
+        ArgumentCaptor<CertificateAlert> alert = ArgumentCaptor.forClass(CertificateAlert.class);
+        verify(alertDispatcher).dispatch(alert.capture());
+        assertThat(alert.getValue().ownerType()).isEqualTo(OwnerType.SERVER);
+        assertThat(alert.getValue().contact()).contains("published@example.gov", "on.call@example.gov");
     }
 
     @Test

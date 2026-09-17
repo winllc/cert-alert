@@ -216,8 +216,8 @@
         return body ? '<div class="cert"><table>' + body + '</table></div>' : '';
     }
 
-    function renderCertificates(certificates, row, entryFields) {
-        var entry = entryFields ? entryBlock(row, entryFields) : '';
+    function renderCertificates(certificates, row, entryFields, prefix) {
+        var entry = (prefix || '') + (entryFields ? entryBlock(row, entryFields) : '');
         if (!certificates || certificates.length === 0) {
             return '<div class="cert-detail">' + entry
                 + '<div class="text-secondary">This entry publishes no certificates.</div></div>';
@@ -237,6 +237,8 @@
      * @param config.filterInputs  elements that re-apply the filters when changed
      * @param config.detailUrl     given a row, the URL of its cached certificates
      * @param config.entryFields   [label, field] pairs shown above the certificates
+     * @param config.detailPrefix  HTML to put at the top of the expanded row
+     * @param config.onDetailShown called once that row is in the document, to wire it up
      */
     function initTable(config) {
         var $table = $(config.selector);
@@ -313,7 +315,11 @@
             row.child('<div class="cert-detail text-secondary">Loading…</div>').show();
             $.getJSON(config.detailUrl(row.data()))
                 .done(function (certificates) {
-                    row.child(renderCertificates(certificates, row.data(), config.entryFields)).show();
+                    var prefix = config.detailPrefix ? config.detailPrefix(row.data()) : '';
+                    row.child(renderCertificates(certificates, row.data(), config.entryFields, prefix)).show();
+                    if (config.onDetailShown) {
+                        config.onDetailShown(row, $(row.child()));
+                    }
                 })
                 .fail(function (xhr) {
                     if (handleUnauthorized(xhr)) {
@@ -342,6 +348,7 @@
         refreshAll: refreshAll,
         loadStats: loadStats,
         escapeHtml: escapeHtml,
+        handleUnauthorized: handleUnauthorized,
         text: text,
         icon: icon,
         formatDate: formatDate,

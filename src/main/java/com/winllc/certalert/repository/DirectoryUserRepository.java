@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import org.springframework.data.jpa.datatables.repository.DataTablesRepository;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -40,6 +41,20 @@ public interface DirectoryUserRepository extends DataTablesRepository<DirectoryU
      */
     @Query("select distinct u from DirectoryUser u join u.identifiers i where i = :identifier")
     List<DirectoryUser> findByIdentifier(@Param("identifier") String identifier);
+
+    /**
+     * People whose name, uid or any of their addresses contains this text, for the contact
+     * picker. Identifiers are already lowercased, so the caller lowercases the term and the
+     * match needs no function on the column.
+     *
+     * <p>A contains match cannot use the index on identifier. It is bounded by the page
+     * size and by how much somebody types, which is enough at the scale this is asked at -
+     * a directory of a few hundred thousand people that wants it faster wants a trigram
+     * index on {@code directory_user_identifier.identifier}.
+     */
+    @Query("select distinct u from DirectoryUser u join u.identifiers i "
+            + "where i like concat('%', :term, '%') order by u.displayName, u.uid")
+    List<DirectoryUser> searchByIdentifier(@Param("term") String term, Pageable pageable);
 
     long countByLastSyncedAtBefore(Instant cutoff);
 

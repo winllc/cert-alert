@@ -98,3 +98,87 @@ table.datatable tfoot th {
     font-size: 0.6rem;
     vertical-align: middle;
 }
+
+/* Points of contact, in the expanded row of the servers table. */
+.contacts {
+    padding-bottom: 0.75rem;
+    margin-bottom: 0.75rem;
+    border-bottom: 1px solid var(--tblr-border-color);
+}
+
+.contacts-heading {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+}
+
+.contacts-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+    margin-bottom: 0.35rem;
+}
+
+.contacts-label {
+    width: 9rem;
+    flex: none;
+    font-size: 0.75rem;
+    color: var(--tblr-secondary);
+}
+
+.contact-badge {
+    display: inline-flex;
+    align-items: center;
+    white-space: normal;
+    text-align: left;
+}
+
+.contact-badge .icon {
+    width: 0.85rem;
+    height: 0.85rem;
+}
+
+.contact-badge .btn-close {
+    font-size: 0.55rem;
+}
+
+.contacts-add {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    padding-left: 9rem;
+}
+
+/* The suggestion list hangs off the input rather than the page. */
+.contacts-search {
+    position: relative;
+    width: 22rem;
+    max-width: 100%;
+}
+
+.contacts-search .contact-suggestions {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    width: 100%;
+    max-height: 16rem;
+    overflow-y: auto;
+    z-index: 30;
+}
+
+.contact-message {
+    font-size: 0.8125rem;
+}
+
+@media (max-width: 40rem) {
+    .contacts-label {
+        width: 100%;
+    }
+
+    .contacts-add {
+        padding-left: 0;
+        flex-wrap: wrap;
+    }
+}

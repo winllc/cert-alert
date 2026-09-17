@@ -1,5 +1,6 @@
 package com.winllc.certalert.web;
 
+import com.winllc.certalert.service.ContactAlreadyExistsException;
 import com.winllc.certalert.service.ResourceNotFoundException;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -26,6 +27,24 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     public ProblemDetail handleNotFound(ResourceNotFoundException e) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
         problem.setTitle("Resource not found");
+        return problem;
+    }
+
+    @ExceptionHandler(ContactAlreadyExistsException.class)
+    public ProblemDetail handleDuplicate(ContactAlreadyExistsException e) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
+        problem.setTitle("Already a point of contact");
+        return problem;
+    }
+
+    /**
+     * A request the application rejected on its own terms - an address that is not one, say.
+     * The message is the point of it, so unlike the unexpected case it is passed through.
+     */
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ProblemDetail handleInvalid(IllegalArgumentException e) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, e.getMessage());
+        problem.setTitle("Invalid request");
         return problem;
     }
 

@@ -9,6 +9,9 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.ldap.core.support.BaseLdapPathContextSource;
 import org.springframework.security.authentication.AuthenticationProvider;
+import org.springframework.security.authorization.AuthenticatedAuthorizationManager;
+import org.springframework.security.authorization.AuthorityAuthorizationManager;
+import org.springframework.security.authorization.AuthorizationManager;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.ldap.authentication.BindAuthenticator;
@@ -21,6 +24,7 @@ import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
 import org.springframework.security.web.authentication.preauth.x509.SubjectX500PrincipalExtractor;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.security.web.access.intercept.RequestAuthorizationContext;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 
 /**
@@ -49,6 +53,13 @@ public class SecurityConfig {
         "/login", "/css/**", "/js/**", "/webjars/**", "/favicon.ico", "/error"
     };
 
+    /** Administrators, or anyone signed in, depending on how the application is configured. */
+    private static AuthorizationManager<RequestAuthorizationContext> contactEditors(SecurityProperties properties) {
+        return properties.getContactEditors() == SecurityProperties.ContactEditors.AUTHENTICATED
+                ? AuthenticatedAuthorizationManager.authenticated()
+                : AuthorityAuthorizationManager.hasRole("ADMIN");
+    }
+
     @Bean
     public SecurityFilterChain filterChain(
             HttpSecurity http,
@@ -70,6 +81,13 @@ public class SecurityConfig {
                 // not something a reader gets to do.
                 .requestMatchers(HttpMethod.POST, "/api/v1/sync/**", "/api/v1/changelog/**")
                 .hasRole("ADMIN")
+                // Editing a server's points of contact decides who hears about an expiry.
+                // Administrators by default; see cert-alert.security.contact-editors.
+                .requestMatchers(
+                        HttpMethod.POST, "/api/v1/servers/*/contacts", "/api/v1/servers/*/contacts/**")
+                .access(contactEditors(properties))
+                .requestMatchers(HttpMethod.DELETE, "/api/v1/servers/*/contacts/**")
+                .access(contactEditors(properties))
                 .anyRequest()
                 .authenticated());
 
