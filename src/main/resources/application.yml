@@ -2,6 +2,10 @@ spring:
   application:
     name: cert-alert
 
+  lifecycle:
+    # How long graceful shutdown (see server.shutdown) may take before it is cut short.
+    timeout-per-shutdown-phase: 30s
+
   # Default datasource is an embedded H2 file database so the app runs with no setup.
   # Point these at PostgreSQL (see application-postgres.yml) for anything real.
   datasource:
@@ -45,6 +49,10 @@ server:
   error:
     include-message: never
 
+  # A container stops with SIGTERM. Finishing in-flight requests, and letting the changelog
+  # connector stop between changes rather than mid-batch, is worth a few seconds.
+  shutdown: graceful
+
   # X.509 needs TLS with client authentication. "want" is deliberate: with "need", a
   # browser holding no certificate cannot even reach the login form, so the password
   # fallback becomes unreachable.
@@ -69,6 +77,12 @@ management:
   endpoint:
     health:
       show-details: when-authorized
+      # Liveness and readiness as their own endpoints. An orchestrator should probe these,
+      # not the aggregate: the aggregate turns DOWN when the directory is unreachable, and
+      # that is not a reason to restart a process that is still serving cached data
+      # perfectly well.
+      probes:
+        enabled: true
 
 cert-alert:
   # Certificates expiring inside this window are reported as EXPIRING_SOON.

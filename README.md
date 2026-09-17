@@ -74,6 +74,62 @@ built jar.
 java -jar build/libs/cert-alert-0.0.1-SNAPSHOT.jar
 ```
 
+### As a container
+
+```bash
+docker build -t cert-alert:latest .
+```
+
+A three-stage build: the jar is built, split into layers, and reassembled into a runtime
+image. The split is what makes rebuilds cheap — the dependency layer is ~78MB and changes
+only when `build.gradle.kts` does, while the application layer is a couple of hundred
+kilobytes and changes on every commit.
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e SPRING_PROFILES_ACTIVE=postgres \
+  -e CERT_ALERT_DB_URL=jdbc:postgresql://db:5432/certalert \
+  -e CERT_ALERT_DB_USER=certalert \
+  -e CERT_ALERT_DB_PASSWORD=... \
+  -e CERT_ALERT_LDAP_URL=ldaps://directory.example.gov:636 \
+  -e CERT_ALERT_LDAP_BASE=dc=example,dc=gov \
+  -e CERT_ALERT_LDAP_USER='cn=cert-alert,ou=services,dc=example,dc=gov' \
+  -e CERT_ALERT_LDAP_PASSWORD=... \
+  cert-alert:latest
+```
+
+Or with a database alongside it:
+
+```bash
+CERT_ALERT_LDAP_URL=ldaps://directory.example.gov:636 \
+CERT_ALERT_LDAP_BASE=dc=example,dc=gov \
+docker compose up --build
+```
+
+Compose brings up PostgreSQL and waits for it to be healthy. It deliberately does **not**
+bring up an LDAP server: this application is an index over somebody's existing directory,
+and a stand-in without the IC FSD schema would prove nothing.
+
+Notes on the image:
+
+- It runs as **uid 1001**, not root. Nothing it does needs privilege.
+- `JAVA_OPTS` defaults to `-XX:MaxRAMPercentage=75.0`, so the heap follows whatever limit
+  the orchestrator sets rather than a number baked in at build time.
+- The JVM is PID 1 and receives `SIGTERM` directly, which is what lets Spring shut down
+  gracefully and the changelog connector stop between changes rather than mid-batch.
+- **Probe `/actuator/health/liveness` and `/actuator/health/readiness`, not
+  `/actuator/health`.** The aggregate turns `DOWN` when the directory is unreachable, and
+  that is not a reason to restart a process still serving cached data perfectly well. The
+  image's own `HEALTHCHECK` is for plain `docker run`; Kubernetes ignores it and wants its
+  own probes.
+- Keystores for X.509 belong in a mounted volume or a secret. `.dockerignore` excludes
+  `*.p12`, `*.jks`, `*.pem` and `*.key` so one cannot be baked in by accident.
+- The image cannot run the `dev` profile: its embedded sample directory is a
+  `developmentOnly` dependency and is deliberately not in the jar.
+
+Tests are not run during the image build — CI runs them, and they need an in-memory LDAP
+server and a database. Build with `--build-arg RUN_TESTS=true` to run them anyway.
+
 ### Against a real directory and PostgreSQL
 
 ```bash
@@ -481,6 +537,8 @@ class SlackAlertNotifier implements AlertNotifier {
 ## Project layout
 
 ```
+Dockerfile               three-stage image build
+docker-compose.yml       the image with a PostgreSQL alongside it
 src/main/java/com/winllc/certalert/
 ├── alert/       notifier SPI, dispatcher, log and email channels
 ├── config/      expiry thresholds, clock, DataTables repository factory

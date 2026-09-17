@@ -1,0 +1,57 @@
+# A Postgres-backed run of cert-alert, for trying the image out.
+#
+# No LDAP server here: this application is an index over somebody's existing directory, and
+# a stand-in would need the IC FSD schema to be worth anything. Point CERT_ALERT_LDAP_* at
+# a real one - see the README for which attributes it reads.
+#
+#   CERT_ALERT_LDAP_URL=ldaps://directory.example.gov:636 \
+#   CERT_ALERT_LDAP_BASE=dc=example,dc=gov \
+#   docker compose up --build
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: certalert
+      POSTGRES_USER: certalert
+      POSTGRES_PASSWORD: ${CERT_ALERT_DB_PASSWORD:-certalert}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # The application waits for this rather than crash-looping on an empty database.
+      test: ["CMD-SHELL", "pg_isready -U certalert -d certalert"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  cert-alert:
+    build:
+      context: .
+      args:
+        REVISION: ${GIT_REVISION:-unknown}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: postgres
+      CERT_ALERT_DB_URL: jdbc:postgresql://postgres:5432/certalert
+      CERT_ALERT_DB_USER: certalert
+      CERT_ALERT_DB_PASSWORD: ${CERT_ALERT_DB_PASSWORD:-certalert}
+      CERT_ALERT_LDAP_URL: ${CERT_ALERT_LDAP_URL:-ldap://localhost:389}
+      CERT_ALERT_LDAP_BASE: ${CERT_ALERT_LDAP_BASE:-}
+      CERT_ALERT_LDAP_USER: ${CERT_ALERT_LDAP_USER:-}
+      CERT_ALERT_LDAP_PASSWORD: ${CERT_ALERT_LDAP_PASSWORD:-}
+      # Whoever should be able to trigger jobs; any value the directory knows them by.
+      CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS: ${CERT_ALERT_ADMINS:-}
+    ports:
+      - "8080:8080"
+    # X.509 client certificates need TLS, which needs keystores. Mount them read-only
+    # rather than baking them into the image, and set CERT_ALERT_TLS_ENABLED=true plus the
+    # keystore variables. Commented out so a first run does not need a ./tls directory.
+    # volumes:
+    #   - ./tls:/etc/cert-alert/tls:ro
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

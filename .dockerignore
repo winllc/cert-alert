@@ -1,0 +1,27 @@
+# Build output: the image builds the jar itself, and copying a host build in would both
+# bloat the context and risk shipping something built against a different JDK.
+build/
+.gradle/
+out/
+
+# Runtime artefacts that must never reach an image.
+data/
+logs/
+*.log
+
+.git/
+.github/
+.idea/
+.vscode/
+*.iml
+
+# Keys and certificates belong in a mounted volume or a secret, never baked in.
+*.p12
+*.jks
+*.pem
+*.key
+
+README.md
+Dockerfile
+.dockerignore
+docker-compose.yml
