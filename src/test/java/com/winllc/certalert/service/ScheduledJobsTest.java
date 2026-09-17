@@ -184,6 +184,7 @@ class ScheduledJobsTest {
                 cachedAt.minus(Duration.ofDays(365)),
                 notAfter,
                 "SHA256withRSA",
+                "SHA-256",
                 "RSA",
                 2048,
                 null,

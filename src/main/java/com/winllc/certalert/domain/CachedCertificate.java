@@ -36,7 +36,11 @@ import java.time.Instant;
             @Index(name = "idx_cached_certificate_server", columnList = "server_id"),
             @Index(name = "idx_cached_certificate_not_after", columnList = "not_after"),
             @Index(name = "idx_cached_certificate_status", columnList = "status"),
-            @Index(name = "idx_cached_certificate_fingerprint", columnList = "sha256_fingerprint")
+            @Index(name = "idx_cached_certificate_fingerprint", columnList = "sha256_fingerprint"),
+            // For reporting on what the directory is signing with: which entries are still
+            // on a weak digest, and which on an undersized key.
+            @Index(name = "idx_cached_certificate_hash_algorithm", columnList = "hash_algorithm"),
+            @Index(name = "idx_cached_certificate_key", columnList = "key_algorithm, key_size")
         })
 public class CachedCertificate {
 
@@ -74,12 +78,23 @@ public class CachedCertificate {
     @Column(name = "not_after")
     private Instant notAfter;
 
+    /** As the provider names it: {@code SHA256withRSA}. Two facts in one string. */
     @Column(name = "signature_algorithm", length = 100)
     private String signatureAlgorithm;
 
+    /**
+     * The digest half of that, on its own and canonically spelled - {@code SHA-256} - so a
+     * report can group and filter on it without pattern-matching the name. Null where the
+     * scheme has no separate digest to name, which is the Ed25519 and Ed448 case.
+     */
+    @Column(name = "hash_algorithm", length = 32)
+    private String hashAlgorithm;
+
+    /** The public key's algorithm: {@code RSA}, {@code EC}, {@code DSA}. */
     @Column(name = "key_algorithm", length = 50)
     private String keyAlgorithm;
 
+    /** Its size in bits: the modulus for RSA and DSA, the field size for EC. */
     @Column(name = "key_size")
     private Integer keySize;
 
@@ -105,6 +120,7 @@ public class CachedCertificate {
             Instant notBefore,
             Instant notAfter,
             String signatureAlgorithm,
+            String hashAlgorithm,
             String keyAlgorithm,
             Integer keySize,
             String subjectAlternativeNames,
@@ -116,6 +132,7 @@ public class CachedCertificate {
         this.notBefore = notBefore;
         this.notAfter = notAfter;
         this.signatureAlgorithm = signatureAlgorithm;
+        this.hashAlgorithm = hashAlgorithm;
         this.keyAlgorithm = keyAlgorithm;
         this.keySize = keySize;
         this.subjectAlternativeNames = subjectAlternativeNames;
@@ -176,6 +193,10 @@ public class CachedCertificate {
 
     public String getSignatureAlgorithm() {
         return signatureAlgorithm;
+    }
+
+    public String getHashAlgorithm() {
+        return hashAlgorithm;
     }
 
     public String getKeyAlgorithm() {

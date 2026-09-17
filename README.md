@@ -246,10 +246,31 @@ contact](#managing-points-of-contact).
 an alert going out. See [The audit trail](#the-audit-trail).
 
 **`cached_certificate`** — everything parsed out of a published certificate: subject,
-issuer, serial, validity window, signature and key algorithm, key size, SANs, and the
-SHA-256 fingerprint of the DER. A certificate belongs to exactly one owner, user or
-server, enforced by a check constraint. The fingerprint is its identity, which is how a
-re-sync recognises a certificate it already holds and leaves it alone.
+issuer, serial, validity window, the algorithms it uses, SANs, and the SHA-256 fingerprint
+of the DER. A certificate belongs to exactly one owner, user or server, enforced by a check
+constraint. The fingerprint is its identity, which is how a re-sync recognises a
+certificate it already holds and leaves it alone.
+
+Four of those columns are kept for reporting on the directory's cryptography rather than
+for anything the application itself does with them:
+
+| Column | Example | |
+|--------|---------|---|
+| `key_algorithm` | `RSA`, `EC`, `DSA` | what the public key is |
+| `key_size` | `2048`, `384` | its size in bits: the modulus for RSA and DSA, the field size for EC — which is also what names the curve |
+| `signature_algorithm` | `SHA256withRSA` | as the provider names it: two facts in one string |
+| `hash_algorithm` | `SHA-256` | the digest half of that, on its own and canonically spelled |
+
+`hash_algorithm` is stored separately because a report asking what is still signed with
+SHA-1 should not have to pattern-match a name — and pattern-matching would miss RSASSA-PSS
+entirely, where the algorithm name carries no digest at all and the one actually used is in
+the signature parameters. It is null where the scheme has no separate digest to name, which
+is the Ed25519 and Ed448 case: there the hash is part of the scheme rather than a choice
+made about the certificate, and recording one would invite a report to compare it with
+things that are choices.
+
+Nothing here judges a certificate on any of this. It records what a certificate is so that
+a report can.
 
 Both object types carry a denormalised roll-up — `certificate_count`,
 `certificate_status`, `earliest_expiry`, `latest_expiry` — refreshed on every sync. The

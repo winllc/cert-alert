@@ -49,6 +49,7 @@ public class CertificateParser {
                 certificate.getNotBefore().toInstant(),
                 certificate.getNotAfter().toInstant(),
                 certificate.getSigAlgName(),
+                CertificateAlgorithms.hashAlgorithm(certificate),
                 certificate.getPublicKey().getAlgorithm(),
                 keySize(certificate.getPublicKey()),
                 subjectAlternativeNames(certificate),

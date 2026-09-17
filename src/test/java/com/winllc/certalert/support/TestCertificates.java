@@ -59,6 +59,42 @@ public final class TestCertificates {
     }
 
     public static X509Certificate certificate(String commonName, Instant notBefore, Instant notAfter) {
+        return certificate(commonName, notBefore, notAfter, "SHA256withRSA", KEY_PAIR);
+    }
+
+    /**
+     * A certificate signed with a named algorithm, and optionally a key of another kind -
+     * for the tests about what is cached <em>about</em> a certificate rather than when it
+     * expires.
+     */
+    public static byte[] der(String commonName, String signatureAlgorithm, KeyPair keyPair) {
+        try {
+            Instant now = Instant.now();
+            return certificate(
+                            commonName,
+                            now.minus(Duration.ofDays(1)),
+                            now.plus(Duration.ofDays(365)),
+                            signatureAlgorithm,
+                            keyPair == null ? KEY_PAIR : keyPair)
+                    .getEncoded();
+        } catch (CertificateEncodingException e) {
+            throw new IllegalStateException("Could not encode test certificate", e);
+        }
+    }
+
+    /** A key pair of a given kind, for the same reason. */
+    public static KeyPair keyPair(String algorithm, int size) {
+        try {
+            KeyPairGenerator generator = KeyPairGenerator.getInstance(algorithm, BouncyCastleProvider.PROVIDER_NAME);
+            generator.initialize(size);
+            return generator.generateKeyPair();
+        } catch (java.security.GeneralSecurityException e) {
+            throw new IllegalStateException("Could not generate a " + algorithm + " key pair", e);
+        }
+    }
+
+    private static X509Certificate certificate(
+            String commonName, Instant notBefore, Instant notAfter, String signatureAlgorithm, KeyPair keyPair) {
         try {
             X500Name name = new X500Name("CN=" + commonName);
             JcaX509v3CertificateBuilder builder = new JcaX509v3CertificateBuilder(
@@ -67,14 +103,14 @@ public final class TestCertificates {
                     Date.from(notBefore),
                     Date.from(notAfter),
                     name,
-                    KEY_PAIR.getPublic());
+                    keyPair.getPublic());
             builder.addExtension(
                     Extension.subjectAlternativeName,
                     false,
                     new GeneralNames(new GeneralName(GeneralName.dNSName, commonName)));
-            ContentSigner signer = new JcaContentSignerBuilder("SHA256withRSA")
+            ContentSigner signer = new JcaContentSignerBuilder(signatureAlgorithm)
                     .setProvider(BouncyCastleProvider.PROVIDER_NAME)
-                    .build(KEY_PAIR.getPrivate());
+                    .build(keyPair.getPrivate());
             return new JcaX509CertificateConverter()
                     .setProvider(BouncyCastleProvider.PROVIDER_NAME)
                     .getCertificate(builder.build(signer));

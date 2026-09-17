@@ -196,6 +196,7 @@
             ['Key', text([certificate.keyAlgorithm, certificate.keySize ? certificate.keySize + ' bit' : null]
                 .filter(Boolean).join(' '))],
             ['Signature', text(certificate.signatureAlgorithm)],
+            ['Hash', text(certificate.hashAlgorithm)],
             ['SANs', text(certificate.subjectAlternativeNames)],
             ['SHA-256', '<span class="mono">' + text(certificate.sha256Fingerprint) + '</span>']
         ];
