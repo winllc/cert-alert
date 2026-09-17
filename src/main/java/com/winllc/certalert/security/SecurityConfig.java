@@ -99,6 +99,14 @@ public class SecurityConfig {
                 .requestMatchers(
                         HttpMethod.DELETE, "/api/v1/servers/*/contacts/**", "/api/v1/users/*/addresses/**")
                 .access(contactEditors(properties))
+                // Projects are the same kind of thing: data this application keeps
+                // alongside the directory, curated by the same people.
+                .requestMatchers(HttpMethod.POST, "/api/v1/projects", "/api/v1/projects/**")
+                .access(contactEditors(properties))
+                .requestMatchers(HttpMethod.PUT, "/api/v1/projects/**")
+                .access(contactEditors(properties))
+                .requestMatchers(HttpMethod.DELETE, "/api/v1/projects/**")
+                .access(contactEditors(properties))
                 .anyRequest()
                 .authenticated());
 

@@ -168,6 +168,25 @@ public final class DirectorySpecifications {
                         builder.or(matches.toArray(new Predicate[0]))));
     }
 
+    /**
+     * Entries in a particular project. An exists rather than a join, for the same reason as
+     * the contacts: a join would multiply rows and inflate the count beside the table.
+     */
+    public static <T extends DirectoryEntry> Specification<T> inProject(Long projectId, String collection) {
+        if (projectId == null) {
+            return unfiltered();
+        }
+        return (root, query, builder) -> {
+            Subquery<Integer> subquery = query.subquery(Integer.class);
+            Root<com.winllc.certalert.domain.Project> project =
+                    subquery.from(com.winllc.certalert.domain.Project.class);
+            Join<com.winllc.certalert.domain.Project, T> members = project.join(collection);
+            return builder.exists(subquery
+                    .select(builder.literal(1))
+                    .where(builder.equal(project.get("id"), projectId), builder.equal(members, root)));
+        };
+    }
+
     private static List<String> normalise(Collection<String> values) {
         if (values == null) {
             return List.of();

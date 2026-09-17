@@ -6,6 +6,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.datatables.repository.DataTablesRepository;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -38,6 +39,14 @@ public interface DirectoryServerRepository extends DataTablesRepository<Director
     @Query("select s.id as id, s.dn as dn, coalesce(s.commonName, s.uid) as name from DirectoryServer s "
             + "where s.lastSyncedAt < :cutoff")
     List<PrunableEntry> findPrunableBefore(@Param("cutoff") Instant cutoff);
+
+    /**
+     * Servers whose name or URL contains this text, for a picker. Bounded by the page size
+     * and by how much somebody types, like the one for people.
+     */
+    @Query("select s from DirectoryServer s where lower(s.commonName) like concat('%', :term, '%') "
+            + "or lower(s.serverUrl) like concat('%', :term, '%') order by s.commonName")
+    List<DirectoryServer> searchByName(@Param("term") String term, Pageable pageable);
 
     long countByLastSyncedAtBefore(Instant cutoff);
 

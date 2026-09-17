@@ -130,6 +130,15 @@
                     </div>
                 </div>
 
+
+                <!--/* What this entry is for, which the directory has no way to say. */-->
+                <div class="card mt-3" th:if="${!#lists.isEmpty(projects)}">
+                    <div class="card-header"><h3 class="card-title">Projects</h3></div>
+                    <div class="card-body">
+                        <a class="badge bg-green-lt me-1" th:each="project : ${projects}"
+                           th:href="@{/projects/{id}(id=${project.id})}" th:text="${project.name}">Project</a>
+                    </div>
+                </div>
                 <div th:replace="~{fragments/detail :: certificates(${certificates})}"></div>
                 <div th:replace="~{fragments/detail :: audit('USER', ${user.id})}"></div>
             </div>

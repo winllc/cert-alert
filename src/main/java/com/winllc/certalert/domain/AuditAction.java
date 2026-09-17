@@ -36,6 +36,11 @@ public enum AuditAction {
 
     ADDRESS_REMOVED("Address removed"),
 
+    /** Put into a project, or taken out of one. */
+    PROJECT_JOINED("Added to a project"),
+
+    PROJECT_LEFT("Removed from a project"),
+
     /** An alert was handed to a delivery channel and the channel accepted it. */
     ALERT_SENT("Alert sent"),
 

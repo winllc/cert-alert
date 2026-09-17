@@ -3,8 +3,10 @@ package com.winllc.certalert.web;
 import com.winllc.certalert.domain.CachedCertificate;
 import com.winllc.certalert.domain.DirectoryServer;
 import com.winllc.certalert.domain.DirectoryUser;
+import com.winllc.certalert.domain.Project;
 import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.DirectoryUserRepository;
+import com.winllc.certalert.service.ProjectService;
 import com.winllc.certalert.service.ResourceNotFoundException;
 import java.util.Comparator;
 import java.util.List;
@@ -31,10 +33,15 @@ public class ViewController {
 
     private final DirectoryUserRepository userRepository;
     private final DirectoryServerRepository serverRepository;
+    private final ProjectService projectService;
 
-    public ViewController(DirectoryUserRepository userRepository, DirectoryServerRepository serverRepository) {
+    public ViewController(
+            DirectoryUserRepository userRepository,
+            DirectoryServerRepository serverRepository,
+            ProjectService projectService) {
         this.userRepository = userRepository;
         this.serverRepository = serverRepository;
+        this.projectService = projectService;
     }
 
     @GetMapping("/")
@@ -61,6 +68,7 @@ public class ViewController {
         model.addAttribute("certificates", byExpiry(user.getCertificates()));
         // Every value a server's serverPOC could name them by, which is what the join uses.
         model.addAttribute("identifiers", userRepository.findIdentifiersById(id));
+        model.addAttribute("projects", projectService.forUser(id));
         return "user-detail";
     }
 
@@ -71,7 +79,29 @@ public class ViewController {
                 serverRepository.findWithCertificatesById(id).orElseThrow(() -> ResourceNotFoundException.server(id));
         model.addAttribute("server", server);
         model.addAttribute("certificates", byExpiry(server.getCertificates()));
+        model.addAttribute("projects", projectService.forServer(id));
         return "server-detail";
+    }
+
+    @GetMapping("/projects")
+    public String projects() {
+        return "projects";
+    }
+
+    @GetMapping("/projects/{id}")
+    @Transactional(readOnly = true)
+    public String project(@PathVariable Long id, Model model) {
+        Project project = projectService.get(id);
+        model.addAttribute("project", project);
+        model.addAttribute("members", project.getMembers().stream()
+                .sorted(java.util.Comparator.comparing(
+                        DirectoryUser::getDisplayName, Comparator.nullsLast(Comparator.naturalOrder())))
+                .toList());
+        model.addAttribute("servers", project.getServers().stream()
+                .sorted(java.util.Comparator.comparing(
+                        DirectoryServer::getCommonName, Comparator.nullsLast(Comparator.naturalOrder())))
+                .toList());
+        return "project-detail";
     }
 
     @GetMapping("/notifications")

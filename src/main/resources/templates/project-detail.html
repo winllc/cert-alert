@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head(${project.name})}"></head>
+<body>
+<svg th:replace="~{fragments/icons :: sprite}"></svg>
+
+<div class="page">
+    <header th:replace="~{fragments/layout :: navbar('projects')}"></header>
+
+    <div class="page-wrapper">
+        <div class="page-header d-print-none">
+            <div class="container-xl">
+                <div class="row g-2 align-items-center">
+                    <div class="col">
+                        <div class="page-pretitle">
+                            <a th:href="@{/projects}" class="text-secondary">Projects</a>
+                        </div>
+                        <h2 class="page-title" th:text="${project.name}">Project</h2>
+                        <div class="text-secondary mt-1" th:text="${project.description}">Description</div>
+                    </div>
+                    <div class="col-auto ms-auto">
+                        <div class="btn-list">
+                            <!-- The two tables, narrowed to this project. -->
+                            <a class="btn" th:href="@{/users(projectId=${project.id})}">
+                                <svg class="icon"><use href="#icon-users"></use></svg>
+                                Its people in the table
+                            </a>
+                            <a class="btn" th:href="@{/servers(projectId=${project.id})}">
+                                <svg class="icon"><use href="#icon-server"></use></svg>
+                                Its servers in the table
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="page-body">
+            <div class="container-xl" th:attr="data-project-id=${project.id}" id="project-page">
+                <div class="row row-cards">
+                    <div class="col-12 col-lg-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">People</h3>
+                                <span class="card-subtitle text-secondary ms-2"
+                                      th:text="${#lists.size(members)}">0</span>
+                            </div>
+                            <div class="card-body">
+                                <div class="contacts-group" th:if="${#lists.isEmpty(members)}">
+                                    <span class="text-secondary">Nobody yet</span>
+                                </div>
+                                <div class="contacts-group">
+                                    <span class="badge bg-blue-lt contact-badge" th:each="member : ${members}">
+                                        <a th:href="@{/users/{id}(id=${member.id})}"
+                                           th:text="${member.displayName != null} ? ${member.displayName} : ${member.uid}">Name</a>
+                                        <button type="button" class="btn-close ms-2 project-remove-user"
+                                                th:attr="data-user-id=${member.id}" aria-label="Remove"></button>
+                                    </span>
+                                </div>
+                                <div class="contacts-add mt-2 ps-0">
+                                    <div class="contacts-search">
+                                        <input type="text" class="form-control form-control-sm" id="project-user-input"
+                                               autocomplete="off" placeholder="Find a person">
+                                        <div class="contact-suggestions dropdown-menu" id="project-user-suggestions"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-12 col-lg-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Servers</h3>
+                                <span class="card-subtitle text-secondary ms-2"
+                                      th:text="${#lists.size(servers)}">0</span>
+                            </div>
+                            <div class="card-body">
+                                <div class="contacts-group" th:if="${#lists.isEmpty(servers)}">
+                                    <span class="text-secondary">Nothing yet</span>
+                                </div>
+                                <div class="contacts-group">
+                                    <span class="badge bg-azure-lt contact-badge" th:each="server : ${servers}">
+                                        <a th:href="@{/servers/{id}(id=${server.id})}"
+                                           th:text="${server.commonName}">Name</a>
+                                        <button type="button" class="btn-close ms-2 project-remove-server"
+                                                th:attr="data-server-id=${server.id}" aria-label="Remove"></button>
+                                    </span>
+                                </div>
+                                <div class="contacts-add mt-2 ps-0">
+                                    <div class="contacts-search">
+                                        <input type="text" class="form-control form-control-sm" id="project-server-input"
+                                               autocomplete="off" placeholder="Find a server">
+                                        <div class="contact-suggestions dropdown-menu" id="project-server-suggestions"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <p class="text-secondary mt-3 small">
+                    Created by <span th:text="${project.createdBy} ?: 'somebody'">somebody</span>.
+                    Removing an entry from a project changes nothing about the entry: it is the directory's,
+                    and this is only what it is for.
+                    <span id="project-detail-message" class="text-danger"></span>
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div th:replace="~{fragments/layout :: scripts}"></div>
+<script th:src="@{/js/project-detail.js}"></script>
+</body>
+</html>

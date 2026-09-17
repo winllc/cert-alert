@@ -63,10 +63,12 @@ public class DirectoryDataTablesController {
             @RequestParam(required = false) List<CertificateStatus> certificateStatus,
             @RequestParam(required = false) Boolean expired,
             @RequestParam(required = false) Integer expiringWithinDays,
-            @RequestParam(required = false) Boolean hasCertificates) {
+            @RequestParam(required = false) Boolean hasCertificates,
+            @RequestParam(required = false) Long projectId) {
 
         Specification<DirectoryUser> filter =
                 certificateFilter(certificateStatus, expired, expiringWithinDays, hasCertificates);
+        filter = filter.and(DirectorySpecifications.inProject(projectId, "members"));
         return userRepository.findAll(input, filter, null, DirectoryUserRow::from);
     }
 
@@ -79,11 +81,13 @@ public class DirectoryDataTablesController {
             @RequestParam(required = false) Boolean hasCertificates,
             @RequestParam(required = false) String poc,
             @RequestParam(required = false) String pocEmail,
-            @RequestParam(required = false) Long pocUserId) {
+            @RequestParam(required = false) Long pocUserId,
+            @RequestParam(required = false) Long projectId) {
 
         Specification<DirectoryServer> filter =
                 certificateFilter(certificateStatus, expired, expiringWithinDays, hasCertificates);
         filter = filter.and(pointOfContactFilter(poc != null ? poc : pocEmail, pocUserId));
+        filter = filter.and(DirectorySpecifications.inProject(projectId, "servers"));
 
         return withContactCounts(serverRepository.findAll(input, filter, null, DirectoryServerRow::from));
     }

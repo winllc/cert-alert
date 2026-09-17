@@ -83,6 +83,14 @@
                         <span class="nav-link-title">Servers</span>
                     </a>
                 </li>
+                <li class="nav-item" th:classappend="${active == 'projects'} ? 'active'">
+                    <a class="nav-link" th:href="@{/projects}">
+                        <span class="nav-link-icon d-md-none d-lg-inline-block">
+                            <svg class="icon"><use href="#icon-folder"></use></svg>
+                        </span>
+                        <span class="nav-link-title">Projects</span>
+                    </a>
+                </li>
                 <li class="nav-item" th:classappend="${active == 'notifications'} ? 'active'">
                     <a class="nav-link" th:href="@{/notifications}">
                         <span class="nav-link-icon d-md-none d-lg-inline-block">

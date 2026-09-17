@@ -9,6 +9,7 @@ import com.winllc.certalert.security.SecurityProperties;
 import com.winllc.certalert.service.ResourceNotFoundException;
 import com.winllc.certalert.service.ServerContactService;
 import com.winllc.certalert.web.dto.AddContactRequest;
+import com.winllc.certalert.web.dto.DirectoryServerOption;
 import com.winllc.certalert.web.dto.DirectoryUserOption;
 import com.winllc.certalert.web.dto.ServerContactRow;
 import com.winllc.certalert.web.dto.ServerContacts;
@@ -97,6 +98,19 @@ public class ServerContactController {
         }
         return userRepository.searchByIdentifier(term, PageRequest.of(0, MAX_SEARCH_RESULTS)).stream()
                 .map(DirectoryUserOption::from)
+                .toList();
+    }
+
+    /** Servers matching what has been typed, for the picker on a project. */
+    @GetMapping("/servers/search")
+    @Transactional(readOnly = true)
+    public List<DirectoryServerOption> searchServers(@RequestParam String q) {
+        String term = q == null ? "" : q.trim().toLowerCase(Locale.ROOT);
+        if (term.isEmpty()) {
+            return List.of();
+        }
+        return serverRepository.searchByName(term, PageRequest.of(0, MAX_SEARCH_RESULTS)).stream()
+                .map(DirectoryServerOption::from)
                 .toList();
     }
 

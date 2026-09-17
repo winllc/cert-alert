@@ -36,6 +36,12 @@
                             <span class="input-group-text">days</span>
                         </div>
                     </div>
+                    <div class="col-12 col-md-auto">
+                        <label class="form-label" for="project-filter">Project</label>
+                        <select id="project-filter" class="form-select">
+                            <option value="">Any</option>
+                        </select>
+                    </div>
                             <div class="col d-flex justify-content-md-end align-items-center">
                                 <span id="applied-filters" class="text-secondary small"></span>
                             </div>
@@ -102,6 +108,7 @@
 
 <div th:replace="~{fragments/layout :: scripts}"></div>
 <script th:src="@{/js/audit-trail.js}"></script>
+<script th:src="@{/js/project-filter.js}"></script>
 <script th:src="@{/js/users-table.js}"></script>
 </body>
 </html>

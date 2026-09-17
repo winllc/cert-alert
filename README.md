@@ -495,6 +495,25 @@ turning it on removes records older than `cert-alert.audit.retention.after` (a y
 default) on a weekly schedule. `cert-alert.audit.enabled: false` stops new records being
 written without deleting or hiding what is already there.
 
+### Projects
+
+The directory knows that a person is in an organization and that a server has a point of
+contact. It has no way to say that *these six servers and these four people are one system
+that gets renewed together*. That grouping is this application's, and it is what turns
+"forty certificates expire this month" into "the payroll migration expires this month".
+
+A project is a name, a description, and two sets. Create one at `/projects`, then add
+people and servers to it by name. Both search tables take a **Project** filter, and an
+entry's details page lists the projects it is in.
+
+Removing something from a project changes nothing about it: the entry is the directory's,
+and the project is only what it is for. Deleting a project deletes the grouping and nothing
+else. A prune that removes an entry from the directory takes it out of its projects, which
+the database does — a prune is a bulk delete that JPA never sees.
+
+Joining and leaving are recorded against the **entry**, not the project, because the
+question is asked while looking at the server: why is this in the payroll project?
+
 ### Notifications
 
 An alert is raised once about a certificate. A **notification** is one person's copy of it,
@@ -561,6 +580,13 @@ for.
 | `POST` | `/api/v1/servers/{id}/contacts`     | Add one: `{"userId":…}` or `{"email":…}` |
 | `DELETE` | `/api/v1/servers/{id}/contacts/{contactId}` | Remove one                   |
 | `GET`  | `/api/v1/users/search?q=`           | People matching, for the contact picker  |
+| `GET`  | `/api/v1/projects`                  | Every project, with its two counts       |
+| `POST` | `/api/v1/projects`                  | Create one                               |
+| `PUT`  | `/api/v1/projects/{id}`             | Rename it                                |
+| `DELETE` | `/api/v1/projects/{id}`           | Delete the grouping, not what is grouped |
+| `POST`/`DELETE` | `/api/v1/projects/{id}/users/{userId}` | Add or remove a person        |
+| `POST`/`DELETE` | `/api/v1/projects/{id}/servers/{serverId}` | Add or remove a server    |
+| `GET`  | `/api/v1/servers/search?q=`         | Servers matching, for the project picker |
 | `GET`  | `/api/v1/notifications`             | Your notifications, `?page=&size=`       |
 | `GET`  | `/api/v1/notifications/unread-count` | What the bell counts                    |
 | `POST` | `/api/v1/notifications/{id}/read`   | Mark one read                            |

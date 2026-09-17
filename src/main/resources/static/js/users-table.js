@@ -32,15 +32,25 @@
             if (days) {
                 filters.expiringWithinDays = days;
             }
+            var project = ProjectFilter.selected();
+            if (project) {
+                filters.projectId = project;
+            }
             return filters;
         }
 
-        CertAlert.initTable({
+        // Filled from the projects endpoint, so the filter re-applies once it arrives:
+        // arriving with ?projectId= in the URL beats the list of projects to the page.
+        var projectFilter = ProjectFilter.attach(function () {
+            CertAlert.reload(table, readFilters());
+        });
+
+        var table = CertAlert.initTable({
             selector: '#users-table',
             endpoint: '/api/v1/datatables/users',
             statsUrl: '/api/v1/stats/users',
             readFilters: readFilters,
-            filterInputs: [certState, withinDays],
+            filterInputs: [certState, withinDays, projectFilter],
             // Sort by name, not by expiry: entries with no certificate have a null expiry,
             // and databases disagree about whether nulls sort first or last.
             order: [[1, 'asc']],

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Projects')}"></head>
+<body>
+<svg th:replace="~{fragments/icons :: sprite}"></svg>
+
+<div class="page">
+    <header th:replace="~{fragments/layout :: navbar('projects')}"></header>
+
+    <div class="page-wrapper">
+        <div class="page-header d-print-none">
+            <div class="container-xl">
+                <div class="row g-2 align-items-center">
+                    <div class="col">
+                        <div class="page-pretitle">IC Full Service Directory</div>
+                        <h2 class="page-title">Projects</h2>
+                        <div class="text-secondary mt-1">
+                            What the people and servers are for, which the directory has no way to say
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="page-body">
+            <div class="container-xl">
+                <div class="card" id="project-create-card">
+                    <div class="card-body">
+                        <div class="row g-2 align-items-end">
+                            <div class="col-12 col-md-3">
+                                <label class="form-label" for="project-name">New project</label>
+                                <input type="text" id="project-name" class="form-control" placeholder="Payroll migration">
+                            </div>
+                            <div class="col-12 col-md-6">
+                                <label class="form-label" for="project-description">Description</label>
+                                <input type="text" id="project-description" class="form-control"
+                                       placeholder="What it is, for whoever finds it in a year">
+                            </div>
+                            <div class="col-auto">
+                                <button type="button" id="project-create" class="btn btn-primary">Create</button>
+                            </div>
+                            <div class="col d-flex align-items-center">
+                                <span id="project-message" class="text-secondary small"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mt-3">
+                    <div class="table-responsive">
+                        <table class="table card-table table-vcenter">
+                            <thead>
+                            <tr>
+                                <th>Project</th>
+                                <th>Description</th>
+                                <th>People</th>
+                                <th>Servers</th>
+                                <th>Created</th>
+                                <th></th>
+                            </tr>
+                            </thead>
+                            <tbody id="projects-body">
+                            <tr><td colspan="6" class="text-secondary">Loading…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div th:replace="~{fragments/layout :: scripts}"></div>
+<script th:src="@{/js/projects.js}"></script>
+</body>
+</html>

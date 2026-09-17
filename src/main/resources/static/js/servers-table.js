@@ -57,15 +57,25 @@
             if (contact) {
                 filters.poc = contact;
             }
+            var project = ProjectFilter.selected();
+            if (project) {
+                filters.projectId = project;
+            }
             return filters;
         }
+
+        // Filled from the projects endpoint, so the filter re-applies once it arrives:
+        // arriving with ?projectId= in the URL beats the list of projects to the page.
+        var projectFilter = ProjectFilter.attach(function () {
+            CertAlert.reload(table, readFilters());
+        });
 
         var table = CertAlert.initTable({
             selector: '#servers-table',
             endpoint: '/api/v1/datatables/servers',
             statsUrl: '/api/v1/stats/servers',
             readFilters: readFilters,
-            filterInputs: [certState, withinDays, pocInput],
+            filterInputs: [certState, withinDays, pocInput, projectFilter],
             order: [[1, 'asc']],
             detailUrl: function (row) {
                 return '/api/v1/servers/' + row.id + '/certificates';
