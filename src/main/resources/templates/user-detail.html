@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head(${user.displayName != null} ? ${user.displayName} : ${user.uid})}"></head>
+<body>
+<svg th:replace="~{fragments/icons :: sprite}"></svg>
+
+<div class="page">
+    <header th:replace="~{fragments/layout :: navbar('users')}"></header>
+
+    <div class="page-wrapper">
+        <div class="page-header d-print-none">
+            <div class="container-xl">
+                <div class="row g-2 align-items-center">
+                    <div class="col">
+                        <div class="page-pretitle">
+                            <a th:href="@{/users}" class="text-secondary">People</a>
+                        </div>
+                        <h2 class="page-title"
+                            th:text="${user.displayName != null} ? ${user.displayName} : (${user.commonName != null} ? ${user.commonName} : ${user.uid})">Name</h2>
+                        <div class="text-secondary mt-1 mono" th:text="${user.dn}">dn</div>
+                    </div>
+                    <div class="col-auto ms-auto">
+                        <div class="btn-list align-items-center">
+                            <span class="badge"
+                                  th:with="badges=${ {'VALID':'bg-green-lt','EXPIRING_SOON':'bg-yellow-lt','EXPIRED':'bg-red-lt','NONE':'bg-secondary-lt'} }"
+                                  th:classappend="${badges.get(user.certificateStatus.name())}"
+                                  th:text="${#strings.capitalize(#strings.replace(#strings.toLowerCase(user.certificateStatus.name()), '_', ' '))}">Valid</span>
+                            <!-- The other half of the join: the servers this person is named on. -->
+                            <a class="btn" th:href="@{/servers(pocUserId=${user.id}, pocName=${user.displayName})}">
+                                <svg class="icon"><use href="#icon-server"></use></svg>
+                                Servers they are the contact for
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="page-body">
+            <div class="container-xl">
+                <div class="row row-cards">
+                    <div class="col-12 col-lg-6">
+                        <div class="card">
+                            <div class="card-header"><h3 class="card-title">IC Person</h3></div>
+                            <div class="card-body cert-detail p-3">
+                                <table>
+                                    <tr th:replace="~{fragments/detail :: attribute('uid', ${user.uid})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('Common name', ${user.commonName})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('Display name', ${user.displayName})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('Preferred name', ${user.preferredName})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('Given name', ${user.givenName})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('Surname', ${user.surname})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('Title', ${user.title})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('Employee type', ${user.employeeType})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('Rank', ${user.rank})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('Telephone', ${user.telephoneNumber})}"></tr>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-12 col-lg-6">
+                        <div class="card">
+                            <div class="card-header"><h3 class="card-title">Addresses</h3></div>
+                            <div class="card-body cert-detail p-3">
+                                <table>
+                                    <tr th:replace="~{fragments/detail :: attribute('Primary', ${user.email})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('icEmail', ${user.icEmail})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('internetEmail', ${user.internetEmail})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('niprnetEmail', ${user.niprnetEmail})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('siprnetEmail', ${user.siprnetEmail})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('mail', ${user.mail})}"></tr>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="card mt-3">
+                            <div class="card-header"><h3 class="card-title">Organization</h3></div>
+                            <div class="card-body cert-detail p-3">
+                                <table>
+                                    <tr th:replace="~{fragments/detail :: attribute('Duty organization', ${user.dutyOrganization})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('Admin organization', ${user.adminOrganization})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('Country of affiliation', ${user.countryOfAffiliation})}"></tr>
+                                    <tr>
+                                        <th>IC member</th>
+                                        <td th:if="${user.icMember != null}" th:text="${user.icMember} ? 'Yes' : 'No'">Yes</td>
+                                        <td th:unless="${user.icMember != null}" class="text-secondary">&mdash;</td>
+                                    </tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('IC networks', ${user.icNetworks})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('Security mark', ${user.resourceSecurityMark})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('Organization', ${user.organization})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('Organizational unit', ${user.organizationalUnit})}"></tr>
+                                    <tr>
+                                        <th>Last synced</th>
+                                        <td th:text="${#strings.substring(user.lastSyncedAt, 0, 10)}">2026-01-01</td>
+                                    </tr>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!--/* What a server's serverPOC could name this person by. The specification
+                       says that attribute carries a name; directories often hold an address,
+                       so a person is indexed under every value that could be either. */-->
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <h3 class="card-title">Known to servers as</h3>
+                        <span class="card-subtitle text-secondary ms-2">any of these in a serverPOC names this person</span>
+                    </div>
+                    <div class="card-body">
+                        <span class="badge bg-secondary-lt me-1" th:each="identifier : ${identifiers}"
+                              th:text="${identifier}">alice</span>
+                        <span class="text-secondary" th:if="${#lists.isEmpty(identifiers)}">Nothing the directory names them by</span>
+                    </div>
+                </div>
+
+                <div th:replace="~{fragments/detail :: certificates(${certificates})}"></div>
+                <div th:replace="~{fragments/detail :: audit('USER', ${user.id})}"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div th:replace="~{fragments/layout :: scripts}"></div>
+<script th:src="@{/js/audit-table.js}"></script>
+</body>
+</html>

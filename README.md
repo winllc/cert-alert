@@ -435,8 +435,10 @@ only to somebody who may use them.
 
 ### The audit trail
 
-Every entry carries a history: what happened to it, when, and who did it. Expand a row on
-either table to read it, ten records at a time, newest first.
+Every entry carries a history: what happened to it, when, and who did it. It shows up in
+two places. Expanding a row on either table gives the last ten, newest first — the quick
+look, with a link through. The **details page** for that entry carries the whole thing as a
+search table of its own: paged, ordered, searchable, and narrowed by kind of event.
 
 | Recorded | When |
 |----------|------|
@@ -473,6 +475,23 @@ turning it on removes records older than `cert-alert.audit.retention.after` (a y
 default) on a weekly schedule. `cert-alert.audit.enabled: false` stops new records being
 written without deleting or hiding what is already there.
 
+### The details pages
+
+`/users/{id}` and `/servers/{id}` are a page per entry, reached by clicking its name in
+either table. They carry what the expanded row shows and more: every attribute the
+directory publishes, each cached certificate in full, and the audit table.
+
+The attributes and certificates are rendered with the page rather than fetched. The search
+pages work the other way round — what they show depends on paging and filters the browser
+owns — but a details page is about one entry known at request time, so only the two things
+that change while it is open are fetched: the points of contact, which are editable, and
+the audit table, which pages and searches.
+
+A server's page carries the same contacts editor as its row on the search table. A person's
+page also lists **what a `serverPOC` could name them by** — every address and every form of
+their name — which is the join key, and links through to the servers they are the contact
+for.
+
 ### Other endpoints
 
 | Method | Path                                | Purpose                                  |
@@ -494,6 +513,7 @@ written without deleting or hiding what is already there.
 | `GET`  | `/api/v1/users/search?q=`           | People matching, for the contact picker  |
 | `GET`  | `/api/v1/users/{id}/audit`          | A person's history, `?page=&size=`       |
 | `GET`  | `/api/v1/servers/{id}/audit`        | A server's history, `?page=&size=`       |
+| `POST` | `/api/v1/datatables/audit`          | One entry's history as a search table, `?subjectType=&subjectId=&action=` |
 
 Errors come back as RFC 7807 problem details. Actuator is at `/actuator`
 (`health`, `info`, `metrics`, `loggers`); the LDAP health indicator reports the
@@ -734,6 +754,7 @@ src/main/resources/
 ├── db/migration/          Flyway migrations
 ├── static/{css,js}/       a thin layer over Tabler, and the table wiring
 ├── templates/             Thymeleaf pages, Tabler layout and the icon sprite
+│                          two search pages, two details pages, login
 └── dev-directory.ldif     sample directory for the dev profile
 ```
 

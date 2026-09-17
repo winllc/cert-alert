@@ -65,7 +65,12 @@
     }
 
     function render($container, page) {
-        var html = '<div class="audit-heading">History</div>';
+        var kind = $container.data('audit-kind');
+        var id = $container.data('audit-id');
+        // The quick look lives here; the searchable one is on the details page.
+        var html = '<div class="audit-heading">History'
+            + '<a class="ms-2 fw-normal" href="/' + kind + '/' + CertAlert.escapeHtml(id) + '">all records &rarr;</a>'
+            + '</div>';
         if (page.totalElements === 0) {
             $container.html(html + '<div class="text-secondary">Nothing has happened to this entry yet.</div>');
             return;

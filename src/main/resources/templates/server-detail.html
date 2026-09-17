@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head(${server.commonName != null} ? ${server.commonName} : ${server.uid})}"></head>
+<body>
+<svg th:replace="~{fragments/icons :: sprite}"></svg>
+
+<div class="page">
+    <header th:replace="~{fragments/layout :: navbar('servers')}"></header>
+
+    <div class="page-wrapper">
+        <div class="page-header d-print-none">
+            <div class="container-xl">
+                <div class="row g-2 align-items-center">
+                    <div class="col">
+                        <div class="page-pretitle">
+                            <a th:href="@{/servers}" class="text-secondary">Servers</a>
+                        </div>
+                        <h2 class="page-title"
+                            th:text="${server.commonName != null} ? ${server.commonName} : ${server.uid}">Name</h2>
+                        <div class="text-secondary mt-1 mono" th:text="${server.dn}">dn</div>
+                    </div>
+                    <div class="col-auto ms-auto">
+                        <div class="btn-list align-items-center">
+                            <span class="badge"
+                                  th:with="badges=${ {'VALID':'bg-green-lt','EXPIRING_SOON':'bg-yellow-lt','EXPIRED':'bg-red-lt','NONE':'bg-secondary-lt'} }"
+                                  th:classappend="${badges.get(server.certificateStatus.name())}"
+                                  th:text="${#strings.capitalize(#strings.replace(#strings.toLowerCase(server.certificateStatus.name()), '_', ' '))}">Valid</span>
+                            <a class="btn" th:if="${server.serverUrl != null}" th:href="${server.serverUrl}"
+                               target="_blank" rel="noopener noreferrer">
+                                <svg class="icon"><use href="#icon-external-link"></use></svg>
+                                Open
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="page-body">
+            <div class="container-xl">
+                <div class="row row-cards">
+                    <div class="col-12 col-lg-6">
+                        <div class="card">
+                            <div class="card-header"><h3 class="card-title">IC Non-Person Entity</h3></div>
+                            <div class="card-body cert-detail p-3">
+                                <table>
+                                    <tr th:replace="~{fragments/detail :: attribute('Common name', ${server.commonName})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('uid', ${server.uid})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('Given name', ${server.givenName})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('Description', ${server.description})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('serverURL', ${server.serverUrl})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('icServerAddress', ${server.icServerAddress})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('ATO status', ${server.atoStatus})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('Life cycle status', ${server.lifeCycleStatus})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('Employee type', ${server.employeeType})}"></tr>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-12 col-lg-6">
+                        <div class="card">
+                            <div class="card-header"><h3 class="card-title">Organization</h3></div>
+                            <div class="card-body cert-detail p-3">
+                                <table>
+                                    <tr th:replace="~{fragments/detail :: attribute('Duty organization', ${server.dutyOrganization})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('Admin organization', ${server.adminOrganization})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('Country of affiliation', ${server.countryOfAffiliation})}"></tr>
+                                    <tr>
+                                        <th>IC member</th>
+                                        <td th:if="${server.icMember != null}" th:text="${server.icMember} ? 'Yes' : 'No'">Yes</td>
+                                        <td th:unless="${server.icMember != null}" class="text-secondary">&mdash;</td>
+                                    </tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('IC networks', ${server.icNetworks})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('Security mark', ${server.resourceSecurityMark})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('Organization', ${server.organization})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('Organizational unit', ${server.organizationalUnit})}"></tr>
+                                    <tr>
+                                        <th>Last synced</th>
+                                        <td th:text="${#strings.substring(server.lastSyncedAt, 0, 10)}">2026-01-01</td>
+                                    </tr>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!--/* The same editor as the expanded row on the servers table: the
+                       directory's serverPOC read-only beside the contacts managed here. */-->
+                <div class="card mt-3">
+                    <div class="card-header"><h3 class="card-title">Points of contact</h3></div>
+                    <div class="card-body">
+                        <div class="contacts contacts-standalone" th:attr="data-server-id=${server.id}">
+                            <div class="text-secondary">Loading contacts…</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div th:replace="~{fragments/detail :: certificates(${certificates})}"></div>
+                <div th:replace="~{fragments/detail :: audit('SERVER', ${server.id})}"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div th:replace="~{fragments/layout :: scripts}"></div>
+<script th:src="@{/js/server-contacts.js}"></script>
+<script th:src="@{/js/audit-table.js}"></script>
+<script>
+    // The contacts editor is written for the expanded row of the servers table; on this
+    // page the same block is in a card, and it is attached the same way.
+    jQuery(function ($) { ServerContacts.attach($(document)); });
+</script>
+</body>
+</html>

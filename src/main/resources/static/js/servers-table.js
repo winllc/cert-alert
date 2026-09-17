@@ -91,9 +91,12 @@
             columns: [
                 {data: 'id', orderable: false, searchable: false, className: 'expand',
                     render: function () { return CertAlert.icon('plus'); }},
-                {data: 'commonName', render: function (value, type) {
+                // The name is the way through to the page about this server.
+                {data: 'commonName', render: function (value, type, row) {
                     if (type !== 'display') { return value; }
-                    return value ? '<span class="fw-medium">' + CertAlert.escapeHtml(value) + '</span>'
+                    return value
+                        ? '<a class="fw-medium" href="/servers/' + row.id + '">'
+                            + CertAlert.escapeHtml(value) + '</a>'
                         : CertAlert.text(null);
                 }},
                 {data: 'serverUrl', className: 'mono', render: renderText},

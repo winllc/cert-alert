@@ -183,6 +183,18 @@ table.datatable tfoot th {
     }
 }
 
+/* On a details page the contacts block is a card of its own, so the card's title says
+   what it is and the block's own heading and separator would repeat it. */
+.contacts-standalone {
+    padding-bottom: 0;
+    margin-bottom: 0;
+    border-bottom: 0;
+}
+
+.contacts-standalone .contacts-heading {
+    display: none;
+}
+
 /* An entry's history, at the bottom of its expanded row. */
 .audit {
     padding-top: 0.75rem;
@@ -213,10 +225,16 @@ table.datatable tfoot th {
     border-top: 0;
 }
 
-.audit-table td.audit-when {
-    width: 10rem;
+/* The same column treatment in both places the trail is shown: the history block in an
+   expanded row, and the audit table on a details page. */
+td.audit-when,
+td.audit-actor {
     white-space: nowrap;
     color: var(--tblr-secondary);
+}
+
+.audit-table td.audit-when {
+    width: 10rem;
 }
 
 .audit-table td.audit-action {
@@ -225,8 +243,6 @@ table.datatable tfoot th {
 
 .audit-table td.audit-actor {
     width: 10rem;
-    white-space: nowrap;
-    color: var(--tblr-secondary);
 }
 
 .audit-pager {
@@ -238,9 +254,9 @@ table.datatable tfoot th {
 }
 
 @media (max-width: 40rem) {
-    .audit-table td.audit-when,
-    .audit-table td.audit-action,
-    .audit-table td.audit-actor {
+    td.audit-when,
+    td.audit-action,
+    td.audit-actor {
         width: auto;
         white-space: normal;
     }

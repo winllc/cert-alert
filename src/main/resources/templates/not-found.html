@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Not found')}"></head>
+<body>
+<svg th:replace="~{fragments/icons :: sprite}"></svg>
+
+<div class="page">
+    <header th:replace="~{fragments/layout :: navbar('')}"></header>
+    <div class="page-wrapper">
+        <div class="page-body">
+            <div class="container-xl">
+                <div class="empty">
+                    <div class="empty-header">404</div>
+                    <p class="empty-title" th:text="${message} ?: 'No such entry'">No such entry</p>
+                    <p class="empty-subtitle text-secondary">
+                        It may have been pruned after the directory stopped publishing it.
+                    </p>
+                    <div class="empty-action">
+                        <a th:href="@{/users}" class="btn btn-primary">Back to the directory</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+</body>
+</html>

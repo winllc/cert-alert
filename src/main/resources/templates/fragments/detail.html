@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<body>
+
+<!--/* One labelled value. Empty reads as a dash rather than as a missing row: on a page
+       about one entry, "the directory does not publish this" is worth seeing. */-->
+<tr th:fragment="attribute(label, value)">
+    <th th:text="${label}">Label</th>
+    <td th:if="${value != null and !#strings.isEmpty(value)}" th:text="${value}">Value</td>
+    <td th:unless="${value != null and !#strings.isEmpty(value)}" class="text-secondary">&mdash;</td>
+</tr>
+
+<!--/* The certificates the directory publishes for this entry, soonest to expire first.
+       Rendered with the page: they are what the page is about, and they do not change
+       while it is open. */-->
+<div th:fragment="certificates(certificates)" class="card mt-3">
+    <div class="card-header">
+        <h3 class="card-title">Certificates</h3>
+        <span class="card-subtitle text-secondary ms-2"
+              th:text="${#lists.size(certificates)} + ' cached from the directory'">0 cached</span>
+    </div>
+    <div class="card-body" th:if="${#lists.isEmpty(certificates)}">
+        <span class="text-secondary">This entry publishes no certificate.</span>
+    </div>
+    <div class="card-body cert-detail p-0" th:unless="${#lists.isEmpty(certificates)}"
+         th:with="badges=${ {'VALID':'bg-green-lt','EXPIRING_SOON':'bg-yellow-lt','EXPIRED':'bg-red-lt','NONE':'bg-secondary-lt'} }">
+        <div class="cert p-3" th:each="certificate : ${certificates}">
+            <table>
+                <tr>
+                    <th>Status</th>
+                    <td>
+                        <span class="badge"
+                              th:classappend="${badges.get(certificate.status.name())}"
+                              th:text="${#strings.capitalize(#strings.replace(#strings.toLowerCase(certificate.status.name()), '_', ' '))}">Valid</span>
+                    </td>
+                </tr>
+                <tr th:replace="~{fragments/detail :: attribute('Subject', ${certificate.subjectDn})}"></tr>
+                <tr th:replace="~{fragments/detail :: attribute('Issuer', ${certificate.issuerDn})}"></tr>
+                <tr>
+                    <th>Serial</th>
+                    <td class="mono" th:text="${certificate.serialNumber}">01</td>
+                </tr>
+                <!--/* An Instant prints as ISO-8601 in UTC, so the first ten characters are
+                       its day - the same thing the tables show. */-->
+                <tr>
+                    <th>Valid from</th>
+                    <td th:text="${#strings.substring(certificate.notBefore, 0, 10)}">2026-01-01</td>
+                </tr>
+                <tr>
+                    <th>Valid to</th>
+                    <td th:text="${#strings.substring(certificate.notAfter, 0, 10)}">2027-01-01</td>
+                </tr>
+                <tr>
+                    <th>Key</th>
+                    <td th:text="${certificate.keyAlgorithm} + (${certificate.keySize != null} ? ' ' + ${certificate.keySize} + ' bit' : '')">RSA 2048 bit</td>
+                </tr>
+                <tr th:replace="~{fragments/detail :: attribute('Signature', ${certificate.signatureAlgorithm})}"></tr>
+                <tr th:replace="~{fragments/detail :: attribute('Hash', ${certificate.hashAlgorithm})}"></tr>
+                <tr th:replace="~{fragments/detail :: attribute('SANs', ${certificate.subjectAlternativeNames})}"></tr>
+                <tr>
+                    <th>SHA-256</th>
+                    <td class="mono" th:text="${certificate.sha256Fingerprint}">abc</td>
+                </tr>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!--/* Everything that has happened to this entry. Its own search table rather than a list:
+       an entry watched for a year has more history than a page can show at once, and the
+       question is usually about one kind of event. */-->
+<div th:fragment="audit(subjectType, subjectId)" class="card mt-3">
+    <div class="card-header">
+        <h3 class="card-title">Audit records</h3>
+    </div>
+    <div class="card-body border-bottom py-3">
+        <div class="row g-3 align-items-end">
+            <div class="col-12 col-md-auto">
+                <label class="form-label" for="audit-kind">Kind</label>
+                <select id="audit-kind" class="form-select">
+                    <option value="">Anything</option>
+                    <option value="ENTRY_DISCOVERED">Discovered</option>
+                    <option value="CERTIFICATE_CACHED">Certificate published</option>
+                    <option value="CERTIFICATE_REMOVED">Certificate withdrawn</option>
+                    <option value="CERTIFICATE_STATUS_CHANGED">Certificate status changed</option>
+                    <option value="CONTACT_ADDED">Point of contact added</option>
+                    <option value="CONTACT_REMOVED">Point of contact removed</option>
+                    <option value="ALERT_SENT">Alert sent</option>
+                    <option value="ALERT_FAILED">Alert failed</option>
+                    <option value="ENTRY_PRUNED">Pruned</option>
+                </select>
+            </div>
+            <div class="col d-flex justify-content-md-end align-items-center">
+                <span class="text-secondary small">
+                    What happened to this entry, and who did it.
+                </span>
+            </div>
+        </div>
+    </div>
+    <div class="table-responsive">
+        <table id="audit-table" class="table card-table table-vcenter datatable" style="width:100%"
+               th:attr="data-subject-type=${subjectType},data-subject-id=${subjectId}">
+            <thead>
+            <tr>
+                <th>When</th>
+                <th>Kind</th>
+                <th>What happened</th>
+                <th>Who</th>
+                <th>Channel</th>
+                <th>Target</th>
+                <th>Certificate</th>
+            </tr>
+            </thead>
+        </table>
+    </div>
+</div>
+
+</body>
+</html>

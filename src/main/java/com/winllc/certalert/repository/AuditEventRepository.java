@@ -5,12 +5,16 @@ import com.winllc.certalert.domain.OwnerType;
 import java.time.Instant;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.datatables.repository.DataTablesRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-public interface AuditEventRepository extends JpaRepository<AuditEvent, Long> {
+/**
+ * A DataTables repository, because the audit table on a details page is a search table like
+ * the other two: the same paging, ordering and search, and the same request shape.
+ */
+public interface AuditEventRepository extends DataTablesRepository<AuditEvent, Long> {
 
     /**
      * One entry's history, newest first. The id breaks ties: a sweep writes several records

@@ -237,6 +237,7 @@
      * @param config.filterInputs  elements that re-apply the filters when changed
      * @param config.detailUrl     given a row, the URL of its cached certificates
      * @param config.entryFields   [label, field] pairs shown above the certificates
+     * @param config.emptyMessage  what an empty table says, when "nothing synced" is wrong
      * @param config.detailPrefix  HTML to put at the top of the expanded row
      * @param config.detailSuffix  HTML to put at the bottom of it
      * @param config.onDetailShown called once that row is in the document, to wire it up
@@ -269,7 +270,7 @@
             },
             language: {
                 processing: 'Loading…',
-                emptyTable: 'Nothing has been synced from the directory yet',
+                emptyTable: config.emptyMessage || 'Nothing has been synced from the directory yet',
                 zeroRecords: 'No entries match these filters',
                 search: '',
                 searchPlaceholder: 'Search all columns',

@@ -65,11 +65,13 @@
             columns: [
                 {data: 'id', orderable: false, searchable: false, className: 'expand',
                     render: function () { return CertAlert.icon('plus'); }},
+                // The name is the way through to the page about this person.
                 {data: 'displayName', render: function (value, type, row) {
                     if (type !== 'display') { return value; }
-                    var name = value || row.commonName;
+                    var name = value || row.commonName || row.uid;
                     if (!name) { return CertAlert.text(null); }
-                    return '<span class="fw-medium">' + CertAlert.escapeHtml(name) + '</span>';
+                    return '<a class="fw-medium" href="/users/' + row.id + '">'
+                        + CertAlert.escapeHtml(name) + '</a>';
                 }},
                 {data: 'uid', className: 'mono', render: renderText},
                 // The link hands this person's id to the servers table, which resolves it
