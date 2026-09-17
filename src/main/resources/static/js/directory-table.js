@@ -216,13 +216,12 @@
         return body ? '<div class="cert"><table>' + body + '</table></div>' : '';
     }
 
-    function renderCertificates(certificates, row, entryFields, prefix) {
+    function renderCertificates(certificates, row, entryFields, prefix, suffix) {
         var entry = (prefix || '') + (entryFields ? entryBlock(row, entryFields) : '');
-        if (!certificates || certificates.length === 0) {
-            return '<div class="cert-detail">' + entry
-                + '<div class="text-secondary">This entry publishes no certificates.</div></div>';
-        }
-        return '<div class="cert-detail">' + entry + certificates.map(certificateBlock).join('') + '</div>';
+        var body = (!certificates || certificates.length === 0)
+            ? '<div class="text-secondary">This entry publishes no certificates.</div>'
+            : certificates.map(certificateBlock).join('');
+        return '<div class="cert-detail">' + entry + body + (suffix || '') + '</div>';
     }
 
     /**
@@ -238,6 +237,7 @@
      * @param config.detailUrl     given a row, the URL of its cached certificates
      * @param config.entryFields   [label, field] pairs shown above the certificates
      * @param config.detailPrefix  HTML to put at the top of the expanded row
+     * @param config.detailSuffix  HTML to put at the bottom of it
      * @param config.onDetailShown called once that row is in the document, to wire it up
      */
     function initTable(config) {
@@ -316,7 +316,9 @@
             $.getJSON(config.detailUrl(row.data()))
                 .done(function (certificates) {
                     var prefix = config.detailPrefix ? config.detailPrefix(row.data()) : '';
-                    row.child(renderCertificates(certificates, row.data(), config.entryFields, prefix)).show();
+                    var suffix = config.detailSuffix ? config.detailSuffix(row.data()) : '';
+                    row.child(renderCertificates(certificates, row.data(), config.entryFields, prefix, suffix))
+                        .show();
                     if (config.onDetailShown) {
                         config.onDetailShown(row, $(row.child()));
                     }

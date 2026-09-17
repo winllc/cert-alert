@@ -1,12 +1,18 @@
 package com.winllc.certalert.service;
 
+import com.winllc.certalert.domain.AuditAction;
+import com.winllc.certalert.domain.AuditEvent;
+import com.winllc.certalert.domain.OwnerType;
 import com.winllc.certalert.domain.SyncJob;
 import com.winllc.certalert.ldap.LdapProperties;
 import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.DirectoryUserRepository;
+import com.winllc.certalert.repository.PrunableEntry;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -30,6 +36,7 @@ public class DirectoryPruneService {
     private final DirectoryServerRepository serverRepository;
     private final LdapProperties properties;
     private final SyncRunRecorder runRecorder;
+    private final AuditService auditService;
     private final Clock clock;
 
     public DirectoryPruneService(
@@ -37,12 +44,29 @@ public class DirectoryPruneService {
             DirectoryServerRepository serverRepository,
             LdapProperties properties,
             SyncRunRecorder runRecorder,
+            AuditService auditService,
             Clock clock) {
         this.userRepository = userRepository;
         this.serverRepository = serverRepository;
         this.properties = properties;
         this.runRecorder = runRecorder;
+        this.auditService = auditService;
         this.clock = clock;
+    }
+
+    private List<AuditEvent> recordsFor(
+            List<PrunableEntry> entries, OwnerType type, Instant cutoff, Instant now) {
+
+        String actor = AuditActors.current(AuditActors.PRUNE);
+        String summary = "Deleted: the directory had not published it since %s".formatted(cutoff);
+        return entries.stream()
+                .map(entry -> AuditEvent.about(
+                                new AuditEvent.SubjectRef(type, entry.getId(), entry.getDn(), entry.getName()),
+                                AuditAction.ENTRY_PRUNED,
+                                summary,
+                                now)
+                        .by(actor))
+                .toList();
     }
 
     /** Deletes entries unseen for longer than the configured window. */
@@ -55,9 +79,16 @@ public class DirectoryPruneService {
 
         int pruned;
         try {
+            // Named before they are deleted: afterwards there is nothing left to name, and
+            // the record of a deletion is the one an audit trail exists for.
+            List<AuditEvent> records = new ArrayList<>();
+            records.addAll(recordsFor(userRepository.findPrunableBefore(cutoff), OwnerType.USER, cutoff, now));
+            records.addAll(recordsFor(serverRepository.findPrunableBefore(cutoff), OwnerType.SERVER, cutoff, now));
+
             int users = userRepository.deleteByLastSyncedAtBefore(cutoff);
             int servers = serverRepository.deleteByLastSyncedAtBefore(cutoff);
             pruned = users + servers;
+            auditService.recordAll(records);
             log.info("Pruned {} user(s) and {} server(s) unseen since {}", users, servers, cutoff);
         } catch (RuntimeException e) {
             runRecorder.failed(runId, Instant.now(clock), e.toString());

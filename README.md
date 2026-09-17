@@ -242,6 +242,9 @@ directory, an address, or a person carrying theirs. Kept apart from `serverPOC` 
 so a sweep, which replaces that, cannot delete it. See [Managing points of
 contact](#managing-points-of-contact).
 
+**`audit_event`** — what happened to an entry and who did it, from a contact being edited to
+an alert going out. See [The audit trail](#the-audit-trail).
+
 **`cached_certificate`** — everything parsed out of a published certificate: subject,
 issuer, serial, validity window, signature and key algorithm, key size, SANs, and the
 SHA-256 fingerprint of the DER. A certificate belongs to exactly one owner, user or
@@ -409,6 +412,46 @@ where the people who run the servers keep their own contacts current. Reading th
 open to anyone signed in, and says which of the two applies so the UI shows the controls
 only to somebody who may use them.
 
+### The audit trail
+
+Every entry carries a history: what happened to it, when, and who did it. Expand a row on
+either table to read it, ten records at a time, newest first.
+
+| Recorded | When |
+|----------|------|
+| **Discovered** | the first sweep to see the entry |
+| **Certificate published / withdrawn** | the directory started or stopped publishing one |
+| **Certificate status changed** | valid → expiring soon → expired, from a sweep or the hourly re-evaluation |
+| **Alert sent / failed** | one record per delivery channel, per alert — including the ones that threw |
+| **Point of contact added / removed** | somebody edited the managed list |
+| **Pruned** | the entry was deleted after going unseen |
+
+What is recorded is **changes**. A sweep that finds a hundred thousand entries exactly as
+it left them writes nothing; the sweep itself is already in `sync_run`. An entry seen for
+the first time is one record however many certificates it arrived with — those certificates
+are what the entry *is*, not something that happened to it, and a record each would bury
+every real change under a hundred thousand rows of "we looked".
+
+The actor is whoever was signed in, or the job that did it (`sync`, `changelog`,
+`expiry refresh`, `prune`) when nobody was. A sweep somebody triggers from the UI is
+recorded as theirs, because it was.
+
+```
+audit_event
+  subject_type + subject_id   the entry, with no foreign key
+  subject_dn + subject_name   copied in, and all that is left after a prune
+  actor                       a person, or the job
+```
+
+The subject is **not** a foreign key on purpose. An audit record has to outlive what it
+describes — the most interesting record of all is the one saying an entry was deleted — and
+a foreign key would either take the record with it or refuse the deletion.
+
+Nothing is ever trimmed unless asked: `cert-alert.audit.retention.enabled` is `false`, and
+turning it on removes records older than `cert-alert.audit.retention.after` (a year by
+default) on a weekly schedule. `cert-alert.audit.enabled: false` stops new records being
+written without deleting or hiding what is already there.
+
 ### Other endpoints
 
 | Method | Path                                | Purpose                                  |
@@ -428,6 +471,8 @@ only to somebody who may use them.
 | `POST` | `/api/v1/servers/{id}/contacts`     | Add one: `{"userId":…}` or `{"email":…}` |
 | `DELETE` | `/api/v1/servers/{id}/contacts/{contactId}` | Remove one                   |
 | `GET`  | `/api/v1/users/search?q=`           | People matching, for the contact picker  |
+| `GET`  | `/api/v1/users/{id}/audit`          | A person's history, `?page=&size=`       |
+| `GET`  | `/api/v1/servers/{id}/audit`        | A server's history, `?page=&size=`       |
 
 Errors come back as RFC 7807 problem details. Actuator is at `/actuator`
 (`health`, `info`, `metrics`, `loggers`); the LDAP health indicator reports the
@@ -435,8 +480,8 @@ directory connection.
 
 ## The scheduled jobs
 
-Four schedules, because they are four different kinds of work. All are configured under
-`cert-alert.ldap` and evaluated in UTC.
+Four on the directory, plus one that trims the audit trail. All are evaluated in UTC; the
+first four are configured under `cert-alert.ldap` and the last under `cert-alert.audit`.
 
 | Job         | Default cron      | What it does                                             |
 |-------------|-------------------|----------------------------------------------------------|
@@ -444,6 +489,7 @@ Four schedules, because they are four different kinds of work. All are configure
 | **servers** | `0 0 4 * * *`     | Scrapes IC Non-Person Entities, staggered from the above  |
 | **refresh** | `0 15 * * * *`    | Re-evaluates cached expiry; reads no LDAP                 |
 | **prune**   | `0 0 6 * * SUN`   | Removes entries the directory has stopped publishing      |
+| **audit retention** | `0 30 3 * * SUN` | Trims the audit trail; off unless turned on        |
 
 Alongside them, the [changelog connector](#following-the-changelog) follows the directory
 continuously, so the sweeps are a backstop rather than the only way a change arrives.
@@ -656,7 +702,7 @@ scripts/                 the dummy directory generator
 src/main/java/com/winllc/certalert/
 ├── alert/       notifier SPI, dispatcher, log and email channels
 ├── config/      expiry thresholds, clock, DataTables repository factory
-├── domain/      DirectoryUser, DirectoryServer, CachedCertificate, ServerContact
+├── domain/      DirectoryUser, DirectoryServer, CachedCertificate, ServerContact, AuditEvent
 ├── ldap/        attribute mapping, paged streaming directory client
 ├── repository/  DataTables repositories and the filter specifications
 ├── security/    X.509 and directory-password authentication, roles

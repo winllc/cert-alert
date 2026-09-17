@@ -182,3 +182,66 @@ table.datatable tfoot th {
         flex-wrap: wrap;
     }
 }
+
+/* An entry's history, at the bottom of its expanded row. */
+.audit {
+    padding-top: 0.75rem;
+    margin-top: 0.75rem;
+    border-top: 1px solid var(--tblr-border-color);
+}
+
+.audit-heading {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+}
+
+.audit-table {
+    width: 100%;
+    font-size: 0.8125rem;
+}
+
+.audit-table td {
+    padding: 0.2rem 0.75rem 0.2rem 0;
+    vertical-align: top;
+    border-top: 1px solid var(--tblr-border-color);
+    /* The table this sits inside is text-nowrap, and a summary is a sentence. */
+    white-space: normal;
+}
+
+.audit-table tr:first-child td {
+    border-top: 0;
+}
+
+.audit-table td.audit-when {
+    width: 10rem;
+    white-space: nowrap;
+    color: var(--tblr-secondary);
+}
+
+.audit-table td.audit-action {
+    width: 12rem;
+}
+
+.audit-table td.audit-actor {
+    width: 10rem;
+    white-space: nowrap;
+    color: var(--tblr-secondary);
+}
+
+.audit-pager {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    font-size: 0.8125rem;
+}
+
+@media (max-width: 40rem) {
+    .audit-table td.audit-when,
+    .audit-table td.audit-action,
+    .audit-table td.audit-actor {
+        width: auto;
+        white-space: normal;
+    }
+}

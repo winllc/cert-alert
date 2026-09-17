@@ -95,14 +95,14 @@ public class DirectoryChangeApplier {
     private Outcome reread(String dn, Instant now) {
         Optional<LdapUserEntry> user = entryReader.readUser(dn);
         if (user.isPresent()) {
-            persistenceService.upsertUsers(List.of(user.get()), now);
+            persistenceService.upsertUsers(List.of(user.get()), now, AuditActors.CHANGELOG);
             log.debug("Applied change to person '{}'", dn);
             return Outcome.APPLIED;
         }
 
         Optional<LdapServerEntry> server = entryReader.readServer(dn);
         if (server.isPresent()) {
-            persistenceService.upsertServers(List.of(server.get()), now);
+            persistenceService.upsertServers(List.of(server.get()), now, AuditActors.CHANGELOG);
             log.debug("Applied change to server '{}'", dn);
             return Outcome.APPLIED;
         }

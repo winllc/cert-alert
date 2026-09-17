@@ -233,6 +233,18 @@ cert-alert:
       # anonymous search, e.g. ["uid={0},ou=people"].
       user-dn-patterns: []
 
+  # The audit trail: what happened to an entry, and who did it. Records are written for
+  # changes only - a sweep that finds everything as it left it writes nothing here, and the
+  # sweep itself is in the run log.
+  audit:
+    enabled: true
+    retention:
+      # Off by default. An audit trail that quietly deletes itself is worse than one that
+      # grows; turn this on once you have decided how long you are keeping.
+      enabled: false
+      after: 365d
+      cron: "0 30 3 * * SUN"
+
   alerts:
     logging:
       enabled: true

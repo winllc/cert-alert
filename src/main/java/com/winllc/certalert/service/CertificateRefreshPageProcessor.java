@@ -2,6 +2,8 @@ package com.winllc.certalert.service;
 
 import com.winllc.certalert.alert.AlertDispatcher;
 import com.winllc.certalert.alert.CertificateAlert;
+import com.winllc.certalert.domain.AuditAction;
+import com.winllc.certalert.domain.AuditEvent;
 import com.winllc.certalert.domain.CachedCertificate;
 import com.winllc.certalert.domain.CertificateStatus;
 import com.winllc.certalert.domain.DirectoryServer;
@@ -33,18 +35,21 @@ public class CertificateRefreshPageProcessor {
     private final DirectoryServerRepository serverRepository;
     private final CertificateStatusEvaluator evaluator;
     private final AlertDispatcher alertDispatcher;
+    private final AuditService auditService;
 
     public CertificateRefreshPageProcessor(
             CachedCertificateRepository certificateRepository,
             DirectoryUserRepository userRepository,
             DirectoryServerRepository serverRepository,
             CertificateStatusEvaluator evaluator,
-            AlertDispatcher alertDispatcher) {
+            AlertDispatcher alertDispatcher,
+            AuditService auditService) {
         this.certificateRepository = certificateRepository;
         this.userRepository = userRepository;
         this.serverRepository = serverRepository;
         this.evaluator = evaluator;
         this.alertDispatcher = alertDispatcher;
+        this.auditService = auditService;
     }
 
     /**
@@ -61,6 +66,8 @@ public class CertificateRefreshPageProcessor {
         }
 
         List<Long> changedIds = new ArrayList<>();
+        List<AuditEvent> records = new ArrayList<>();
+        String actor = AuditActors.current(AuditActors.REFRESH);
         int alerts = 0;
         for (CachedCertificate certificate : stale) {
             CertificateStatus previous = certificate.getStatus();
@@ -70,13 +77,40 @@ public class CertificateRefreshPageProcessor {
             }
             certificate.updateStatus(current, now);
             changedIds.add(certificate.getId());
+            records.add(statusChange(certificate, previous, current, now, actor));
             if (current.isAlertable()) {
                 alerts += raiseAlert(certificate, current, now);
             }
         }
+        auditService.recordAll(records);
 
         refreshOwnerSummaries(changedIds);
         return new RefreshPage(stale.size(), alerts, stale.getLast().getId());
+    }
+
+    /**
+     * The other way a certificate's state changes: not because the directory published
+     * something different, but because time passed. It reads the same in the history.
+     */
+    private AuditEvent statusChange(
+            CachedCertificate certificate,
+            CertificateStatus previous,
+            CertificateStatus current,
+            Instant now,
+            String actor) {
+
+        DirectoryUser user = certificate.getUser();
+        AuditEvent.SubjectRef subject = user != null
+                ? AuditEvent.SubjectRef.of(user)
+                : AuditEvent.SubjectRef.of(certificate.getServer());
+        return AuditEvent.about(
+                        subject,
+                        AuditAction.CERTIFICATE_STATUS_CHANGED,
+                        "The certificate for %s went from %s to %s"
+                                .formatted(certificate.getSubjectDn(), previous, current),
+                        now)
+                .by(actor)
+                .forCertificate(certificate.getSha256Fingerprint());
     }
 
     private int raiseAlert(CachedCertificate certificate, CertificateStatus status, Instant now) {
@@ -85,6 +119,7 @@ public class CertificateRefreshPageProcessor {
         if (user != null) {
             alertDispatcher.dispatch(CertificateAlert.from(
                     OwnerType.USER,
+                    user.getId(),
                     nameOf(user),
                     user.getDn(),
                     user.getEmail(),
@@ -98,6 +133,7 @@ public class CertificateRefreshPageProcessor {
         if (server != null) {
             alertDispatcher.dispatch(CertificateAlert.from(
                     OwnerType.SERVER,
+                    server.getId(),
                     server.getCommonName() == null ? server.getDn() : server.getCommonName(),
                     server.getDn(),
                     server.getServerPocDisplay(),

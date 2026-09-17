@@ -1,5 +1,7 @@
 package com.winllc.certalert.service;
 
+import com.winllc.certalert.domain.AuditAction;
+import com.winllc.certalert.domain.AuditEvent;
 import com.winllc.certalert.domain.DirectoryServer;
 import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.domain.ServerContact;
@@ -40,16 +42,19 @@ public class ServerContactService {
     private final DirectoryServerRepository serverRepository;
     private final DirectoryUserRepository userRepository;
     private final ServerContactRepository contactRepository;
+    private final AuditService auditService;
     private final Clock clock;
 
     public ServerContactService(
             DirectoryServerRepository serverRepository,
             DirectoryUserRepository userRepository,
             ServerContactRepository contactRepository,
+            AuditService auditService,
             Clock clock) {
         this.serverRepository = serverRepository;
         this.userRepository = userRepository;
         this.contactRepository = contactRepository;
+        this.auditService = auditService;
         this.clock = clock;
     }
 
@@ -77,6 +82,7 @@ public class ServerContactService {
 
         ServerContact contact = ServerContact.forUser(server, user, addedBy, Instant.now(clock));
         contactRepository.save(contact);
+        recordAdded(server, contact, addedBy);
         log.info("Added {} as a point of contact for {}, by {}", user.getDn(), server.getDn(), addedBy);
         return contact;
     }
@@ -105,6 +111,7 @@ public class ServerContactService {
             }
             ServerContact contact = ServerContact.forUser(server, owner, addedBy, Instant.now(clock));
             contactRepository.save(contact);
+            recordAdded(server, contact, addedBy);
             log.info("Added {} as a point of contact for {} (matched {}), by {}",
                     owner.getDn(), server.getDn(), address, addedBy);
             return contact;
@@ -112,6 +119,7 @@ public class ServerContactService {
 
         ServerContact contact = ServerContact.forEmail(server, address, addedBy, Instant.now(clock));
         contactRepository.save(contact);
+        recordAdded(server, contact, addedBy);
         log.info("Added {} as a point of contact for {}, by {}", address, server.getDn(), addedBy);
         return contact;
     }
@@ -122,8 +130,16 @@ public class ServerContactService {
                 .findByIdAndServerId(contactId, serverId)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "No contact with id %d on server %d".formatted(contactId, serverId)));
+        DirectoryServer server = contact.getServer();
         contactRepository.delete(contact);
-        log.info("Removed point of contact {} from server {}", contact.label(), contact.getServer().getDn());
+        auditService.record(AuditEvent.about(
+                        AuditEvent.SubjectRef.of(server),
+                        AuditAction.CONTACT_REMOVED,
+                        "Removed %s as a point of contact".formatted(contact.label()),
+                        Instant.now(clock))
+                .by(AuditActors.current(AuditActors.SYSTEM))
+                .to(contact.address() != null ? contact.address() : contact.label()));
+        log.info("Removed point of contact {} from server {}", contact.label(), server.getDn());
     }
 
     /**
@@ -137,6 +153,17 @@ public class ServerContactService {
                 .filter(address -> address != null && !address.isBlank())
                 .distinct()
                 .toList();
+    }
+
+    private void recordAdded(DirectoryServer server, ServerContact contact, String addedBy) {
+        String how = contact.getUser() != null ? "directory entry" : "address";
+        auditService.record(AuditEvent.about(
+                        AuditEvent.SubjectRef.of(server),
+                        AuditAction.CONTACT_ADDED,
+                        "Added %s as a point of contact (%s)".formatted(contact.label(), how),
+                        Instant.now(clock))
+                .by(addedBy != null ? addedBy : AuditActors.current(AuditActors.SYSTEM))
+                .to(contact.address() != null ? contact.address() : contact.label()));
     }
 
     /**

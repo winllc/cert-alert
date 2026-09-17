@@ -71,8 +71,10 @@
                 return '/api/v1/servers/' + row.id + '/certificates';
             },
             detailPrefix: ServerContacts.placeholder,
+            detailSuffix: AuditTrail.placeholder('servers'),
             onDetailShown: function (row, $childRow) {
                 ServerContacts.attach($childRow);
+                AuditTrail.attach($childRow);
             },
             entryFields: [
                 ['DN', 'dn'],

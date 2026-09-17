@@ -56,6 +56,14 @@ public interface DirectoryUserRepository extends DataTablesRepository<DirectoryU
             + "where i like concat('%', :term, '%') order by u.displayName, u.uid")
     List<DirectoryUser> searchByIdentifier(@Param("term") String term, Pageable pageable);
 
+    /**
+     * What the next prune would delete, named well enough to audit. Read before the bulk
+     * delete, because afterwards there is nothing left to name.
+     */
+    @Query("select u.id as id, u.dn as dn, coalesce(u.displayName, u.commonName, u.uid) as name from DirectoryUser u "
+            + "where u.lastSyncedAt < :cutoff")
+    List<PrunableEntry> findPrunableBefore(@Param("cutoff") Instant cutoff);
+
     long countByLastSyncedAtBefore(Instant cutoff);
 
     /** Used by the prune job; the cascade takes the certificates and identifiers with it. */

@@ -2,6 +2,8 @@ package com.winllc.certalert.service;
 
 import com.winllc.certalert.alert.AlertDispatcher;
 import com.winllc.certalert.alert.CertificateAlert;
+import com.winllc.certalert.domain.AuditAction;
+import com.winllc.certalert.domain.AuditEvent;
 import com.winllc.certalert.domain.CachedCertificate;
 import com.winllc.certalert.domain.CertificateStatus;
 import com.winllc.certalert.domain.DirectoryEntry;
@@ -52,6 +54,7 @@ public class DirectoryPersistenceService {
     private final AlertDispatcher alertDispatcher;
     private final LdapProperties ldapProperties;
     private final ServerContactRepository contactRepository;
+    private final AuditService auditService;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -63,7 +66,8 @@ public class DirectoryPersistenceService {
             CertificateStatusEvaluator evaluator,
             AlertDispatcher alertDispatcher,
             LdapProperties ldapProperties,
-            ServerContactRepository contactRepository) {
+            ServerContactRepository contactRepository,
+            AuditService auditService) {
         this.userRepository = userRepository;
         this.serverRepository = serverRepository;
         this.certificateParser = certificateParser;
@@ -71,16 +75,18 @@ public class DirectoryPersistenceService {
         this.alertDispatcher = alertDispatcher;
         this.ldapProperties = ldapProperties;
         this.contactRepository = contactRepository;
+        this.auditService = auditService;
     }
 
     @Transactional
-    public BatchOutcome upsertUsers(List<LdapUserEntry> batch, Instant now) {
+    public BatchOutcome upsertUsers(List<LdapUserEntry> batch, Instant now, String actor) {
         if (batch.isEmpty()) {
             return BatchOutcome.EMPTY;
         }
         Map<String, DirectoryUser> existing = index(userRepository.findAllByDnIn(dns(batch, LdapUserEntry::dn)));
         BatchOutcome outcome = BatchOutcome.EMPTY;
         List<DirectoryUser> toSave = new ArrayList<>(batch.size());
+        List<Change> changes = new ArrayList<>();
 
         for (LdapUserEntry entry : batch) {
             DirectoryUser user = existing.get(entry.dn());
@@ -97,13 +103,19 @@ public class DirectoryPersistenceService {
                     now,
                     OwnerType.USER,
                     displayNameOf(user),
+                    user.getId(),
+                    created,
                     owner::getEmail,
                     owner::addCertificate,
-                    owner::removeCertificate);
+                    owner::removeCertificate,
+                    changes);
 
             user.markSynced(now);
             user.refreshCertificateSummary();
             toSave.add(user);
+            if (created) {
+                changes.add(new Change(user, AuditAction.ENTRY_DISCOVERED, discovered(entry.certificates()), null));
+            }
             outcome = outcome.plus(new BatchOutcome(
                     created ? 1 : 0,
                     reconciliation.cached(),
@@ -112,12 +124,13 @@ public class DirectoryPersistenceService {
         }
 
         userRepository.saveAll(toSave);
+        recordChanges(changes, now, actor);
         flushAndClear();
         return outcome;
     }
 
     @Transactional
-    public BatchOutcome upsertServers(List<LdapServerEntry> batch, Instant now) {
+    public BatchOutcome upsertServers(List<LdapServerEntry> batch, Instant now, String actor) {
         if (batch.isEmpty()) {
             return BatchOutcome.EMPTY;
         }
@@ -125,6 +138,7 @@ public class DirectoryPersistenceService {
                 index(serverRepository.findAllByDnIn(dns(batch, LdapServerEntry::dn)));
         BatchOutcome outcome = BatchOutcome.EMPTY;
         List<DirectoryServer> toSave = new ArrayList<>(batch.size());
+        List<Change> changes = new ArrayList<>();
 
         for (LdapServerEntry entry : batch) {
             DirectoryServer server = existing.get(entry.dn());
@@ -141,13 +155,19 @@ public class DirectoryPersistenceService {
                     now,
                     OwnerType.SERVER,
                     displayNameOf(server),
+                    server.getId(),
+                    created,
                     () -> contactsFor(owner),
                     owner::addCertificate,
-                    owner::removeCertificate);
+                    owner::removeCertificate,
+                    changes);
 
             server.markSynced(now);
             server.refreshCertificateSummary();
             toSave.add(server);
+            if (created) {
+                changes.add(new Change(server, AuditAction.ENTRY_DISCOVERED, discovered(entry.certificates()), null));
+            }
             outcome = outcome.plus(new BatchOutcome(
                     created ? 1 : 0,
                     reconciliation.cached(),
@@ -156,6 +176,7 @@ public class DirectoryPersistenceService {
         }
 
         serverRepository.saveAll(toSave);
+        recordChanges(changes, now, actor);
         flushAndClear();
         return outcome;
     }
@@ -206,6 +227,40 @@ public class DirectoryPersistenceService {
         server.setOrganization(entry.get(ServerField.ORGANIZATION));
         server.setOrganizationalUnit(entry.get(ServerField.ORGANIZATIONAL_UNIT));
         server.setServerPocs(entry.serverPocs());
+    }
+
+    /**
+     * Something that happened to an entry during a batch, held until the batch is written.
+     *
+     * <p>An entry seen for the first time has no id until it is saved, and an audit record
+     * pointing at no entry is not one anybody can read. So the records are built after the
+     * batch is written rather than as the changes are noticed.
+     */
+    private record Change(DirectoryEntry entity, AuditAction action, String summary, String fingerprint) {}
+
+    private void recordChanges(List<Change> changes, Instant now, String actor) {
+        if (changes.isEmpty()) {
+            return;
+        }
+        auditService.recordAll(changes.stream()
+                .map(change -> AuditEvent.about(subjectOf(change.entity()), change.action(), change.summary(), now)
+                        .by(actor)
+                        .forCertificate(change.fingerprint()))
+                .toList());
+    }
+
+    private AuditEvent.SubjectRef subjectOf(DirectoryEntry entity) {
+        return entity instanceof DirectoryUser user
+                ? AuditEvent.SubjectRef.of(user)
+                : AuditEvent.SubjectRef.of((DirectoryServer) entity);
+    }
+
+    private String discovered(List<byte[]> certificates) {
+        return switch (certificates.size()) {
+            case 0 -> "First seen in the directory, publishing no certificate";
+            case 1 -> "First seen in the directory, publishing 1 certificate";
+            default -> "First seen in the directory, publishing %d certificates".formatted(certificates.size());
+        };
     }
 
     /**
@@ -273,9 +328,12 @@ public class DirectoryPersistenceService {
             Instant now,
             OwnerType ownerType,
             String ownerName,
+            Long ownerId,
+            boolean created,
             Supplier<String> contact,
             Consumer<CachedCertificate> add,
-            Consumer<CachedCertificate> remove) {
+            Consumer<CachedCertificate> remove,
+            List<Change> changes) {
 
         Map<String, CachedCertificate> parsed = parseAll(published, now, entity.getDn());
         Map<String, CachedCertificate> existing = new LinkedHashMap<>();
@@ -289,6 +347,12 @@ public class DirectoryPersistenceService {
             if (!parsed.containsKey(certificate.getSha256Fingerprint())) {
                 remove.accept(certificate);
                 removed++;
+                changes.add(new Change(
+                        entity,
+                        AuditAction.CERTIFICATE_REMOVED,
+                        "The directory stopped publishing the certificate for %s, expiring %s"
+                                .formatted(certificate.getSubjectDn(), certificate.getNotAfter()),
+                        certificate.getSha256Fingerprint()));
             }
         }
 
@@ -301,9 +365,29 @@ public class DirectoryPersistenceService {
                 cached++;
             }
 
+            // A certificate that arrived with an entry nobody had seen before is what the
+            // entry is, not something that changed about it; the discovery covers it.
+            if (isNew && !created) {
+                changes.add(new Change(
+                        entity,
+                        AuditAction.CERTIFICATE_CACHED,
+                        "The directory published a certificate for %s, expiring %s"
+                                .formatted(certificate.getSubjectDn(), certificate.getNotAfter()),
+                        certificate.getSha256Fingerprint()));
+            }
+
             CertificateStatus previous = certificate.getStatus();
             CertificateStatus current = evaluator.evaluate(certificate.getNotAfter(), now);
             certificate.updateStatus(current, now);
+
+            if (!isNew && current != previous) {
+                changes.add(new Change(
+                        entity,
+                        AuditAction.CERTIFICATE_STATUS_CHANGED,
+                        "The certificate for %s went from %s to %s"
+                                .formatted(certificate.getSubjectDn(), previous, current),
+                        certificate.getSha256Fingerprint()));
+            }
 
             // A newly discovered certificate is not news, it is just the first time we
             // looked. Only a transition into a bad state is worth waking someone for.
@@ -311,6 +395,7 @@ public class DirectoryPersistenceService {
                 long daysUntilExpiry = evaluator.daysUntilExpiry(certificate.getNotAfter(), now);
                 alertDispatcher.dispatch(CertificateAlert.from(
                         ownerType,
+                        ownerId,
                         ownerName,
                         entity.getDn(),
                         contact.get(),

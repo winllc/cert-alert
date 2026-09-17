@@ -114,6 +114,9 @@ public class DirectorySyncService {
         private final SyncJob job;
         private final Instant now;
         private final List<T> batch;
+        // Resolved once, at the start: a sweep somebody triggered is theirs, and a
+        // scheduled one is the job's. The security context does not reach the batch.
+        private final String actor = AuditActors.current(AuditActors.SYNC);
         private BatchOutcome outcome = BatchOutcome.EMPTY;
         private int errors;
         private int written;
@@ -140,8 +143,8 @@ public class DirectorySyncService {
             batch.clear();
             try {
                 outcome = outcome.plus(job == SyncJob.USERS
-                        ? persistenceService.upsertUsers((List<LdapUserEntry>) pending, now)
-                        : persistenceService.upsertServers((List<LdapServerEntry>) pending, now));
+                        ? persistenceService.upsertUsers((List<LdapUserEntry>) pending, now, actor)
+                        : persistenceService.upsertServers((List<LdapServerEntry>) pending, now, actor));
             } catch (RuntimeException e) {
                 errors++;
                 log.error("Failed to write a batch of {} {} entries", pending.size(), job, e);

@@ -47,6 +47,10 @@
             detailUrl: function (row) {
                 return '/api/v1/users/' + row.id + '/certificates';
             },
+            detailSuffix: AuditTrail.placeholder('users'),
+            onDetailShown: function (row, $childRow) {
+                AuditTrail.attach($childRow);
+            },
             entryFields: [
                 ['DN', 'dn'],
                 ['Employee type', 'employeeType'],

@@ -31,6 +31,14 @@ public interface DirectoryServerRepository extends DataTablesRepository<Director
     @EntityGraph(attributePaths = "serverPocs")
     Optional<DirectoryServer> findWithPocsById(Long id);
 
+    /**
+     * What the next prune would delete, named well enough to audit. Read before the bulk
+     * delete, because afterwards there is nothing left to name.
+     */
+    @Query("select s.id as id, s.dn as dn, coalesce(s.commonName, s.uid) as name from DirectoryServer s "
+            + "where s.lastSyncedAt < :cutoff")
+    List<PrunableEntry> findPrunableBefore(@Param("cutoff") Instant cutoff);
+
     long countByLastSyncedAtBefore(Instant cutoff);
 
     /** Used by the prune job; the cascade takes the certificates and contacts with it. */

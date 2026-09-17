@@ -2,6 +2,7 @@ package com.winllc.certalert.scheduling;
 
 import com.winllc.certalert.domain.SyncJob;
 import com.winllc.certalert.ldap.LdapProperties;
+import com.winllc.certalert.service.AuditService;
 import com.winllc.certalert.service.CertificateRefreshService;
 import com.winllc.certalert.service.DirectoryPruneService;
 import com.winllc.certalert.service.DirectorySyncService;
@@ -27,6 +28,8 @@ import org.springframework.stereotype.Component;
  *       cheap enough to run hourly and keeps alerts and the tables current between sweeps.
  *   <li><b>prune</b> removes entries the directory has stopped publishing. It is off by
  *       default: deleting records is not something to start doing on its own.
+ *   <li><b>audit retention</b> trims the audit trail, and is off by default for the same
+ *       reason - more so, since the whole point of that table is that it remembers.
  * </ul>
  *
  * <p>Every job is guarded against overlapping itself. A sweep of a directory with 100,000+
@@ -43,6 +46,7 @@ public class DirectoryJobScheduler {
     private final DirectorySyncService syncService;
     private final CertificateRefreshService refreshService;
     private final DirectoryPruneService pruneService;
+    private final AuditService auditService;
     private final LdapProperties properties;
 
     private final Map<SyncJob, AtomicBoolean> running = new EnumMap<>(SyncJob.class);
@@ -51,10 +55,12 @@ public class DirectoryJobScheduler {
             DirectorySyncService syncService,
             CertificateRefreshService refreshService,
             DirectoryPruneService pruneService,
+            AuditService auditService,
             LdapProperties properties) {
         this.syncService = syncService;
         this.refreshService = refreshService;
         this.pruneService = pruneService;
+        this.auditService = auditService;
         this.properties = properties;
         for (SyncJob job : SyncJob.values()) {
             running.put(job, new AtomicBoolean(false));
@@ -74,6 +80,19 @@ public class DirectoryJobScheduler {
     @Scheduled(cron = "${cert-alert.ldap.sync.refresh-cron}", zone = "UTC")
     public void refreshExpiry() {
         runOnce(SyncJob.REFRESH, refreshService::refresh);
+    }
+
+    /**
+     * Trimming the audit trail. Not guarded like the others: it is one delete statement,
+     * and it is not recorded in the run log because the run log is about the directory.
+     */
+    @Scheduled(cron = "${cert-alert.audit.retention.cron}", zone = "UTC")
+    public void trimAuditTrail() {
+        try {
+            auditService.trim();
+        } catch (RuntimeException e) {
+            log.error("Trimming the audit trail failed", e);
+        }
     }
 
     @Scheduled(cron = "${cert-alert.ldap.prune.cron}", zone = "UTC")
