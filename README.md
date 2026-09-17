@@ -98,17 +98,89 @@ docker run --rm -p 8080:8080 \
   cert-alert:latest
 ```
 
-Or with a database alongside it:
+Or with a database and a directory alongside it:
+
+```bash
+docker compose up --build
+```
+
+That brings up three services — PostgreSQL, a stand-in OpenLDAP, and the application —
+and waits for the first two to be healthy before starting the third. Sign in at
+<http://localhost:8080> as `alice` / `password` and press **Sync directory**.
+
+To point it at a real directory instead, override the connection. The stand-in keeps
+running; nothing reads it.
 
 ```bash
 CERT_ALERT_LDAP_URL=ldaps://directory.example.gov:636 \
 CERT_ALERT_LDAP_BASE=dc=example,dc=gov \
+CERT_ALERT_LDAP_USER='cn=cert-alert,ou=services,dc=example,dc=gov' \
+CERT_ALERT_LDAP_PASSWORD=... \
 docker compose up --build
 ```
 
-Compose brings up PostgreSQL and waits for it to be healthy. It deliberately does **not**
-bring up an LDAP server: this application is an index over somebody's existing directory,
-and a stand-in without the IC FSD schema would prove nothing.
+#### The stand-in directory
+
+`docker/openldap/` builds a slapd carrying `docker/openldap/schema/ic-fsd.schema` — the IC
+FSD attributes and the `icOrgPerson` and `icOrgServer` object classes, with the OIDs the
+specification publishes. It is a demo, and looks like one: plaintext LDAP on port 1389,
+passwords in the clear, and a default password on everything.
+
+The first time its volume is empty it generates a directory. How much is up to you:
+
+```bash
+CERT_ALERT_DUMMY_USERS=5000 CERT_ALERT_DUMMY_SERVERS=1500 docker compose up --build
+```
+
+Or mount an LDIF of your own at `/bootstrap` and it loads that instead. `ldapsearch` works
+against it from the host:
+
+```bash
+ldapsearch -x -H ldap://localhost:1389 \
+  -D 'cn=cert-alert,ou=services,dc=example,dc=test' -w cert-alert \
+  -b 'dc=example,dc=test' '(objectClass=icOrgServer)' cn serverPOC
+```
+
+Two things it cannot demonstrate. It serves plain LDAP, so X.509 sign-in still needs
+keystores of your own. And OpenLDAP publishes no `cn=changelog` — that is a 389 Directory
+Server and Sun/Oracle DSEE feature — so the changelog connector stays off against it and
+the sweeps are what keep the cache current.
+
+#### Generating the data
+
+`scripts/generate-directory-data.sh` writes the LDIF, and is what the image runs on first
+boot. It needs bash and openssl and nothing else, so it is equally useful for filling a
+directory of your own:
+
+```bash
+./scripts/generate-directory-data.sh --users 500 --servers 200 > directory.ldif
+# -c because the LDIF carries ou=people and ou=servers, which a directory may already have
+ldapadd -c -x -H ldap://localhost:1389 -D 'cn=admin,dc=example,dc=test' -w admin -f directory.ldif
+```
+
+What it produces is deliberate rather than random: the same arguments give the same people
+and servers every time, down to the addresses and who contacts whom. Only the certificates
+move, because they are minted against the clock.
+
+- **Certificates are real X.509**, minted by a throwaway CA, spread across every state the
+  application reports: valid for years, inside the 30-day warning window, inside the 7-day
+  critical one, expired, and absent. Each is distinct, so fingerprints identify an entry
+  the way X.509 sign-in needs them to.
+- **Points of contact are written both ways round.** `serverPOC` is a name in the
+  specification and an address in most real directories, so roughly a third are names,
+  most are addresses, and every ninth is an organization that matches nobody — which is
+  how a server ends up with no one to tell about an expiry.
+- **Contacts repeat.** They are drawn from the first fifth of the people, so filtering
+  servers by one person returns several rows rather than one.
+- `alice` / `password` is the administrator, matching the `dev` profile's sample.
+
+Certificates are what make it slow: on the machine this was written on, about twenty
+seconds per thousand entries against one or two without them. Pass `--no-certificates`
+when what you want is volume — a hundred thousand people to watch the paged sweep work:
+
+```bash
+./scripts/generate-directory-data.sh --users 100000 --servers 20000 --no-certificates > big.ldif
+```
 
 Notes on the image:
 
@@ -538,7 +610,9 @@ class SlackAlertNotifier implements AlertNotifier {
 
 ```
 Dockerfile               three-stage image build
-docker-compose.yml       the image with a PostgreSQL alongside it
+docker-compose.yml       the application, a PostgreSQL and a stand-in directory
+docker/openldap/         slapd carrying the IC FSD schema, for the compose stack
+scripts/                 the dummy directory generator
 src/main/java/com/winllc/certalert/
 ├── alert/       notifier SPI, dispatcher, log and email channels
 ├── config/      expiry thresholds, clock, DataTables repository factory

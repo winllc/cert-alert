@@ -1,11 +1,20 @@
-# A Postgres-backed run of cert-alert, for trying the image out.
+# A Postgres-backed run of cert-alert with a directory to scrape, for trying the image out.
 #
-# No LDAP server here: this application is an index over somebody's existing directory, and
-# a stand-in would need the IC FSD schema to be worth anything. Point CERT_ALERT_LDAP_* at
-# a real one - see the README for which attributes it reads.
+#   docker compose up --build
+#
+# Three services: PostgreSQL, a stand-in OpenLDAP loaded with generated people and
+# servers, and the application. Everything has a default password and the directory
+# serves plaintext LDAP; this is a demo, not a deployment.
+#
+# Sign in at http://localhost:8080 as alice / password, then press Sync directory.
+#
+# To point it at a real directory instead, override the CERT_ALERT_LDAP_* variables - the
+# stand-in keeps running but nothing reads it:
 #
 #   CERT_ALERT_LDAP_URL=ldaps://directory.example.gov:636 \
 #   CERT_ALERT_LDAP_BASE=dc=example,dc=gov \
+#   CERT_ALERT_LDAP_USER='cn=cert-alert,ou=services,dc=example,dc=gov' \
+#   CERT_ALERT_LDAP_PASSWORD=... \
 #   docker compose up --build
 
 services:
@@ -25,6 +34,30 @@ services:
       retries: 10
     restart: unless-stopped
 
+  openldap:
+    build:
+      context: .
+      dockerfile: docker/openldap/Dockerfile
+    environment:
+      LDAP_ADMIN_PASSWORD: ${CERT_ALERT_LDAP_ADMIN_PASSWORD:-admin}
+      LDAP_SERVICE_PASSWORD: ${CERT_ALERT_LDAP_PASSWORD:-cert-alert}
+      # How much dummy data to generate the first time the volume is empty. Raise these to
+      # see the tables and the paged sweep under load; 100k is the case this was built for,
+      # though minting that many certificates takes a while - see the generator's
+      # --no-certificates.
+      LDAP_DUMMY_USERS: ${CERT_ALERT_DUMMY_USERS:-100}
+      LDAP_DUMMY_SERVERS: ${CERT_ALERT_DUMMY_SERVERS:-40}
+    volumes:
+      - ldap-data:/var/lib/ldap
+      # Mount a directory of your own here to load it instead of generating one. Anything
+      # but 00-base.ldif is loaded in name order.
+      # - ./my-directory:/bootstrap:ro
+    ports:
+      # Exposed so you can point ldapsearch at it; the application reaches it over the
+      # compose network and does not need this.
+      - "1389:389"
+    restart: unless-stopped
+
   cert-alert:
     build:
       context: .
@@ -33,17 +66,23 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      openldap:
+        condition: service_healthy
     environment:
       SPRING_PROFILES_ACTIVE: postgres
       CERT_ALERT_DB_URL: jdbc:postgresql://postgres:5432/certalert
       CERT_ALERT_DB_USER: certalert
       CERT_ALERT_DB_PASSWORD: ${CERT_ALERT_DB_PASSWORD:-certalert}
-      CERT_ALERT_LDAP_URL: ${CERT_ALERT_LDAP_URL:-ldap://localhost:389}
-      CERT_ALERT_LDAP_BASE: ${CERT_ALERT_LDAP_BASE:-}
-      CERT_ALERT_LDAP_USER: ${CERT_ALERT_LDAP_USER:-}
-      CERT_ALERT_LDAP_PASSWORD: ${CERT_ALERT_LDAP_PASSWORD:-}
+      CERT_ALERT_LDAP_URL: ${CERT_ALERT_LDAP_URL:-ldap://openldap:389}
+      CERT_ALERT_LDAP_BASE: ${CERT_ALERT_LDAP_BASE:-dc=example,dc=test}
+      CERT_ALERT_LDAP_USER: ${CERT_ALERT_LDAP_USER:-cn=cert-alert,ou=services,dc=example,dc=test}
+      CERT_ALERT_LDAP_PASSWORD: ${CERT_ALERT_LDAP_PASSWORD:-cert-alert}
+      # Where the password fallback looks a person up. The stand-in keeps them in one
+      # place; a real directory may want this empty, to search the whole tree.
+      CERT_ALERT_SECURITY_LDAP_USER_SEARCH_BASE: ${CERT_ALERT_LDAP_USER_SEARCH_BASE:-ou=people}
       # Whoever should be able to trigger jobs; any value the directory knows them by.
-      CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS: ${CERT_ALERT_ADMINS:-}
+      # alice is the generated directory's administrator.
+      CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS: ${CERT_ALERT_ADMINS:-alice@intelink.ic.gov}
     ports:
       - "8080:8080"
     # X.509 client certificates need TLS, which needs keystores. Mount them read-only
@@ -55,3 +94,4 @@ services:
 
 volumes:
   postgres-data:
+  ldap-data:

@@ -1,0 +1,45 @@
+# Configuration for the cert-alert stand-in directory. Not a template for a real one:
+# it serves plaintext LDAP, holds passwords in the clear, and exists to be thrown away.
+#
+# The slapd.conf format rather than cn=config, because this configuration is fixed at
+# build time and a file that can be read top to bottom is worth more here than one that
+# can be edited over LDAP.
+
+include         /etc/ldap/schema/core.schema
+include         /etc/ldap/schema/cosine.schema
+include         /etc/ldap/schema/inetorgperson.schema
+include         /etc/ldap/schema/ic-fsd.schema
+
+pidfile         /var/lib/ldap/slapd.pid
+argsfile        /var/lib/ldap/slapd.args
+
+moduleload      back_mdb.la
+
+database        mdb
+suffix          "dc=example,dc=test"
+rootdn          "cn=admin,dc=example,dc=test"
+rootpw          @ADMIN_PASSWORD_HASH@
+directory       /var/lib/ldap
+# 512MB of map, which is room for a few hundred thousand entries with certificates.
+maxsize         536870912
+
+# Indexes matching how the application searches: an objectClass filter for each sweep,
+# and uid or an address when somebody signs in.
+index           objectClass             eq
+index           uid,cn                  eq,sub
+index           icEmail,mail            eq,sub
+index           serverPOC               eq,sub
+index           entryCSN,entryUUID      eq
+
+# The service account reads everything, including published certificates. Everyone else
+# gets enough to authenticate and to look at entries once they have.
+access to attrs=userPassword
+        by self write
+        by anonymous auth
+        by * none
+
+access to *
+        by dn.exact="cn=cert-alert,ou=services,dc=example,dc=test" read
+        by self read
+        by users read
+        by anonymous none

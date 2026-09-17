@@ -1,0 +1,22 @@
+# The suffix, and the account the application binds as. The people and servers are
+# generated separately - see scripts/generate-directory-data.sh.
+
+dn: dc=example,dc=test
+objectClass: top
+objectClass: dcObject
+objectClass: organization
+dc: example
+o: Example Agency
+
+dn: ou=services,dc=example,dc=test
+objectClass: top
+objectClass: organizationalUnit
+ou: services
+
+dn: cn=cert-alert,ou=services,dc=example,dc=test
+objectClass: top
+objectClass: organizationalRole
+objectClass: simpleSecurityObject
+cn: cert-alert
+description: The read-only account cert-alert binds as to sweep the directory
+userPassword: @SERVICE_PASSWORD@

@@ -9,6 +9,10 @@ import com.unboundid.ldap.sdk.LDAPException;
 import com.unboundid.ldap.sdk.Modification;
 import com.unboundid.ldap.sdk.ModificationType;
 import com.unboundid.ldap.sdk.ModifyRequest;
+import com.unboundid.ldif.LDIFException;
+import com.unboundid.ldif.LDIFReader;
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -74,6 +78,23 @@ public final class EmbeddedDirectory implements AutoCloseable {
                 SERVERS_DN,
                 new Attribute("objectClass", "top", "organizationalUnit"),
                 new Attribute("ou", "servers")));
+    }
+
+    /**
+     * Loads an LDIF file, skipping any entry the structure already holds. Used to run the
+     * scrape over what scripts/generate-directory-data.sh produces.
+     */
+    public void importLdif(Path ldif) {
+        try (LDIFReader reader = new LDIFReader(ldif.toFile())) {
+            Entry entry;
+            while ((entry = reader.readEntry()) != null) {
+                if (server.getEntry(entry.getDN()) == null) {
+                    server.add(entry);
+                }
+            }
+        } catch (IOException | LDIFException | LDAPException e) {
+            throw new IllegalStateException("Could not load " + ldif, e);
+        }
     }
 
     /** Replaces a single attribute, as an ordinary directory modify would. */
