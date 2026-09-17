@@ -14,6 +14,7 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import org.hibernate.annotations.BatchSize;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -154,12 +155,24 @@ public class DirectoryUser extends DirectoryEntry {
     }
 
     /**
-     * Recomputes the set of values a server might use to name this person. Called after
-     * the directory attributes have been applied.
+     * Recomputes the set of values a server might use to name this person, from what the
+     * directory publishes. Called after the directory attributes have been applied.
      *
      * @param primaryEmail the address chosen as primary by the configured precedence
      */
     public void refreshIdentifiers(String primaryEmail) {
+        refreshIdentifiers(primaryEmail, java.util.List.of());
+    }
+
+    /**
+     * The same, plus the addresses added here - an old address, a role address, a team's
+     * list. A sweep rebuilds this set from the directory, so the extra addresses have to be
+     * handed back in or they would last until the next one.
+     *
+     * @param primaryEmail the address chosen as primary by the configured precedence
+     * @param aliases addresses from {@code user_email_alias}
+     */
+    public void refreshIdentifiers(String primaryEmail, Collection<String> aliases) {
         this.email = normalise(primaryEmail);
         Set<String> refreshed = new LinkedHashSet<>();
         Stream.of(email, mail, icEmail, internetEmail, niprnetEmail, siprnetEmail,
@@ -167,6 +180,12 @@ public class DirectoryUser extends DirectoryEntry {
                 .map(DirectoryUser::normalise)
                 .filter(java.util.Objects::nonNull)
                 .forEach(refreshed::add);
+        if (aliases != null) {
+            aliases.stream()
+                    .map(DirectoryUser::normalise)
+                    .filter(java.util.Objects::nonNull)
+                    .forEach(refreshed::add);
+        }
         // Replace in place: Hibernate tracks this collection, and swapping the instance
         // would make it re-insert every row on every sync.
         if (!refreshed.equals(this.identifiers)) {

@@ -31,6 +31,11 @@ public enum AuditAction {
 
     CONTACT_REMOVED("Point of contact removed"),
 
+    /** An address this person answers to, added here rather than published by the directory. */
+    ADDRESS_ADDED("Address added"),
+
+    ADDRESS_REMOVED("Address removed"),
+
     /** An alert was handed to a delivery channel and the channel accepted it. */
     ALERT_SENT("Alert sent"),
 

@@ -81,12 +81,19 @@ public class SecurityConfig {
                 // not something a reader gets to do.
                 .requestMatchers(HttpMethod.POST, "/api/v1/sync/**", "/api/v1/changelog/**")
                 .hasRole("ADMIN")
-                // Editing a server's points of contact decides who hears about an expiry.
-                // Administrators by default; see cert-alert.security.contact-editors.
+                // Editing a server's points of contact, or the addresses a person answers
+                // to, decides who hears about an expiry - the addresses because they are
+                // what binds a person to a server. Administrators by default; see
+                // cert-alert.security.contact-editors.
                 .requestMatchers(
-                        HttpMethod.POST, "/api/v1/servers/*/contacts", "/api/v1/servers/*/contacts/**")
+                        HttpMethod.POST,
+                        "/api/v1/servers/*/contacts",
+                        "/api/v1/servers/*/contacts/**",
+                        "/api/v1/users/*/addresses",
+                        "/api/v1/users/*/addresses/**")
                 .access(contactEditors(properties))
-                .requestMatchers(HttpMethod.DELETE, "/api/v1/servers/*/contacts/**")
+                .requestMatchers(
+                        HttpMethod.DELETE, "/api/v1/servers/*/contacts/**", "/api/v1/users/*/addresses/**")
                 .access(contactEditors(properties))
                 .anyRequest()
                 .authenticated());

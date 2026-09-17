@@ -402,6 +402,26 @@ their address, and the server resolves it to the full identifier set — so foll
 link finds servers named either way. The free-text box next to it matches a literal
 `serverPOC` value.
 
+### Addresses a person answers to
+
+The directory publishes up to five addresses per person and all five are indexed. A
+server's `serverPOC`, though, is written by whoever runs the server, and they write what
+they use: an old address, a role address, or the team's distribution list. A server named
+after a list has no contact at all as far as the directory is concerned.
+
+So a person's details page carries **addresses added here** alongside the published ones.
+An address added there joins the set a `serverPOC` is matched against, and the servers
+named after it become theirs immediately — not at the next sweep.
+
+A **group address** is one several people answer, which is what a distribution list is.
+Each of them carries their own row for it, and each of them is a contact for the servers
+named after it. The badge says how many others share it.
+
+A sweep rebuilds each person's identifiers from the directory, so the added addresses are
+handed back to it during the sweep rather than being re-added afterwards. Removing one
+rebuilds the set from both sources rather than striking out the value, so removing an
+address the directory also publishes leaves it in place.
+
 ### Managing points of contact
 
 `serverPOC` is the directory's, and a sweep replaces it. That is right for a cached copy of
@@ -511,6 +531,9 @@ for.
 | `POST` | `/api/v1/servers/{id}/contacts`     | Add one: `{"userId":…}` or `{"email":…}` |
 | `DELETE` | `/api/v1/servers/{id}/contacts/{contactId}` | Remove one                   |
 | `GET`  | `/api/v1/users/search?q=`           | People matching, for the contact picker  |
+| `GET`  | `/api/v1/users/{id}/addresses`      | Both lists of addresses                  |
+| `POST` | `/api/v1/users/{id}/addresses`      | Add one: `{"address":…,"kind":"GROUP"}`  |
+| `DELETE` | `/api/v1/users/{id}/addresses/{aliasId}` | Remove one                       |
 | `GET`  | `/api/v1/users/{id}/audit`          | A person's history, `?page=&size=`       |
 | `GET`  | `/api/v1/servers/{id}/audit`        | A server's history, `?page=&size=`       |
 | `POST` | `/api/v1/datatables/audit`          | One entry's history as a search table, `?subjectType=&subjectId=&action=` |

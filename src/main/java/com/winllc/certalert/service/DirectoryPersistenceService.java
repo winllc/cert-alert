@@ -18,10 +18,12 @@ import com.winllc.certalert.ldap.UserField;
 import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.DirectoryUserRepository;
 import com.winllc.certalert.repository.ServerContactRepository;
+import com.winllc.certalert.repository.UserEmailAliasRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -54,6 +56,7 @@ public class DirectoryPersistenceService {
     private final AlertDispatcher alertDispatcher;
     private final LdapProperties ldapProperties;
     private final ServerContactRepository contactRepository;
+    private final UserEmailAliasRepository aliasRepository;
     private final AuditService auditService;
 
     @PersistenceContext
@@ -67,6 +70,7 @@ public class DirectoryPersistenceService {
             AlertDispatcher alertDispatcher,
             LdapProperties ldapProperties,
             ServerContactRepository contactRepository,
+            UserEmailAliasRepository aliasRepository,
             AuditService auditService) {
         this.userRepository = userRepository;
         this.serverRepository = serverRepository;
@@ -75,6 +79,7 @@ public class DirectoryPersistenceService {
         this.alertDispatcher = alertDispatcher;
         this.ldapProperties = ldapProperties;
         this.contactRepository = contactRepository;
+        this.aliasRepository = aliasRepository;
         this.auditService = auditService;
     }
 
@@ -84,6 +89,11 @@ public class DirectoryPersistenceService {
             return BatchOutcome.EMPTY;
         }
         Map<String, DirectoryUser> existing = index(userRepository.findAllByDnIn(dns(batch, LdapUserEntry::dn)));
+        // One query for the batch: a sweep rebuilds each person's identifiers from the
+        // directory, and the addresses added here have to go back in or they would last
+        // only until the next sweep. Most people have none, and this costs one query per
+        // two hundred either way.
+        Map<Long, List<String>> aliases = aliasesFor(existing.values());
         BatchOutcome outcome = BatchOutcome.EMPTY;
         List<DirectoryUser> toSave = new ArrayList<>(batch.size());
         List<Change> changes = new ArrayList<>();
@@ -94,7 +104,8 @@ public class DirectoryPersistenceService {
             if (created) {
                 user = new DirectoryUser(entry.dn());
             }
-            applyAttributes(user, entry);
+            // An entry nobody has seen before has no id yet, and so no addresses of its own.
+            applyAttributes(user, entry, created ? List.of() : aliases.getOrDefault(user.getId(), List.of()));
 
             DirectoryUser owner = user;
             CertificateReconciliation reconciliation = reconcileCertificates(
@@ -181,7 +192,19 @@ public class DirectoryPersistenceService {
         return outcome;
     }
 
-    private void applyAttributes(DirectoryUser user, LdapUserEntry entry) {
+    private Map<Long, List<String>> aliasesFor(Collection<DirectoryUser> users) {
+        List<Long> ids = users.stream().map(DirectoryUser::getId).filter(java.util.Objects::nonNull).toList();
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, List<String>> byUser = new LinkedHashMap<>();
+        for (UserEmailAliasRepository.AliasAddress alias : aliasRepository.findAddressesByUserIdIn(ids)) {
+            byUser.computeIfAbsent(alias.getUserId(), key -> new ArrayList<>()).add(alias.getAddress());
+        }
+        return byUser;
+    }
+
+    private void applyAttributes(DirectoryUser user, LdapUserEntry entry, List<String> aliases) {
         user.setUid(entry.get(UserField.UID));
         user.setCommonName(entry.get(UserField.COMMON_NAME));
         user.setDisplayName(entry.get(UserField.DISPLAY_NAME));
@@ -205,7 +228,7 @@ public class DirectoryPersistenceService {
         user.setResourceSecurityMark(entry.get(UserField.RESOURCE_SECURITY_MARK));
         user.setOrganization(entry.get(UserField.ORGANIZATION));
         user.setOrganizationalUnit(entry.get(UserField.ORGANIZATIONAL_UNIT));
-        user.refreshIdentifiers(primaryEmail(entry));
+        user.refreshIdentifiers(primaryEmail(entry), aliases);
     }
 
     private void applyAttributes(DirectoryServer server, LdapServerEntry entry) {

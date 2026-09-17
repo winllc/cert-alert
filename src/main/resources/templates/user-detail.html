@@ -100,6 +100,21 @@
                     </div>
                 </div>
 
+                <!--/* The addresses that bind this person to servers. The directory's are a
+                       cached copy; the ones added here reach the servers whose serverPOC is
+                       an address it never published. */-->
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <h3 class="card-title">Addresses this person answers to</h3>
+                        <span class="card-subtitle text-secondary ms-2">a serverPOC holding any of these binds that server to them</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="addresses contacts contacts-standalone" th:attr="data-user-id=${user.id}">
+                            <div class="text-secondary">Loading addresses…</div>
+                        </div>
+                    </div>
+                </div>
+
                 <!--/* What a server's serverPOC could name this person by. The specification
                        says that attribute carries a name; directories often hold an address,
                        so a person is indexed under every value that could be either. */-->
@@ -123,6 +138,7 @@
 </div>
 
 <div th:replace="~{fragments/layout :: scripts}"></div>
+<script th:src="@{/js/user-addresses.js}"></script>
 <script th:src="@{/js/audit-table.js}"></script>
 </body>
 </html>
