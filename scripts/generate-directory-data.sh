@@ -113,17 +113,39 @@ CONF
     openssl req -new -newkey rsa:2048 -nodes -x509 -days 3650 \
         -subj "/CN=cert-alert dummy data CA" \
         -keyout "$CA_DIR/ca.key" -out "$CA_DIR/ca.crt" 2>/dev/null
-    # One key for every leaf. These certificates exist to be parsed, not trusted.
-    openssl genrsa -out "$CA_DIR/leaf.key" 2048 2>/dev/null
+
+    # A key per kind rather than one for everything, so a report on what the directory is
+    # signing with has something to report. Generated once; signing is the cheap part.
+    openssl genrsa -out "$CA_DIR/leaf-rsa2048.key" 2048 2>/dev/null
+    openssl genrsa -out "$CA_DIR/leaf-rsa4096.key" 4096 2>/dev/null
+    openssl genrsa -out "$CA_DIR/leaf-rsa1024.key" 1024 2>/dev/null
+    openssl ecparam -name prime256v1 -genkey -noout -out "$CA_DIR/leaf-ec256.key" 2>/dev/null
 }
 
-# certificate <common-name> <san> <not-before-days> <not-after-days> -> base64 DER
+# The mix. Most of a real directory is one thing; the interest is in the rest of it, and a
+# metrics page with one row on it demonstrates nothing.
+#              0             1             2             3             4              5
+KEY_FILES=(leaf-rsa2048 leaf-rsa2048 leaf-rsa2048 leaf-rsa4096 leaf-rsa1024 leaf-ec256)
+KEY_DIGESTS=(sha256      sha256       sha384       sha256       sha1         sha256)
+
+# key_for <index> -> the key file to sign with
+key_for() {
+    printf '%s' "${KEY_FILES[$(( $1 % ${#KEY_FILES[@]} ))]}"
+}
+
+# digest_for <index> -> the message digest to sign with
+digest_for() {
+    printf '%s' "${KEY_DIGESTS[$(( $1 % ${#KEY_DIGESTS[@]} ))]}"
+}
+
+# certificate <common-name> <san> <not-before-days> <not-after-days> <key> <digest>
+#   -> base64 DER
 certificate() {
-    local cn="$1" san="$2" from="$3" to="$4"
-    openssl req -new -key "$CA_DIR/leaf.key" -subj "/CN=$cn" -addext "subjectAltName=$san" \
+    local cn="$1" san="$2" from="$3" to="$4" key="$5" digest="$6"
+    openssl req -new -key "$CA_DIR/$key.key" -subj "/CN=$cn" -addext "subjectAltName=$san" \
         -out "$CA_DIR/leaf.csr" 2>/dev/null
     openssl ca -batch -config "$CA_DIR/openssl.cnf" -in "$CA_DIR/leaf.csr" \
-        -out "$CA_DIR/leaf.crt" -notext \
+        -out "$CA_DIR/leaf.crt" -notext -md "$digest" \
         -startdate "$(at_days "$from")" -enddate "$(at_days "$to")" 2>/dev/null
     # A PEM body already is the base64 DER that LDIF wants, so it is read here rather than
     # piped through `openssl x509 | base64`. Three fewer processes per certificate, which
@@ -150,7 +172,8 @@ certificate_for() {
     [ "$CERTIFICATES" = true ] || return 0
     slot=$((index % 7))
     [ "$slot" -eq 6 ] && return 0
-    certificate "$cn" "$san" "${NOT_BEFORE[$slot]}" "${NOT_AFTER[$slot]}"
+    certificate "$cn" "$san" "${NOT_BEFORE[$slot]}" "${NOT_AFTER[$slot]}" \
+        "$(key_for "$index")" "$(digest_for "$index")"
 }
 
 # ---------------------------------------------------------------------------------------

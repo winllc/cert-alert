@@ -104,6 +104,11 @@ public class ViewController {
         return "project-detail";
     }
 
+    @GetMapping("/metrics")
+    public String metrics() {
+        return "metrics";
+    }
+
     @GetMapping("/notifications")
     public String notifications() {
         return "notifications";

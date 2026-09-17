@@ -166,6 +166,9 @@ move, because they are minted against the clock.
   application reports: valid for years, inside the 30-day warning window, inside the 7-day
   critical one, expired, and absent. Each is distinct, so fingerprints identify an entry
   the way X.509 sign-in needs them to.
+- **The keys and digests are mixed**: mostly RSA-2048 on SHA-256, with RSA-4096, EC P-256
+  and a tail of RSA-1024 on SHA-1. A metrics page comparing key sizes across a directory
+  where every certificate is identical compares nothing.
 - **Points of contact are written both ways round.** `serverPOC` is a name in the
   specification and an address in most real directories, so roughly a third are names,
   most are addresses, and every ninth is an organization that matches nobody — which is
@@ -495,6 +498,28 @@ turning it on removes records older than `cert-alert.audit.retention.after` (a y
 default) on a weekly schedule. `cert-alert.audit.enabled: false` stops new records being
 written without deleting or hiding what is already there.
 
+### Metrics
+
+`/metrics` reports on the directory as a whole rather than on one entry: how many
+certificates are cached and in what state, what is falling due in seven days and thirty and
+ninety, what the directory is signing with, and how many people have been told about it.
+
+**Issued against expiring** is the chart worth looking at. A bar per month for a year
+either side of today: to the left, when certificates were issued; to the right, when they
+run out. The bars past the marker are the renewals that have not happened yet, which is the
+thing a page like this exists to make visible.
+
+Every number is a grouped count done by the database, including the ones bucketed by month
+— reporting on a hundred thousand certificates by reading them into the application and
+counting them there would work exactly once, on a small directory.
+
+The chart is inline SVG drawn in the page's own script. Everything this application serves
+has to come out of the jar, and two series of twenty-five points do not justify shipping a
+charting library to an air-gapped network.
+
+"Channel deliveries" is a different number from "people told": one alert goes to every
+configured channel, and a channel that threw is still a delivery that was attempted.
+
 ### Projects
 
 The directory knows that a person is in an organization and that a server has a point of
@@ -580,6 +605,7 @@ for.
 | `POST` | `/api/v1/servers/{id}/contacts`     | Add one: `{"userId":…}` or `{"email":…}` |
 | `DELETE` | `/api/v1/servers/{id}/contacts/{contactId}` | Remove one                   |
 | `GET`  | `/api/v1/users/search?q=`           | People matching, for the contact picker  |
+| `GET`  | `/api/v1/metrics`                   | Everything the metrics page shows        |
 | `GET`  | `/api/v1/projects`                  | Every project, with its two counts       |
 | `POST` | `/api/v1/projects`                  | Create one                               |
 | `PUT`  | `/api/v1/projects/{id}`             | Rename it                                |

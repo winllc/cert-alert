@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Metrics')}"></head>
+<body>
+<svg th:replace="~{fragments/icons :: sprite}"></svg>
+
+<div class="page">
+    <header th:replace="~{fragments/layout :: navbar('metrics')}"></header>
+
+    <div class="page-wrapper">
+        <div class="page-header d-print-none">
+            <div class="container-xl">
+                <div class="row g-2 align-items-center">
+                    <div class="col">
+                        <div class="page-pretitle">IC Full Service Directory</div>
+                        <h2 class="page-title">Metrics</h2>
+                        <div class="text-secondary mt-1">
+                            What the directory is publishing, what is falling due, and who has been told
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="page-body" id="metrics-page">
+            <div class="container-xl">
+
+                <!--/* Per certificate rather than per entry: an entry's badge takes the worst
+                       of its certificates, which is the right answer for a table and the
+                       wrong one for a count of certificates. */-->
+                <div class="row row-deck row-cards">
+                    <div class="col-6 col-sm-3">
+                        <div class="card card-sm"><div class="card-body">
+                            <div class="h3 mb-0" data-metric="certificates">—</div>
+                            <div class="text-secondary">Certificates cached</div>
+                        </div></div>
+                    </div>
+                    <div class="col-6 col-sm-3">
+                        <div class="card card-sm"><div class="card-body">
+                            <div class="h3 mb-0 text-green" data-metric="valid">—</div>
+                            <div class="text-secondary">Valid</div>
+                        </div></div>
+                    </div>
+                    <div class="col-6 col-sm-3">
+                        <div class="card card-sm"><div class="card-body">
+                            <div class="h3 mb-0 text-yellow" data-metric="expiring">—</div>
+                            <div class="text-secondary">Expiring soon</div>
+                        </div></div>
+                    </div>
+                    <div class="col-6 col-sm-3">
+                        <div class="card card-sm"><div class="card-body">
+                            <div class="h3 mb-0 text-red" data-metric="expired">—</div>
+                            <div class="text-secondary">Expired</div>
+                        </div></div>
+                    </div>
+                </div>
+
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <h3 class="card-title">Issued against expiring</h3>
+                        <div class="card-actions">
+                            <span class="metric-legend">
+                                <span class="metric-swatch" style="background: var(--tblr-primary)"></span>
+                                issued
+                            </span>
+                            <span class="metric-legend">
+                                <span class="metric-swatch" style="background: var(--tblr-orange)"></span>
+                                expiring
+                            </span>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="metrics-chart"><span class="text-secondary">Loading…</span></div>
+                        <p class="text-secondary small mb-0 mt-2">
+                            A year either side of today, by the month a certificate's validity began and the
+                            month it ends. The bars to the right of the marker are the renewals that have not
+                            happened yet.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="row row-cards mt-3">
+                    <div class="col-12 col-lg-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Key algorithms and sizes</h3>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table card-table table-vcenter">
+                                    <thead><tr><th>Key</th><th class="text-end">Certificates</th><th></th></tr></thead>
+                                    <tbody id="metrics-keys">
+                                    <tr><td colspan="3" class="text-secondary">Loading…</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-12 col-lg-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Signature digests</h3>
+                                <span class="card-subtitle text-secondary ms-2">what a weak-hash report reads</span>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table card-table table-vcenter">
+                                    <thead><tr><th>Hash</th><th class="text-end">Certificates</th><th></th></tr></thead>
+                                    <tbody id="metrics-hashes">
+                                    <tr><td colspan="3" class="text-secondary">Loading…</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row row-cards mt-3">
+                    <div class="col-12 col-lg-6">
+                        <div class="card">
+                            <div class="card-header"><h3 class="card-title">Falling due</h3></div>
+                            <div class="table-responsive">
+                                <table class="table card-table table-vcenter">
+                                    <tbody>
+                                    <tr><td>Already expired</td><td class="mono text-end" data-metric="expired">—</td></tr>
+                                    <tr><td>Within 7 days</td><td class="mono text-end" data-metric="next7">—</td></tr>
+                                    <tr><td>Within 30 days</td><td class="mono text-end" data-metric="next30">—</td></tr>
+                                    <tr><td>Within 90 days</td><td class="mono text-end" data-metric="next90">—</td></tr>
+                                    <tr><td>Within a year</td><td class="mono text-end" data-metric="next365">—</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-12 col-lg-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Notifications</h3>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table card-table table-vcenter">
+                                    <tbody>
+                                    <tr><td>People told</td><td class="mono text-end" data-metric="raised">—</td></tr>
+                                    <tr><td>Still unread</td><td class="mono text-end" data-metric="unread">—</td></tr>
+                                    <tr><td>Emailed</td><td class="mono text-end" data-metric="emailed">—</td></tr>
+                                    <!--/* Deliveries are a different number: one alert goes to
+                                           every channel, and a channel that threw was still
+                                           an attempt. */-->
+                                    <tr><td>Channel deliveries</td><td class="mono text-end" data-metric="delivered">—</td></tr>
+                                    <tr><td>Deliveries that failed</td><td class="mono text-end" data-metric="failed">—</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row row-cards mt-3">
+                    <div class="col-12 col-lg-6">
+                        <div class="card">
+                            <div class="card-header"><h3 class="card-title">The directory</h3></div>
+                            <div class="table-responsive">
+                                <table class="table card-table table-vcenter">
+                                    <tbody>
+                                    <tr><td>IC Persons</td><td class="mono text-end" data-metric="users">—</td></tr>
+                                    <tr><td>…publishing no certificate</td>
+                                        <td class="mono text-end" data-metric="usersWithout">—</td></tr>
+                                    <tr><td>IC Non-Person Entities</td><td class="mono text-end" data-metric="servers">—</td></tr>
+                                    <tr><td>…publishing no certificate</td>
+                                        <td class="mono text-end" data-metric="serversWithout">—</td></tr>
+                                    <tr><td>Projects</td><td class="mono text-end" data-metric="projects">—</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-12 col-lg-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Signature algorithms</h3>
+                                <span class="card-subtitle text-secondary ms-2">as the provider names them</span>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table card-table table-vcenter">
+                                    <thead><tr><th>Algorithm</th><th class="text-end">Certificates</th><th></th></tr></thead>
+                                    <tbody id="metrics-signatures">
+                                    <tr><td colspan="3" class="text-secondary">Loading…</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>
+
+<div th:replace="~{fragments/layout :: scripts}"></div>
+<script th:src="@{/js/metrics.js}"></script>
+</body>
+</html>

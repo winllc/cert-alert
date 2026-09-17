@@ -1,9 +1,13 @@
 package com.winllc.certalert.web;
 
+import com.winllc.certalert.domain.DirectoryUser;
+import com.winllc.certalert.repository.DirectoryUserRepository;
 import com.winllc.certalert.security.DirectoryPrincipal;
 import com.winllc.certalert.service.NotificationService;
 import com.winllc.certalert.web.dto.NotificationRow;
 import com.winllc.certalert.web.dto.PageResponse;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
@@ -34,9 +38,12 @@ public class NotificationController {
     private static final int MAX_PAGE_SIZE = 100;
 
     private final NotificationService notificationService;
+    private final DirectoryUserRepository userRepository;
 
-    public NotificationController(NotificationService notificationService) {
+    public NotificationController(
+            NotificationService notificationService, DirectoryUserRepository userRepository) {
         this.notificationService = notificationService;
+        this.userRepository = userRepository;
     }
 
     @GetMapping
@@ -47,7 +54,7 @@ public class NotificationController {
 
         Long userId = directoryUserId(authentication);
         if (userId == null) {
-            return new PageResponse<>(java.util.List.of(), 0, size, 0, 0, true, true);
+            return new PageResponse<>(List.of(), 0, size, 0, 0, true, true);
         }
         int bounded = Math.min(Math.max(size, 1), MAX_PAGE_SIZE);
         return PageResponse.of(
@@ -83,10 +90,25 @@ public class NotificationController {
         return notificationService.digest();
     }
 
+    /**
+     * Which directory entry is asking.
+     *
+     * <p>Resolved when they signed in, where it could be: on a deployment whose first sweep
+     * has not finished, or one that swept after somebody signed in, there was no entry to
+     * resolve them to and the session carries none. Rather than showing that person an
+     * empty page until they sign out and back in, their name is looked up now - one indexed
+     * query, on a page they asked for.
+     */
     private Long directoryUserId(Authentication authentication) {
-        if (authentication != null && authentication.getPrincipal() instanceof DirectoryPrincipal principal) {
+        if (authentication == null || !(authentication.getPrincipal() instanceof DirectoryPrincipal principal)) {
+            return null;
+        }
+        if (principal.getDirectoryUserId() != null) {
             return principal.getDirectoryUserId();
         }
-        return null;
+        List<DirectoryUser> named = userRepository.findByIdentifier(principal.getUsername().toLowerCase(Locale.ROOT));
+        // Two people answering to one name is no basis for showing either of them the
+        // other's notifications.
+        return named.size() == 1 ? named.getFirst().getId() : null;
     }
 }

@@ -64,6 +64,8 @@ public interface DirectoryUserRepository extends DataTablesRepository<DirectoryU
             + "where u.lastSyncedAt < :cutoff")
     List<PrunableEntry> findPrunableBefore(@Param("cutoff") Instant cutoff);
 
+    long countByCertificateCount(int certificateCount);
+
     long countByLastSyncedAtBefore(Instant cutoff);
 
     /** Used by the prune job; the cascade takes the certificates and identifiers with it. */

@@ -26,6 +26,8 @@ public interface AuditEventRepository extends DataTablesRepository<AuditEvent, L
 
     long countBySubjectTypeAndSubjectId(OwnerType subjectType, Long subjectId);
 
+    long countByAction(com.winllc.certalert.domain.AuditAction action);
+
     @Modifying
     @Query("delete from AuditEvent e where e.occurredAt < :cutoff")
     int deleteByOccurredAtBefore(@Param("cutoff") Instant cutoff);

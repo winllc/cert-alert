@@ -58,6 +58,8 @@ public interface CachedCertificateRepository extends JpaRepository<CachedCertifi
             @Param("horizon") Instant horizon,
             Pageable pageable);
 
+    long countByStatus(CertificateStatus status);
+
     @Query("select distinct c.user.id from CachedCertificate c where c.id in :ids and c.user is not null")
     List<Long> findUserIdsByCertificateIds(@Param("ids") Collection<Long> ids);
 

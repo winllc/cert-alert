@@ -91,6 +91,14 @@
                         <span class="nav-link-title">Projects</span>
                     </a>
                 </li>
+                <li class="nav-item" th:classappend="${active == 'metrics'} ? 'active'">
+                    <a class="nav-link" th:href="@{/metrics}">
+                        <span class="nav-link-icon d-md-none d-lg-inline-block">
+                            <svg class="icon"><use href="#icon-chart"></use></svg>
+                        </span>
+                        <span class="nav-link-title">Metrics</span>
+                    </a>
+                </li>
                 <li class="nav-item" th:classappend="${active == 'notifications'} ? 'active'">
                     <a class="nav-link" th:href="@{/notifications}">
                         <span class="nav-link-icon d-md-none d-lg-inline-block">

@@ -48,6 +48,8 @@ public interface DirectoryServerRepository extends DataTablesRepository<Director
             + "or lower(s.serverUrl) like concat('%', :term, '%') order by s.commonName")
     List<DirectoryServer> searchByName(@Param("term") String term, Pageable pageable);
 
+    long countByCertificateCount(int certificateCount);
+
     long countByLastSyncedAtBefore(Instant cutoff);
 
     /** Used by the prune job; the cascade takes the certificates and contacts with it. */
