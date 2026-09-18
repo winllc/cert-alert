@@ -5,6 +5,9 @@
     $(function () {
         var certState = document.getElementById('cert-state');
         var withinDays = document.getElementById('within-days');
+        var latestFrom = document.getElementById('latest-from');
+        var latestTo = document.getElementById('latest-to');
+        var pocName = document.getElementById('poc-name');
         var applied = document.getElementById('applied-filters');
 
         function readFilters() {
@@ -32,6 +35,16 @@
             if (days) {
                 filters.expiringWithinDays = days;
             }
+            if (latestFrom.value) {
+                filters.latestExpiryFrom = latestFrom.value;
+            }
+            if (latestTo.value) {
+                filters.latestExpiryTo = latestTo.value;
+            }
+            var poc = pocName.value.trim();
+            if (poc) {
+                filters.poc = poc;
+            }
             var project = ProjectFilter.selected();
             if (project) {
                 filters.projectId = project;
@@ -50,7 +63,7 @@
             endpoint: '/api/v1/datatables/users',
             statsUrl: '/api/v1/stats/users',
             readFilters: readFilters,
-            filterInputs: [certState, withinDays, projectFilter],
+            filterInputs: [certState, withinDays, latestFrom, latestTo, pocName, projectFilter],
             // Sort by name, not by expiry: entries with no certificate have a null expiry,
             // and databases disagree about whether nulls sort first or last.
             order: [[1, 'asc']],
@@ -105,6 +118,10 @@
                     return type === 'display' ? CertAlert.statusBadge(value) : value;
                 }},
                 {data: 'earliestExpiry', searchable: false, render: function (value, type) {
+                    return type === 'display' ? CertAlert.expiryCell(value) : value;
+                }},
+                // The day the last of them runs out; the same as Expires where there is one.
+                {data: 'latestExpiry', searchable: false, render: function (value, type) {
                     return type === 'display' ? CertAlert.expiryCell(value) : value;
                 }},
                 {data: 'lastSyncedAt', searchable: false, render: function (value, type) {

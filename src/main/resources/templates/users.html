@@ -37,6 +37,23 @@
                         </div>
                     </div>
                     <div class="col-12 col-md-auto">
+                        <!--/* The day the last of an entry's certificates runs out: what is
+                               gone by the end of the quarter, rather than what expires next. */-->
+                        <label class="form-label" for="latest-from">Last certificate expires</label>
+                        <div class="input-group" style="max-width: 20rem;">
+                            <input type="date" id="latest-from" class="form-control" aria-label="from">
+                            <span class="input-group-text">to</span>
+                            <input type="date" id="latest-to" class="form-control" aria-label="to">
+                        </div>
+                    </div>
+                    <div class="col-12 col-md-auto">
+                        <!--/* A serverPOC names a person by an address or a form of their name,
+                               and not always one this table shows: match every one of them. */-->
+                        <label class="form-label" for="poc-name">Point of contact name</label>
+                        <input type="text" id="poc-name" class="form-control"
+                               placeholder="name or address from a serverPOC">
+                    </div>
+                    <div class="col-12 col-md-auto">
                         <label class="form-label" for="project-filter">Project</label>
                         <select id="project-filter" class="form-select">
                             <option value="">Any</option>
@@ -64,6 +81,7 @@
                             <th>Certs</th>
                             <th>Status</th>
                             <th>Expires</th>
+                            <th>Last expires</th>
                             <th>Last synced</th>
                             <th>DN</th>
                             </tr>
@@ -77,6 +95,7 @@
                             <th><input type="text" class="form-control form-control-sm" placeholder="Title"></th>
                             <th></th>
                             <th><input type="text" class="form-control form-control-sm" placeholder="Duty organization"></th>
+                            <th></th>
                             <th></th>
                             <th></th>
                             <th></th>

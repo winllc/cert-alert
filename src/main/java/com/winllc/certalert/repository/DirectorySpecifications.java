@@ -3,6 +3,7 @@ package com.winllc.certalert.repository;
 import com.winllc.certalert.domain.CertificateStatus;
 import com.winllc.certalert.domain.DirectoryEntry;
 import com.winllc.certalert.domain.DirectoryServer;
+import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.domain.ServerContact;
 import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.persistence.criteria.CriteriaQuery;
@@ -56,6 +57,32 @@ public final class DirectorySpecifications {
                 .in(CertificateStatus.VALID, CertificateStatus.EXPIRING_SOON);
     }
 
+    /**
+     * Entities whose <em>last</em> certificate to expire does so inside this range - the
+     * date everything an entry publishes has run out by.
+     *
+     * <p>A different question from "expires next", which is what the warning window and the
+     * Expires column answer. This one is for planning: everything this team holds is gone by
+     * March, or nothing of theirs outlives the year. Either end may be left open, and an
+     * entry publishing no certificate has no such date, so it matches neither.
+     */
+    public static <T extends DirectoryEntry> Specification<T> latestExpiryBetween(Instant from, Instant to) {
+        if (from == null && to == null) {
+            return unfiltered();
+        }
+        return (root, query, builder) -> {
+            if (from == null) {
+                return builder.lessThan(root.get("latestExpiry"), to);
+            }
+            if (to == null) {
+                return builder.greaterThanOrEqualTo(root.get("latestExpiry"), from);
+            }
+            return builder.and(
+                    builder.greaterThanOrEqualTo(root.get("latestExpiry"), from),
+                    builder.lessThan(root.get("latestExpiry"), to));
+        };
+    }
+
     /** Entities whose next certificate to expire does so inside the given window. */
     public static <T extends DirectoryEntry> Specification<T> expiringWithinDays(int days, Instant now) {
         Instant cutoff = now.plus(days, ChronoUnit.DAYS);
@@ -102,6 +129,50 @@ public final class DirectorySpecifications {
         return (root, query, builder) -> builder.or(
                 scrapedContactIn(root, query, builder, normalised),
                 managedContactIn(root, query, builder, normalised, null));
+    }
+
+    /**
+     * Servers with a point of contact whose name or address contains this - what the search
+     * box on the table is for, as distinct from the exact match the person-to-servers join
+     * needs.
+     *
+     * <p>It looks in all three places a contact's name can be: the directory's
+     * {@code serverPOC}, the address of a contact added here, and the identifiers of the
+     * person such a contact is linked to. That last one is what makes "chase" find a server
+     * whose contact was added by picking Carol Chase out of the directory, where the only
+     * string stored against the server is her address.
+     */
+    public static Specification<DirectoryServer> pointOfContactLike(String term) {
+        String pattern = contains(term);
+        if (pattern == null) {
+            return unfiltered();
+        }
+        return (root, query, builder) -> builder.or(
+                scrapedContactLike(root, query, builder, pattern),
+                managedContactLike(root, query, builder, pattern));
+    }
+
+    /**
+     * People a {@code serverPOC} could name by this - matched against every value the join
+     * uses, which is each address they answer to and each form of their name.
+     *
+     * <p>Pasting a value out of a server entry finds the person it means, which the name and
+     * address columns cannot do on their own: a directory may name somebody by an address
+     * the table does not show, or by a form of their name nobody searches for.
+     */
+    public static Specification<DirectoryUser> namedAsPointOfContactBy(String term) {
+        String pattern = contains(term);
+        if (pattern == null) {
+            return unfiltered();
+        }
+        return (root, query, builder) -> {
+            Subquery<Integer> subquery = query.subquery(Integer.class);
+            Root<DirectoryUser> user = subquery.from(DirectoryUser.class);
+            Join<DirectoryUser, String> identifiers = user.join("identifiers");
+            return builder.exists(subquery
+                    .select(builder.literal(1))
+                    .where(builder.equal(user, root), builder.like(identifiers, pattern)));
+        };
     }
 
     /**
@@ -185,6 +256,42 @@ public final class DirectorySpecifications {
                     .select(builder.literal(1))
                     .where(builder.equal(project.get("id"), projectId), builder.equal(members, root)));
         };
+    }
+
+    /** A contains pattern over a value already stored lowercased, or null for no filter. */
+    private static String contains(String term) {
+        if (term == null || term.isBlank()) {
+            return null;
+        }
+        return "%" + term.trim().toLowerCase(Locale.ROOT) + "%";
+    }
+
+    private static Predicate scrapedContactLike(
+            Root<DirectoryServer> root, CriteriaQuery<?> query, CriteriaBuilder builder, String pattern) {
+
+        Subquery<Integer> subquery = query.subquery(Integer.class);
+        Root<DirectoryServer> server = subquery.from(DirectoryServer.class);
+        Join<DirectoryServer, String> contacts = server.join("serverPocs");
+        return builder.exists(subquery
+                .select(builder.literal(1))
+                .where(builder.equal(server, root), builder.like(builder.lower(contacts), pattern)));
+    }
+
+    /** A managed contact's own address, or the name of the person it was linked to. */
+    private static Predicate managedContactLike(
+            Root<DirectoryServer> root, CriteriaQuery<?> query, CriteriaBuilder builder, String pattern) {
+
+        Subquery<Integer> subquery = query.subquery(Integer.class);
+        Root<ServerContact> contact = subquery.from(ServerContact.class);
+        Join<ServerContact, ?> user = contact.join("user", jakarta.persistence.criteria.JoinType.LEFT);
+        Join<?, String> identifiers = user.join("identifiers", jakarta.persistence.criteria.JoinType.LEFT);
+        return builder.exists(subquery
+                .select(builder.literal(1))
+                .where(
+                        builder.equal(contact.get("server"), root),
+                        builder.or(
+                                builder.like(builder.lower(contact.get("email")), pattern),
+                                builder.like(identifiers, pattern))));
     }
 
     private static List<String> normalise(Collection<String> values) {

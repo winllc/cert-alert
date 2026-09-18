@@ -5,7 +5,11 @@
     $(function () {
         var certState = document.getElementById('cert-state');
         var withinDays = document.getElementById('within-days');
+        var latestFrom = document.getElementById('latest-from');
+        var latestTo = document.getElementById('latest-to');
         var pocInput = document.getElementById('poc-email');
+        // The box under the contacts column, which searches the same thing as the one above.
+        var pocColumn = document.querySelector('#servers-table tfoot input[data-filter="poc"]');
         var pocUserField = document.getElementById('poc-user-field');
         var pocUserLabel = document.getElementById('poc-user-label');
         var pocUserClear = document.getElementById('poc-user-clear');
@@ -53,7 +57,13 @@
             if (pocUserId) {
                 filters.pocUserId = pocUserId;
             }
-            var contact = pocInput.value.trim();
+            if (latestFrom.value) {
+                filters.latestExpiryFrom = latestFrom.value;
+            }
+            if (latestTo.value) {
+                filters.latestExpiryTo = latestTo.value;
+            }
+            var contact = pocInput.value.trim() || (pocColumn ? pocColumn.value.trim() : '');
             if (contact) {
                 filters.poc = contact;
             }
@@ -75,7 +85,7 @@
             endpoint: '/api/v1/datatables/servers',
             statsUrl: '/api/v1/stats/servers',
             readFilters: readFilters,
-            filterInputs: [certState, withinDays, pocInput, projectFilter],
+            filterInputs: [certState, withinDays, latestFrom, latestTo, pocInput, pocColumn, projectFilter],
             order: [[1, 'asc']],
             detailUrl: function (row) {
                 return '/api/v1/servers/' + row.id + '/certificates';
@@ -114,7 +124,10 @@
                 // What the directory publishes, plus a count of what was added here. The
                 // editable list is in the expanded row; this is only the signal that it
                 // has something in it.
-                {data: 'serverPocDisplay', render: function (value, type, row) {
+                //
+                // Not searchable as a column: it is assembled from an element collection and
+                // the contacts added here, so searching it is the poc filter's job.
+                {data: 'serverPocDisplay', searchable: false, render: function (value, type, row) {
                     if (type !== 'display') { return value; }
                     var count = row.managedContactCount || 0;
                     return CertAlert.text(value)
@@ -130,6 +143,10 @@
                     return type === 'display' ? CertAlert.statusBadge(value) : value;
                 }},
                 {data: 'earliestExpiry', searchable: false, render: function (value, type) {
+                    return type === 'display' ? CertAlert.expiryCell(value) : value;
+                }},
+                // The day the last of them runs out; the same as Expires where there is one.
+                {data: 'latestExpiry', searchable: false, render: function (value, type) {
                     return type === 'display' ? CertAlert.expiryCell(value) : value;
                 }},
                 {data: 'lastSyncedAt', searchable: false, render: function (value, type) {

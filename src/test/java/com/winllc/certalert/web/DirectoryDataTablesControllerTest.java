@@ -11,8 +11,12 @@ import com.winllc.certalert.domain.DirectoryServer;
 import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.DirectoryUserRepository;
+import com.winllc.certalert.repository.ServerContactRepository;
+import com.winllc.certalert.service.ServerContactService;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,14 +46,14 @@ class DirectoryDataTablesControllerTest {
     private static final String[] USER_COLUMNS = {
         "id", "displayName", "uid", "email", "title", "organization",
         "organizationalUnit", "certificateCount", "certificateStatus",
-        "earliestExpiry", "lastSyncedAt", "dn"
+        "earliestExpiry", "latestExpiry", "lastSyncedAt", "dn"
     };
 
     /** Column order matches the servers table in the template. */
     private static final String[] SERVER_COLUMNS = {
         "id", "commonName", "serverUrl", "serverPocDisplay", "description", "organization",
         "organizationalUnit", "certificateCount", "certificateStatus",
-        "earliestExpiry", "lastSyncedAt", "dn"
+        "earliestExpiry", "latestExpiry", "lastSyncedAt", "dn"
     };
 
     @Autowired
@@ -61,6 +65,12 @@ class DirectoryDataTablesControllerTest {
     @Autowired
     private DirectoryServerRepository serverRepository;
 
+    @Autowired
+    private ServerContactRepository contactRepository;
+
+    @Autowired
+    private ServerContactService contactService;
+
     private MockMvc mockMvc;
 
     @BeforeEach
@@ -70,6 +80,7 @@ class DirectoryDataTablesControllerTest {
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
                 .apply(SecurityMockMvcConfigurers.springSecurity())
                 .build();
+        contactRepository.deleteAll();
         serverRepository.deleteAll();
         userRepository.deleteAll();
 
@@ -236,6 +247,184 @@ class DirectoryDataTablesControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.recordsFiltered").value(1))
                 .andExpect(jsonPath("$.data[0].serverPocDisplay").value("alice@example.gov, bob@example.gov"));
+    }
+
+    // ---------------------------------------------------------------------------------
+    // The day the last certificate runs out
+    // ---------------------------------------------------------------------------------
+
+    /**
+     * Two dates, and they answer different questions. Erin's next certificate expires in
+     * three days and her last in nearly three years, so "expiring within 30 days" finds her
+     * and "everything gone before next year" does not.
+     */
+    @Test
+    void theLastExpiryIsADifferentDateFromTheNext() throws Exception {
+        Instant now = Instant.now();
+        userRepository.save(user("uid=erin,ou=people", "erin", "Erin Ellis", "erin@example.gov",
+                certificate("CN=erin-a", now.plus(Duration.ofDays(3)), now),
+                certificate("CN=erin-b", now.plus(Duration.ofDays(1000)), now)));
+
+        mockMvc.perform(post(USERS + "?expiringWithinDays=30").contentType(MediaType.APPLICATION_JSON)
+                        .content(usersRequest(0, 10, null, null))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                // carol, 10 days out, and erin, 3 days out.
+                .andExpect(jsonPath("$.recordsFiltered").value(2));
+
+        mockMvc.perform(post(USERS + "?latestExpiryFrom=" + day(900) + "&latestExpiryTo=" + day(1100))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(usersRequest(0, 10, null, null))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recordsFiltered").value(1))
+                .andExpect(jsonPath("$.data[0].uid").value("erin"))
+                .andExpect(jsonPath("$.data[0].certificateCount").value(2));
+    }
+
+    /** Either end may be left open: everything gone by a date, or nothing until one. */
+    @Test
+    void oneEndOfTheRangeIsEnough() throws Exception {
+        mockMvc.perform(post(USERS + "?latestExpiryTo=" + day(30)).contentType(MediaType.APPLICATION_JSON)
+                        .content(usersRequest(0, 10, null, null))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                // bob expired five days ago and carol runs out in ten; alice is 400 days
+                // out, and dave publishes nothing, so he has no such date at all.
+                .andExpect(jsonPath("$.recordsFiltered").value(2));
+
+        mockMvc.perform(post(USERS + "?latestExpiryFrom=" + day(30)).contentType(MediaType.APPLICATION_JSON)
+                        .content(usersRequest(0, 10, null, null))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recordsFiltered").value(1))
+                .andExpect(jsonPath("$.data[0].uid").value("alice"));
+    }
+
+    /** The day named is inside the range, whatever hour of it the certificate expires at. */
+    @Test
+    void bothEndsIncludeTheDayTheyName() throws Exception {
+        String carolsDay = day(10);
+
+        mockMvc.perform(post(USERS + "?latestExpiryFrom=" + carolsDay + "&latestExpiryTo=" + carolsDay)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(usersRequest(0, 10, null, null))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recordsFiltered").value(1))
+                .andExpect(jsonPath("$.data[0].uid").value("carol"));
+    }
+
+    @Test
+    void serversTakeTheSameRange() throws Exception {
+        mockMvc.perform(post(SERVERS + "?latestExpiryFrom=" + day(100) + "&latestExpiryTo=" + day(300))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(serversRequest(0, 10, null))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                // web01 at 200 days; web02 has expired and db01 is 500 days out.
+                .andExpect(jsonPath("$.recordsFiltered").value(1))
+                .andExpect(jsonPath("$.data[0].commonName").value("web01"));
+    }
+
+    @Test
+    void theRangeCombinesWithEverythingElse() throws Exception {
+        mockMvc.perform(post(SERVERS + "?latestExpiryTo=" + day(600) + "&poc=bob")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(serversRequest(0, 10, null))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                // bob contacts web02 and db01, both of which run out inside 600 days.
+                .andExpect(jsonPath("$.recordsFiltered").value(2));
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Points of contact, by name
+    // ---------------------------------------------------------------------------------
+
+    /** A search box is typed into, not pasted into: part of a value has to match. */
+    @Test
+    void serversMatchPartOfAContactName() throws Exception {
+        mockMvc.perform(post(SERVERS + "?poc=ali").contentType(MediaType.APPLICATION_JSON)
+                        .content(serversRequest(0, 10, null))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recordsFiltered").value(2));
+
+        mockMvc.perform(post(SERVERS + "?poc=@example.gov").contentType(MediaType.APPLICATION_JSON)
+                        .content(serversRequest(0, 10, null))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recordsFiltered").value(3));
+    }
+
+    /**
+     * The interesting half: a contact added here by picking somebody out of the directory
+     * stores their address, so searching for their name has to reach through the link.
+     */
+    @Test
+    void searchingByNameFindsAServerContactedThroughAPerson() throws Exception {
+        Long carolId = userRepository.findByDn("uid=carol,ou=people").orElseThrow().getId();
+        Long db01 = serverRepository.findByDn("cn=db01,ou=servers").orElseThrow().getId();
+        contactService.addUser(db01, carolId, "alice");
+
+        mockMvc.perform(post(SERVERS + "?poc=carol").contentType(MediaType.APPLICATION_JSON)
+                        .content(serversRequest(0, 10, null))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recordsFiltered").value(1))
+                .andExpect(jsonPath("$.data[0].commonName").value("db01"));
+    }
+
+    /**
+     * On the people table the question is the other way round: who does this serverPOC
+     * value mean? Every value the join uses is matched, which is more than the columns show.
+     */
+    @Test
+    void peopleAreFoundByWhatAServerPocCouldCallThem() throws Exception {
+        mockMvc.perform(post(USERS + "?poc=chase").contentType(MediaType.APPLICATION_JSON)
+                        .content(usersRequest(0, 10, null, null))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recordsFiltered").value(1))
+                .andExpect(jsonPath("$.data[0].uid").value("carol"));
+
+        mockMvc.perform(post(USERS + "?poc=bob@example.gov").contentType(MediaType.APPLICATION_JSON)
+                        .content(usersRequest(0, 10, null, null))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recordsFiltered").value(1))
+                .andExpect(jsonPath("$.data[0].uid").value("bob"));
+    }
+
+    @Test
+    void aContactNameNobodyAnswersToMatchesNothing() throws Exception {
+        mockMvc.perform(post(USERS + "?poc=nobody").contentType(MediaType.APPLICATION_JSON)
+                        .content(usersRequest(0, 10, null, null))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recordsFiltered").value(0));
+
+        mockMvc.perform(post(SERVERS + "?poc=nobody").contentType(MediaType.APPLICATION_JSON)
+                        .content(serversRequest(0, 10, null))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recordsFiltered").value(0));
+    }
+
+    /** A blank box is no filter at all, rather than a match against the empty string. */
+    @Test
+    void anEmptySearchNarrowsNothing() throws Exception {
+        mockMvc.perform(post(USERS + "?poc=&latestExpiryFrom=").contentType(MediaType.APPLICATION_JSON)
+                        .content(usersRequest(0, 10, null, null))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recordsFiltered").value(4));
+    }
+
+    /** The day this many days from now, as the date inputs send it. */
+    private String day(int daysFromNow) {
+        return LocalDate.ofInstant(Instant.now().plus(Duration.ofDays(daysFromNow)), ZoneOffset.UTC).toString();
     }
 
     @Test

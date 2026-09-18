@@ -280,7 +280,11 @@
 
         // ':visIdx' rather than a bare index: a hidden column leaves no footer cell, so
         // the DOM position of an input is its visible index, not its column index.
-        $table.find('tfoot input').on('input', debounce(function () {
+        //
+        // A box marked data-filter is not a column search at all: its column is assembled
+        // for display and is not something the database can be asked about, so the page
+        // reads it into an extra filter instead. Those are wired by the page.
+        $table.find('tfoot input:not([data-filter])').on('input', debounce(function () {
             var column = table.column($(this).closest('th').index() + ':visIdx');
             if (column.search() !== this.value) {
                 column.search(this.value).draw();

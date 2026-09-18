@@ -391,6 +391,30 @@ the table footer; all of it posts as the request body and the library turns it i
 query. The filters this application adds ride along as query parameters and become an
 additional `Specification`, so the two never have to know about each other.
 
+Both tables carry the same filters, and both take the two expiry dates an entry has:
+
+| Filter | Parameter | What it asks |
+|---|---|---|
+| Certificates | `certificateStatus`, `expired`, `hasCertificates` | the state of the worst certificate an entry holds |
+| Expiring within | `expiringWithinDays` | how soon the **next** one runs out |
+| Last certificate expires | `latestExpiryFrom`, `latestExpiryTo` | the day the **last** of them runs out, as a range of whole days, either end optional |
+| Point of contact | `poc` | on servers, a contact whose name or address contains this; on people, somebody a `serverPOC` could name by it |
+| Project | `projectId` | the entries in one project |
+
+The two expiry dates answer different questions. "Expiring within 30 days" is the warning;
+"the last certificate expires before March" is the plan — everything this team holds is gone
+by then, whatever else they publish in the meantime. Both are roll-up columns on the entry
+row (`earliest_expiry`, `latest_expiry`), so either is an indexed predicate rather than a
+walk of the certificate history.
+
+The point-of-contact search is a partial match, because a search box is typed into rather
+than pasted into. On the servers table it looks in all three places a contact's name can
+be — the directory's `serverPOC`, the address of a contact added here, and the identifiers
+of the person that contact is linked to, which is what makes a name find a server whose
+stored contact is an address. On the people table it asks the opposite question: who does
+this `serverPOC` value mean? It matches every value the join uses, which is more than the
+table's columns show.
+
 ### The user ↔ server join
 
 A server names whoever is responsible for it in `serverPOC`. The specification says that

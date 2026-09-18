@@ -13,6 +13,8 @@ import com.winllc.certalert.web.dto.DirectoryUserRow;
 import jakarta.validation.Valid;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -20,6 +22,7 @@ import java.util.Set;
 import org.springframework.data.jpa.datatables.mapping.DataTablesInput;
 import org.springframework.data.jpa.datatables.mapping.DataTablesOutput;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -64,10 +67,17 @@ public class DirectoryDataTablesController {
             @RequestParam(required = false) Boolean expired,
             @RequestParam(required = false) Integer expiringWithinDays,
             @RequestParam(required = false) Boolean hasCertificates,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate latestExpiryFrom,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate latestExpiryTo,
+            @RequestParam(required = false) String poc,
             @RequestParam(required = false) Long projectId) {
 
         Specification<DirectoryUser> filter =
                 certificateFilter(certificateStatus, expired, expiringWithinDays, hasCertificates);
+        filter = filter.and(latestExpiryFilter(latestExpiryFrom, latestExpiryTo));
+        // On this table a point of contact is what somebody is, not what they have: the
+        // search is over the values a serverPOC could name them by.
+        filter = filter.and(DirectorySpecifications.namedAsPointOfContactBy(poc));
         filter = filter.and(DirectorySpecifications.inProject(projectId, "members"));
         return userRepository.findAll(input, filter, null, DirectoryUserRow::from);
     }
@@ -79,6 +89,8 @@ public class DirectoryDataTablesController {
             @RequestParam(required = false) Boolean expired,
             @RequestParam(required = false) Integer expiringWithinDays,
             @RequestParam(required = false) Boolean hasCertificates,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate latestExpiryFrom,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate latestExpiryTo,
             @RequestParam(required = false) String poc,
             @RequestParam(required = false) String pocEmail,
             @RequestParam(required = false) Long pocUserId,
@@ -86,6 +98,7 @@ public class DirectoryDataTablesController {
 
         Specification<DirectoryServer> filter =
                 certificateFilter(certificateStatus, expired, expiringWithinDays, hasCertificates);
+        filter = filter.and(latestExpiryFilter(latestExpiryFrom, latestExpiryTo));
         filter = filter.and(pointOfContactFilter(poc != null ? poc : pocEmail, pocUserId));
         filter = filter.and(DirectorySpecifications.inProject(projectId, "servers"));
 
@@ -123,7 +136,9 @@ public class DirectoryDataTablesController {
      */
     private Specification<DirectoryServer> pointOfContactFilter(String poc, Long pocUserId) {
         if (poc != null && !poc.isBlank()) {
-            return DirectorySpecifications.pointOfContact(poc);
+            // Typed rather than followed: a partial match, because somebody searching a
+            // table types "chase" or "@ops", not the whole value the directory holds.
+            return DirectorySpecifications.pointOfContactLike(poc);
         }
         if (pocUserId == null) {
             return DirectorySpecifications.unfiltered();
@@ -132,6 +147,19 @@ public class DirectoryDataTablesController {
         // here is linked to them by id, which is why the id goes to the specification too.
         Set<String> identifiers = userRepository.findIdentifiersById(pocUserId);
         return DirectorySpecifications.pointOfContactOf(pocUserId, identifiers);
+    }
+
+    /**
+     * The day everything an entry publishes has run out by, as a range of whole days.
+     *
+     * <p>Both ends are inclusive of the day named, which is what somebody typing two dates
+     * into a form means by them: the upper bound is the start of the following day, so a
+     * certificate expiring at any hour of it is still inside the range.
+     */
+    private <T extends DirectoryEntry> Specification<T> latestExpiryFilter(LocalDate from, LocalDate to) {
+        return DirectorySpecifications.latestExpiryBetween(
+                from == null ? null : from.atStartOfDay(ZoneOffset.UTC).toInstant(),
+                to == null ? null : to.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant());
     }
 
     private <T extends DirectoryEntry> Specification<T> certificateFilter(
