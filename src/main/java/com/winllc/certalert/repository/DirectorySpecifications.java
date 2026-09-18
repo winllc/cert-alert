@@ -58,6 +58,17 @@ public final class DirectorySpecifications {
     }
 
     /**
+     * Everything except entities holding an expired certificate. Unlike {@code expired(false)}
+     * this keeps entries that hold no certificate at all: it hides what has lapsed, rather
+     * than selecting what is healthy.
+     */
+    public static <T extends DirectoryEntry> Specification<T> withoutExpired() {
+        return (root, query, builder) -> builder.or(
+                builder.isNull(root.get("certificateStatus")),
+                builder.notEqual(root.get("certificateStatus"), CertificateStatus.EXPIRED));
+    }
+
+    /**
      * Entities whose <em>last</em> certificate to expire does so inside this range - the
      * date everything an entry publishes has run out by.
      *

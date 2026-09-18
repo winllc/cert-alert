@@ -29,6 +29,14 @@
                         </select>
                     </div>
                     <div class="col-12 col-md-auto">
+                        <!--/* Lapsed entries are hidden unless asked for: they are what has already
+                               gone wrong, not what is about to. */-->
+                        <label class="form-check form-switch mb-2">
+                            <input type="checkbox" id="show-expired" class="form-check-input">
+                            <span class="form-check-label">Show expired</span>
+                        </label>
+                    </div>
+                    <div class="col-12 col-md-auto">
                         <label class="form-label" for="within-days">Expiring within</label>
                         <div class="input-group">
                             <input type="number" id="within-days" class="form-control" min="1" max="3650"
@@ -92,7 +100,7 @@
                             <th><input type="text" class="form-control form-control-sm" placeholder="Name"></th>
                             <th><input type="text" class="form-control form-control-sm" placeholder="UID"></th>
                             <th><input type="text" class="form-control form-control-sm" placeholder="Email"></th>
-                            <th><input type="text" class="form-control form-control-sm" placeholder="Title"></th>
+                            <th></th>
                             <th></th>
                             <th><input type="text" class="form-control form-control-sm" placeholder="Duty organization"></th>
                             <th></th>

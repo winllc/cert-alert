@@ -15,9 +15,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,6 +45,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 @ActiveProfiles("test")
 class GeneratedDirectoryTest {
 
+    private static final boolean WINDOWS =
+            System.getProperty("os.name").toLowerCase(Locale.ROOT).startsWith("windows");
     private static final Path SCRIPT = Path.of("scripts/generate-directory-data.sh");
     private static final int USERS = 24;
     private static final int SERVERS = 12;
@@ -65,14 +69,15 @@ class GeneratedDirectoryTest {
     @BeforeAll
     static void generateAndLoad() throws IOException, InterruptedException {
         assumeTrue(Files.isRegularFile(SCRIPT), "generator script not present");
-        assumeTrue(canRun("bash"), "bash not on the path");
-        assumeTrue(canRun("openssl"), "openssl not on the path");
+        String bash = findBash();
+        assumeTrue(bash != null, "bash not on the path");
+        assumeTrue(WINDOWS || canRun("openssl"), "openssl not on the path");
 
         workingDirectory = Files.createTempDirectory("generated-directory");
         Path ldif = workingDirectory.resolve("directory.ldif");
-        Process process = new ProcessBuilder(
-                        "bash",
-                        SCRIPT.toString(),
+        ProcessBuilder builder = new ProcessBuilder(
+                        bash,
+                        forBash(SCRIPT),
                         "--users",
                         String.valueOf(USERS),
                         "--servers",
@@ -80,9 +85,13 @@ class GeneratedDirectoryTest {
                         "--base",
                         EmbeddedDirectory.BASE_DN,
                         "--out",
-                        ldif.toString())
-                .redirectErrorStream(true)
-                .start();
+                        forBash(ldif))
+                .redirectErrorStream(true);
+        // Git Bash rewrites any argument starting with a slash into a Windows path, which
+        // turns openssl's -subj "/CN=..." into a file name. Everything else it rewrites is
+        // a real path, and wants rewriting, so only the subjects are excluded.
+        builder.environment().put("MSYS2_ARG_CONV_EXCL", "/CN");
+        Process process = builder.start();
         String output = new String(process.getInputStream().readAllBytes());
         assertThat(process.waitFor(5, TimeUnit.MINUTES))
                 .as("the generator finished, output was:%n%s", output)
@@ -203,6 +212,34 @@ class GeneratedDirectoryTest {
         return serverRepository.findAll().stream()
                 .map(DirectoryServer::getCertificateStatus)
                 .collect(Collectors.toSet());
+    }
+
+    /**
+     * The bash to run the generator with.
+     *
+     * <p>On Windows that has to be Git Bash, found by where it installs rather than on the
+     * path: the {@code bash.exe} in System32 is WSL's, which sees a different filesystem
+     * and none of Git Bash's tools, openssl among them.
+     */
+    private static String findBash() {
+        if (!WINDOWS) {
+            return canRun("bash") ? "bash" : null;
+        }
+        return Stream.of(System.getenv("ProgramW6432"), System.getenv("ProgramFiles"),
+                        System.getenv("LOCALAPPDATA"))
+                .filter(Objects::nonNull)
+                .flatMap(root -> Stream.of(
+                        Path.of(root, "Git", "bin", "bash.exe"),
+                        Path.of(root, "Programs", "Git", "bin", "bash.exe")))
+                .filter(Files::isRegularFile)
+                .map(Path::toString)
+                .findFirst()
+                .orElse(null);
+    }
+
+    /** Bash reads a backslash as an escape, so hand it forward slashes; Git Bash takes C:/ paths. */
+    private static String forBash(Path path) {
+        return path.toAbsolutePath().toString().replace('\\', '/');
     }
 
     private static boolean canRun(String command) {

@@ -152,6 +152,8 @@ certificate() {
     # is most of the cost of minting one.
     local line body=""
     while IFS= read -r line; do
+        # Git for Windows' openssl writes CRLF; a stray CR would split the LDIF value.
+        line="${line%$'\r'}"
         case "$line" in
             -----*) continue ;;
         esac

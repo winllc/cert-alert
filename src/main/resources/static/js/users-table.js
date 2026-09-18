@@ -4,6 +4,7 @@
 
     $(function () {
         var certState = document.getElementById('cert-state');
+        var showExpired = document.getElementById('show-expired');
         var withinDays = document.getElementById('within-days');
         var latestFrom = document.getElementById('latest-from');
         var latestTo = document.getElementById('latest-to');
@@ -30,6 +31,12 @@
                     break;
                 default:
                     break;
+            }
+            // Asking for expired entries outright overrides hiding them.
+            var askedForExpired = certState.value === 'expired';
+            showExpired.disabled = askedForExpired;
+            if (!showExpired.checked && !askedForExpired) {
+                filters.hideExpired = 'true';
             }
             var days = withinDays.value.trim();
             if (days) {
@@ -63,7 +70,7 @@
             endpoint: '/api/v1/datatables/users',
             statsUrl: '/api/v1/stats/users',
             readFilters: readFilters,
-            filterInputs: [certState, withinDays, latestFrom, latestTo, pocName, projectFilter],
+            filterInputs: [certState, showExpired, withinDays, latestFrom, latestTo, pocName, projectFilter],
             // Sort by name, not by expiry: entries with no certificate have a null expiry,
             // and databases disagree about whether nulls sort first or last.
             order: [[1, 'asc']],
@@ -76,6 +83,7 @@
             },
             entryFields: [
                 ['DN', 'dn'],
+                ['Title', 'title'],
                 ['Employee type', 'employeeType'],
                 ['Country', 'countryOfAffiliation'],
                 ['Admin org', 'adminOrganization'],
@@ -108,8 +116,8 @@
                         + CertAlert.icon('link') + '</a>';
                     return (value ? CertAlert.escapeHtml(value) : CertAlert.text(null)) + link;
                 }},
-                {data: 'title', render: renderText},
                 // Hidden, not dropped: still searchable, and shown in the expanded row.
+                {data: 'title', visible: false},
                 {data: 'employeeType', visible: false},
                 {data: 'dutyOrganization', render: renderText},
                 {data: 'countryOfAffiliation', visible: false},

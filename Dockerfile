@@ -19,7 +19,9 @@ WORKDIR /build
 # layer holding them - and the dependency resolution below - survives most rebuilds.
 COPY gradlew gradlew.bat settings.gradle.kts build.gradle.kts gradle.properties ./
 COPY gradle ./gradle
-RUN chmod +x gradlew
+# .gitattributes keeps these LF, but a checkout made before it existed (or with
+# core.autocrlf) hands over CRLF, and the kernel then looks for an interpreter "sh\r".
+RUN sed -i 's/\r$//' gradlew && chmod +x gradlew
 
 COPY src ./src
 

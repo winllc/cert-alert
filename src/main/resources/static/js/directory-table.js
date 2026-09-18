@@ -253,7 +253,12 @@
             pageLength: 25,
             lengthMenu: [10, 25, 50, 100],
             order: config.order || [],
-            columns: config.columns,
+            // Null fields are left out of the JSON, so a directory entry without an
+            // attribute arrives without the key at all. DataTables warns about a missing
+            // key unless the column says what to show instead.
+            columns: config.columns.map(function (column) {
+                return $.extend({defaultContent: ''}, column);
+            }),
             ajax: {
                 url: buildUrl(config.endpoint, config.readFilters()),
                 type: 'POST',
