@@ -37,6 +37,38 @@
 
         <div class="page-body">
             <div class="container-xl">
+                <!--/*
+                  How far ahead the round-up looks. Everybody sees what it is set to,
+                  because it is what decides whether they hear about a certificate in time;
+                  administrators can change it.
+                */-->
+                <div class="card mb-3" id="notification-settings" th:data-editable="${isAdmin}">
+                    <div class="card-body">
+                        <div class="row g-3 align-items-end">
+                            <div class="col-auto">
+                                <label class="form-label" for="notification-lead-days">
+                                    Email the round-up this many days before expiry
+                                </label>
+                                <div class="input-group" style="max-width: 16rem;">
+                                    <input type="number" class="form-control" id="notification-lead-days"
+                                           min="1" max="365" step="1" th:disabled="${!isAdmin}">
+                                    <span class="input-group-text">days</span>
+                                    <button type="button" class="btn btn-primary" id="notification-lead-save"
+                                            th:if="${isAdmin}">Save</button>
+                                </div>
+                            </div>
+                            <div class="col">
+                                <div class="text-secondary small" id="notification-lead-status"></div>
+                                <div class="text-secondary small">
+                                    A certificate is reported once it comes inside this many days of expiring, and
+                                    every day after until it is renewed. It decides the round-up only; the page
+                                    reports a certificate crossing into a bad state whatever this says.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="card">
                     <div class="table-responsive">
                         <table class="table card-table table-vcenter">

@@ -66,6 +66,81 @@
             + '</tr>';
     }
 
+    /**
+     * How far ahead the round-up looks.
+     *
+     * <p>Shown to everybody, because it is what decides whether somebody hears about a
+     * certificate in time to do anything about it. Only an administrator gets the button.
+     */
+    function settingsStatus(settings) {
+        var parts = [];
+        if (settings.fromConfiguration) {
+            parts.push('From the configuration (' + settings.configuredLeadDays + ' days); nobody has set it here.');
+        } else if (settings.updatedBy) {
+            parts.push('Set by ' + settings.updatedBy + ' on ' + moment(settings.updatedAt) + '.');
+        } else {
+            parts.push('Set on ' + moment(settings.updatedAt) + '.');
+        }
+        if (!settings.emailEnabled) {
+            parts.push('Email sending is off, so the round-up appears here and goes nowhere.');
+        }
+        return parts.join(' ');
+    }
+
+    function showSettings(settings) {
+        $('#notification-lead-days').val(settings.leadDays)
+            .attr('min', settings.minimumLeadDays)
+            .attr('max', settings.maximumLeadDays);
+        $('#notification-lead-status').text(settingsStatus(settings)).removeClass('text-danger');
+    }
+
+    function loadSettings() {
+        if ($('#notification-settings').length === 0) {
+            return;
+        }
+        $.getJSON('/api/v1/notifications/settings')
+            .done(showSettings)
+            .fail(function (xhr) {
+                if (xhr.status === 401) {
+                    CertAlert.handleUnauthorized(xhr);
+                    return;
+                }
+                $('#notification-lead-status').text('Could not read how far ahead the round-up looks.')
+                    .addClass('text-danger');
+            });
+    }
+
+    function saveSettings() {
+        var $button = $('#notification-lead-save').prop('disabled', true);
+        var days = parseInt($('#notification-lead-days').val(), 10);
+
+        $.ajax({
+            url: '/api/v1/notifications/settings',
+            type: 'PUT',
+            contentType: 'application/json',
+            data: JSON.stringify({leadDays: isNaN(days) ? null : days})
+        })
+            .done(function (settings) {
+                showSettings(settings);
+                $('#notification-lead-status').text('Saved. ' + settingsStatus(settings));
+            })
+            .fail(function (xhr) {
+                if (xhr.status === 401) {
+                    CertAlert.handleUnauthorized(xhr);
+                    return;
+                }
+                // A 403 here is somebody who may read the setting and not change it, which
+                // is not a lapsed session: say so rather than sending them to the login form.
+                var detail = xhr.responseJSON && (xhr.responseJSON.detail || xhr.responseJSON.title);
+                $('#notification-lead-status')
+                    .text(xhr.status === 403 ? 'Only an administrator can change this.' : (detail || 'Could not save.'))
+                    .addClass('text-danger');
+            })
+            .always(function () {
+                $button.prop('disabled', false);
+            });
+    }
+
     function loadPage(page) {
         var $body = $('#notifications-body');
         $.getJSON('/api/v1/notifications', {page: page, size: 20})
@@ -108,7 +183,16 @@
         if ($('#notifications-body').length === 0) {
             return;
         }
+        loadSettings();
         loadPage(0);
+
+        $('#notification-lead-save').on('click', saveSettings);
+        $('#notification-lead-days').on('keydown', function (event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                saveSettings();
+            }
+        });
 
         $('#notifications-read-all').on('click', function () {
             post('/api/v1/notifications/read-all').done(function () {
@@ -125,6 +209,7 @@
                     $('#notifications-digest-status').text(
                         result.certificates + ' expiring, ' + result.peopleTold + ' told, '
                         + result.emailsSent + ' emailed');
+                    loadSettings();
                     loadPage(0);
                     refreshCount();
                 })

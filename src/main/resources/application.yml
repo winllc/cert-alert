@@ -264,6 +264,10 @@ cert-alert:
     digest:
       enabled: true
       cron: "0 0 7 * * *"
+      # How many days before expiry the round-up starts reporting a certificate. This is
+      # the starting point only: it is set from the notifications page after that, because
+      # the people who know the right answer are not the people with access to this file.
+      # Clearing the row the page writes (notification_setting) comes back to this.
       window: 30d
       include-expired: true
     email:

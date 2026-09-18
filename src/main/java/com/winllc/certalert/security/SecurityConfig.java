@@ -85,6 +85,11 @@ public class SecurityConfig {
                         "/api/v1/changelog/**",
                         "/api/v1/notifications/digest")
                 .hasRole("ADMIN")
+                // How far ahead the round-up looks decides what every point of contact in
+                // the directory is written to about, so it is not in the same bracket as
+                // editing one server's contacts. Reading it stays open to anyone signed in.
+                .requestMatchers(HttpMethod.PUT, "/api/v1/notifications/settings")
+                .hasRole("ADMIN")
                 // Editing a server's points of contact, or the addresses a person answers
                 // to, decides who hears about an expiry - the addresses because they are
                 // what binds a person to a server. Administrators by default; see

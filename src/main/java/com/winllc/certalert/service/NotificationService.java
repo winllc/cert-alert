@@ -4,7 +4,6 @@ import com.winllc.certalert.alert.CertificateAlert;
 import com.winllc.certalert.config.NotificationProperties;
 import com.winllc.certalert.domain.AuditEvent;
 import com.winllc.certalert.domain.CachedCertificate;
-import com.winllc.certalert.domain.CertificateStatus;
 import com.winllc.certalert.domain.DirectoryServer;
 import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.domain.Notification;
@@ -14,6 +13,7 @@ import com.winllc.certalert.domain.Severity;
 import com.winllc.certalert.repository.CachedCertificateRepository;
 import com.winllc.certalert.repository.NotificationRepository;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -51,6 +51,7 @@ public class NotificationService {
     private final CachedCertificateRepository certificates;
     private final NotificationRecipients recipients;
     private final NotificationMailer mailer;
+    private final NotificationSettingsService settings;
     private final NotificationProperties properties;
     private final Clock clock;
 
@@ -59,12 +60,14 @@ public class NotificationService {
             CachedCertificateRepository certificates,
             NotificationRecipients recipients,
             NotificationMailer mailer,
+            NotificationSettingsService settings,
             NotificationProperties properties,
             Clock clock) {
         this.notifications = notifications;
         this.certificates = certificates;
         this.recipients = recipients;
         this.mailer = mailer;
+        this.settings = settings;
         this.properties = properties;
         this.clock = clock;
     }
@@ -145,20 +148,23 @@ public class NotificationService {
      */
     @Transactional
     public DigestResult digest() {
-        NotificationProperties.Digest settings = properties.getDigest();
+        NotificationProperties.Digest digestSettings = properties.getDigest();
         if (!properties.isEnabled()) {
             return DigestResult.NOTHING;
         }
         Instant now = Instant.now(clock);
-        Instant horizon = now.plus(settings.getWindow());
-        List<CertificateStatus> statuses = settings.isIncludeExpired()
-                ? List.of(CertificateStatus.EXPIRING_SOON, CertificateStatus.EXPIRED)
-                : List.of(CertificateStatus.EXPIRING_SOON);
+        // How far ahead to look is somebody's decision, made in the UI, and it may be
+        // further than the window certificates are marked EXPIRING_SOON in.
+        int leadDays = settings.leadDays();
+        Instant horizon = now.plus(Duration.ofDays(leadDays));
+        // Nothing has a notAfter before this, so it excludes nothing; the current instant in
+        // its place is what leaves out what has already expired.
+        Instant floor = digestSettings.isIncludeExpired() ? Instant.EPOCH : now;
 
         List<CachedCertificate> expiring =
-                certificates.findExpiringBefore(statuses, horizon, PageRequest.of(0, DIGEST_SCAN_LIMIT));
+                certificates.findExpiringBetween(floor, horizon, PageRequest.of(0, DIGEST_SCAN_LIMIT));
         if (expiring.isEmpty()) {
-            log.debug("Expiry digest: nothing expiring before {}", horizon);
+            log.debug("Expiry digest: nothing expiring in the next {} day(s)", leadDays);
             return DigestResult.NOTHING;
         }
 
@@ -189,8 +195,8 @@ public class NotificationService {
                 emailed++;
             }
         }
-        log.info("Expiry digest: {} certificate(s) expiring before {}, {} person(s) told, {} emailed",
-                expiring.size(), horizon, told, emailed);
+        log.info("Expiry digest: {} certificate(s) expiring in the next {} day(s), {} person(s) told, {} emailed",
+                expiring.size(), leadDays, told, emailed);
         return new DigestResult(expiring.size(), told, emailed);
     }
 

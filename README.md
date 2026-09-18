@@ -566,6 +566,21 @@ Nobody hears the same thing twice inside `cert-alert.notifications.repeat-after`
 default). A nightly sweep and a certificate that stays expiring for a month would otherwise
 mean thirty notifications.
 
+**How many days before expiry the round-up writes** is set on the notifications page, not in
+the configuration file. It is the number that gets argued about once a deployment is real -
+thirty days is too late for a certificate whose renewal needs a change request raised, and a
+fortnight of noise for a service that reissues weekly - and the people who know the answer
+are rarely the people with access to the YAML. `cert-alert.notifications.digest.window` is
+the starting point; the page overrides it, anybody signed in can see what it is set to and
+who set it, and only an administrator can change it, because it decides what every point of
+contact in the directory hears.
+
+The round-up selects on the expiry date rather than on the cached `EXPIRING_SOON` status,
+so setting this beyond `cert-alert.warning-threshold-days` reaches the certificates past that
+window rather than quietly reporting the same thirty days. The two are separate on purpose:
+the threshold is what the tables and the page alerts call expiring, and this is how far ahead
+the email looks.
+
 Email is off until `cert-alert.notifications.email.enabled` is set and `spring.mail.*` is
 configured. The notifications are written and shown on the page either way.
 
@@ -636,6 +651,8 @@ for.
 | `POST` | `/api/v1/notifications/{id}/read`   | Mark one read                            |
 | `POST` | `/api/v1/notifications/read-all`    | Mark them all read                       |
 | `POST` | `/api/v1/notifications/digest`      | Run the expiry round-up now              |
+| `GET`  | `/api/v1/notifications/settings`    | How far ahead the round-up looks         |
+| `PUT`  | `/api/v1/notifications/settings`    | Set it, `{"leadDays": 45}`               |
 | `GET`  | `/api/v1/users/{id}/addresses`      | Both lists of addresses                  |
 | `POST` | `/api/v1/users/{id}/addresses`      | Add one: `{"address":…,"kind":"GROUP"}`  |
 | `DELETE` | `/api/v1/users/{id}/addresses/{aliasId}` | Remove one                       |

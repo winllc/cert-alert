@@ -1,10 +1,16 @@
 package com.winllc.certalert.web;
 
+import com.winllc.certalert.config.NotificationProperties;
 import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.repository.DirectoryUserRepository;
 import com.winllc.certalert.security.DirectoryPrincipal;
+import com.winllc.certalert.security.DirectoryPrincipalResolver;
+import com.winllc.certalert.service.AuditActors;
 import com.winllc.certalert.service.NotificationService;
+import com.winllc.certalert.service.NotificationSettingsService;
 import com.winllc.certalert.web.dto.NotificationRow;
+import com.winllc.certalert.web.dto.NotificationSettingsRequest;
+import com.winllc.certalert.web.dto.NotificationSettingsView;
 import com.winllc.certalert.web.dto.PageResponse;
 import java.util.List;
 import java.util.Locale;
@@ -15,6 +21,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -38,11 +46,18 @@ public class NotificationController {
     private static final int MAX_PAGE_SIZE = 100;
 
     private final NotificationService notificationService;
+    private final NotificationSettingsService settingsService;
+    private final NotificationProperties properties;
     private final DirectoryUserRepository userRepository;
 
     public NotificationController(
-            NotificationService notificationService, DirectoryUserRepository userRepository) {
+            NotificationService notificationService,
+            NotificationSettingsService settingsService,
+            NotificationProperties properties,
+            DirectoryUserRepository userRepository) {
         this.notificationService = notificationService;
+        this.settingsService = settingsService;
+        this.properties = properties;
         this.userRepository = userRepository;
     }
 
@@ -84,10 +99,37 @@ public class NotificationController {
         return Map.of("read", userId == null ? 0 : notificationService.markAllRead(userId));
     }
 
+    /**
+     * How far ahead the round-up looks. Anybody signed in may read it - it is what the page
+     * says the email will tell them about - and administrators may change it.
+     */
+    @GetMapping("/settings")
+    public NotificationSettingsView settings(Authentication authentication) {
+        return NotificationSettingsView.of(
+                settingsService.current(), properties.getEmail().isEnabled(), isAdmin(authentication));
+    }
+
+    /** Administrators only; see SecurityConfig. */
+    @PutMapping("/settings")
+    public NotificationSettingsView updateSettings(
+            @RequestBody NotificationSettingsRequest request, Authentication authentication) {
+
+        return NotificationSettingsView.of(
+                settingsService.update(request.leadDays(), AuditActors.current(AuditActors.SYSTEM)),
+                properties.getEmail().isEnabled(),
+                isAdmin(authentication));
+    }
+
     /** Runs the round-up now rather than waiting for the schedule. Administrators only. */
     @PostMapping("/digest")
     public NotificationService.DigestResult digest() {
         return notificationService.digest();
+    }
+
+    private boolean isAdmin(Authentication authentication) {
+        return authentication != null
+                && authentication.getAuthorities().stream()
+                        .anyMatch(authority -> DirectoryPrincipalResolver.ROLE_ADMIN.equals(authority.getAuthority()));
     }
 
     /**

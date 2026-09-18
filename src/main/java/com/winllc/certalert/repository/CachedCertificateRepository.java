@@ -39,24 +39,26 @@ public interface CachedCertificateRepository extends JpaRepository<CachedCertifi
     List<CachedCertificate> findByFingerprint(@Param("fingerprint") String fingerprint);
 
     /**
-     * What the digest reports: everything in one of these states that expires before the
-     * horizon, owner attached so the round-up can name what it is about. Already-expired
-     * certificates come along with it - their notAfter is in the past, which is before any
-     * horizon - unless the caller leaves EXPIRED out of the statuses.
+     * What the digest reports: everything expiring between the floor and the horizon, owner
+     * attached so the round-up can name what it is about.
+     *
+     * <p>Dates rather than cached statuses, because how far ahead the round-up looks is set
+     * from the UI and may be further than the window a certificate is marked EXPIRING_SOON
+     * in. Asking for status would then quietly report nothing beyond that window, whatever
+     * the setting said. The floor is what leaves already-expired certificates out: pass the
+     * current instant to exclude them, and something before any certificate to keep them.
      */
     @Query("""
             select c from CachedCertificate c
             left join fetch c.user
             left join fetch c.server
-            where c.status in :statuses
-              and c.notAfter is not null
+            where c.notAfter is not null
               and c.notAfter <= :horizon
+              and c.notAfter > :floor
             order by c.notAfter
             """)
-    List<CachedCertificate> findExpiringBefore(
-            @Param("statuses") Collection<CertificateStatus> statuses,
-            @Param("horizon") Instant horizon,
-            Pageable pageable);
+    List<CachedCertificate> findExpiringBetween(
+            @Param("floor") Instant floor, @Param("horizon") Instant horizon, Pageable pageable);
 
     long countByStatus(CertificateStatus status);
 

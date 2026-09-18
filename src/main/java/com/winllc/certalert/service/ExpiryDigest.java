@@ -2,7 +2,6 @@ package com.winllc.certalert.service;
 
 import com.winllc.certalert.domain.AuditEvent;
 import com.winllc.certalert.domain.CachedCertificate;
-import com.winllc.certalert.domain.CertificateStatus;
 import com.winllc.certalert.domain.OwnerType;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -141,7 +140,10 @@ public final class ExpiryDigest {
         public static Entry of(
                 CachedCertificate certificate, AuditEvent.SubjectRef subject, OwnerType ownerType, Instant now) {
 
-            boolean expired = certificate.getStatus() == CertificateStatus.EXPIRED;
+            // The date rather than the cached status: statuses are re-evaluated hourly, and
+            // the round-up looks as far ahead as it is told to, which may be past the window
+            // anything is marked EXPIRING_SOON in.
+            boolean expired = !certificate.getNotAfter().isAfter(now);
             long days = ChronoUnit.DAYS.between(now, certificate.getNotAfter());
             return new Entry(ownerType, subject, certificate, days, expired);
         }
