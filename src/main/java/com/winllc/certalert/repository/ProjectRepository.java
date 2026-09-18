@@ -31,6 +31,14 @@ public interface ProjectRepository extends JpaRepository<Project, Long> {
     @Query("select p from Project p join p.servers s where s.id = :serverId order by p.name")
     List<Project> findByServerId(@Param("serverId") Long serverId);
 
+    /**
+     * Whether this person and this server are in a project together - which is what lets
+     * them manage that server's points of contact. See {@code ServerAccessPolicy}.
+     */
+    @Query("select count(p) > 0 from Project p join p.members m join p.servers s "
+            + "where m.id = :userId and s.id = :serverId")
+    boolean existsSharedMembership(@Param("userId") Long userId, @Param("serverId") Long serverId);
+
     /** Projection for {@link #countMembership()}. */
     interface ProjectSize {
         Long getProjectId();

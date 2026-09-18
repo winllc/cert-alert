@@ -4,8 +4,7 @@ import com.winllc.certalert.domain.DirectoryServer;
 import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.DirectoryUserRepository;
 import com.winllc.certalert.security.DirectoryPrincipal;
-import com.winllc.certalert.security.DirectoryPrincipalResolver;
-import com.winllc.certalert.security.SecurityProperties;
+import com.winllc.certalert.security.ServerAccessPolicy;
 import com.winllc.certalert.service.ResourceNotFoundException;
 import com.winllc.certalert.service.ServerContactService;
 import com.winllc.certalert.web.dto.AddContactRequest;
@@ -18,6 +17,7 @@ import java.util.List;
 import java.util.Locale;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -34,9 +34,13 @@ import org.springframework.web.bind.annotation.RestController;
  * Managing the points of contact for a server.
  *
  * <p>Reading returns both lists: what the directory publishes in {@code serverPOC}, which
- * is a cached copy and not editable here, and what was added here, which is. Who may edit
- * is {@code cert-alert.security.contact-editors}, enforced in the filter chain; the read
- * says which it is so the UI does not offer a button that will be refused.
+ * is a cached copy and not editable here, and what was added here, which is.
+ *
+ * <p>Who may edit is a question about this server rather than about the application, so it
+ * is answered here rather than in the filter chain: a point of contact for the server, or a
+ * member of a project it belongs to, manages its contacts, as do administrators. See
+ * {@link ServerAccessPolicy}. The read says which it is, so the UI shows the controls to
+ * the people they will work for rather than offering them and then refusing.
  */
 @RestController
 @RequestMapping("/api/v1")
@@ -48,17 +52,17 @@ public class ServerContactController {
     private final ServerContactService contactService;
     private final DirectoryServerRepository serverRepository;
     private final DirectoryUserRepository userRepository;
-    private final SecurityProperties securityProperties;
+    private final ServerAccessPolicy accessPolicy;
 
     public ServerContactController(
             ServerContactService contactService,
             DirectoryServerRepository serverRepository,
             DirectoryUserRepository userRepository,
-            SecurityProperties securityProperties) {
+            ServerAccessPolicy accessPolicy) {
         this.contactService = contactService;
         this.serverRepository = serverRepository;
         this.userRepository = userRepository;
-        this.securityProperties = securityProperties;
+        this.accessPolicy = accessPolicy;
     }
 
     @GetMapping("/servers/{id}/contacts")
@@ -68,7 +72,8 @@ public class ServerContactController {
                 serverRepository.findWithPocsById(id).orElseThrow(() -> ResourceNotFoundException.server(id));
         List<ServerContactRow> managed =
                 contactService.list(id).stream().map(ServerContactRow::from).toList();
-        return new ServerContacts(List.copyOf(server.getServerPocs()), managed, mayEdit(authentication));
+        return new ServerContacts(
+                List.copyOf(server.getServerPocs()), managed, accessPolicy.mayManageContacts(id, authentication));
     }
 
     @PostMapping("/servers/{id}/contacts")
@@ -76,6 +81,7 @@ public class ServerContactController {
     public ServerContactRow addContact(
             @PathVariable Long id, @Valid @RequestBody AddContactRequest request, Authentication authentication) {
 
+        requireManagement(id, authentication);
         String addedBy = nameOf(authentication);
         return ServerContactRow.from(request.userId() != null
                 ? contactService.addUser(id, request.userId(), addedBy)
@@ -84,7 +90,8 @@ public class ServerContactController {
 
     @DeleteMapping("/servers/{id}/contacts/{contactId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void removeContact(@PathVariable Long id, @PathVariable Long contactId) {
+    public void removeContact(@PathVariable Long id, @PathVariable Long contactId, Authentication authentication) {
+        requireManagement(id, authentication);
         contactService.remove(id, contactId);
     }
 
@@ -114,15 +121,11 @@ public class ServerContactController {
                 .toList();
     }
 
-    private boolean mayEdit(Authentication authentication) {
-        if (authentication == null || !authentication.isAuthenticated()) {
-            return false;
+    private void requireManagement(Long serverId, Authentication authentication) {
+        if (!accessPolicy.mayManageContacts(serverId, authentication)) {
+            throw new AccessDeniedException(
+                    "You are not a point of contact for this server, or a member of a project it belongs to");
         }
-        if (securityProperties.getContactEditors() == SecurityProperties.ContactEditors.AUTHENTICATED) {
-            return true;
-        }
-        return authentication.getAuthorities().stream()
-                .anyMatch(authority -> DirectoryPrincipalResolver.ROLE_ADMIN.equals(authority.getAuthority()));
     }
 
     /** Whoever is signed in, as the directory names them, for the audit trail on the row. */

@@ -90,19 +90,23 @@ public class SecurityConfig {
                 // editing one server's contacts. Reading it stays open to anyone signed in.
                 .requestMatchers(HttpMethod.PUT, "/api/v1/notifications/settings")
                 .hasRole("ADMIN")
-                // Editing a server's points of contact, or the addresses a person answers
-                // to, decides who hears about an expiry - the addresses because they are
-                // what binds a person to a server. Administrators by default; see
+                // A server's points of contact are managed by the people associated with
+                // that server - its contacts, and the members of a project it belongs to -
+                // as well as by administrators. That is a question about one server rather
+                // than about the application, so the rule is ServerAccessPolicy's and all
+                // this asks for is somebody signed in to ask it about.
+                .requestMatchers(
+                        HttpMethod.POST, "/api/v1/servers/*/contacts", "/api/v1/servers/*/contacts/**")
+                .authenticated()
+                .requestMatchers(HttpMethod.DELETE, "/api/v1/servers/*/contacts/**")
+                .authenticated()
+                // The addresses a person answers to are a different matter: they bind that
+                // person to every server named after one, so they stay with
                 // cert-alert.security.contact-editors.
                 .requestMatchers(
-                        HttpMethod.POST,
-                        "/api/v1/servers/*/contacts",
-                        "/api/v1/servers/*/contacts/**",
-                        "/api/v1/users/*/addresses",
-                        "/api/v1/users/*/addresses/**")
+                        HttpMethod.POST, "/api/v1/users/*/addresses", "/api/v1/users/*/addresses/**")
                 .access(contactEditors(properties))
-                .requestMatchers(
-                        HttpMethod.DELETE, "/api/v1/servers/*/contacts/**", "/api/v1/users/*/addresses/**")
+                .requestMatchers(HttpMethod.DELETE, "/api/v1/users/*/addresses/**")
                 .access(contactEditors(properties))
                 // Projects are the same kind of thing: data this application keeps
                 // alongside the directory, curated by the same people.

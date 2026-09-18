@@ -450,11 +450,29 @@ Both lists count as points of contact everywhere it matters: the contact filter 
 person-to-servers join match either, and an expiry alert names both. The servers table
 shows the directory's value with a **+n added** badge beside it.
 
-Who may edit is `cert-alert.security.contact-editors`: `ADMIN` by default, because a
-contact decides who hears that a certificate is about to expire. Set it to `AUTHENTICATED`
-where the people who run the servers keep their own contacts current. Reading the list is
-open to anyone signed in, and says which of the two applies so the UI shows the controls
-only to somebody who may use them.
+#### Who may edit them
+
+**Whoever is associated with the server**, which is a question about that server rather than
+about the application:
+
+| May manage a server's contacts | How |
+|---|---|
+| A point of contact for it | named in the directory's `serverPOC` by any value that names them, or added here |
+| A member of a project it belongs to | the project is what says these servers are one system |
+| An administrator | as with everything else |
+
+The people who know who belongs on a contact list are the people already on it, and the
+people who own the project the server is part of. Waiting on an administrator to add a
+colleague is how a list goes stale, and a stale list is a certificate nobody is told about.
+Nobody gets a server they have nothing to do with: the refusal is a 403 saying exactly that.
+
+`cert-alert.security.contact-editors: AUTHENTICATED` still opens it to anyone signed in,
+where that suits the deployment. The addresses a person answers to stay with that setting
+either way — those bind a person to *every* server named after one, so they are not a
+per-server question.
+
+Reading the list is open to anyone signed in, and says whether this person may edit *this*
+server, so the UI shows the controls only where they will work.
 
 ### The audit trail
 

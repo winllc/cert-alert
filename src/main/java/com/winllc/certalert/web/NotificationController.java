@@ -1,10 +1,7 @@
 package com.winllc.certalert.web;
 
 import com.winllc.certalert.config.NotificationProperties;
-import com.winllc.certalert.domain.DirectoryUser;
-import com.winllc.certalert.repository.DirectoryUserRepository;
-import com.winllc.certalert.security.DirectoryPrincipal;
-import com.winllc.certalert.security.DirectoryPrincipalResolver;
+import com.winllc.certalert.security.SignedInDirectoryUser;
 import com.winllc.certalert.service.AuditActors;
 import com.winllc.certalert.service.NotificationService;
 import com.winllc.certalert.service.NotificationSettingsService;
@@ -13,7 +10,6 @@ import com.winllc.certalert.web.dto.NotificationSettingsRequest;
 import com.winllc.certalert.web.dto.NotificationSettingsView;
 import com.winllc.certalert.web.dto.PageResponse;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
@@ -48,17 +44,17 @@ public class NotificationController {
     private final NotificationService notificationService;
     private final NotificationSettingsService settingsService;
     private final NotificationProperties properties;
-    private final DirectoryUserRepository userRepository;
+    private final SignedInDirectoryUser signedIn;
 
     public NotificationController(
             NotificationService notificationService,
             NotificationSettingsService settingsService,
             NotificationProperties properties,
-            DirectoryUserRepository userRepository) {
+            SignedInDirectoryUser signedIn) {
         this.notificationService = notificationService;
         this.settingsService = settingsService;
         this.properties = properties;
-        this.userRepository = userRepository;
+        this.signedIn = signedIn;
     }
 
     @GetMapping
@@ -127,30 +123,11 @@ public class NotificationController {
     }
 
     private boolean isAdmin(Authentication authentication) {
-        return authentication != null
-                && authentication.getAuthorities().stream()
-                        .anyMatch(authority -> DirectoryPrincipalResolver.ROLE_ADMIN.equals(authority.getAuthority()));
+        return SignedInDirectoryUser.isAdmin(authentication);
     }
 
-    /**
-     * Which directory entry is asking.
-     *
-     * <p>Resolved when they signed in, where it could be: on a deployment whose first sweep
-     * has not finished, or one that swept after somebody signed in, there was no entry to
-     * resolve them to and the session carries none. Rather than showing that person an
-     * empty page until they sign out and back in, their name is looked up now - one indexed
-     * query, on a page they asked for.
-     */
+    /** Which directory entry is asking. A notification is addressed to one of those. */
     private Long directoryUserId(Authentication authentication) {
-        if (authentication == null || !(authentication.getPrincipal() instanceof DirectoryPrincipal principal)) {
-            return null;
-        }
-        if (principal.getDirectoryUserId() != null) {
-            return principal.getDirectoryUserId();
-        }
-        List<DirectoryUser> named = userRepository.findByIdentifier(principal.getUsername().toLowerCase(Locale.ROOT));
-        // Two people answering to one name is no basis for showing either of them the
-        // other's notifications.
-        return named.size() == 1 ? named.getFirst().getId() : null;
+        return signedIn.idOf(authentication);
     }
 }
