@@ -3,7 +3,11 @@
 <head th:fragment="head(pageTitle)">
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <title th:text="'cert-alert · ' + ${pageTitle}">cert-alert</title>
+    <title th:text="'CertAlert · ' + ${pageTitle}">CertAlert</title>
+    <!-- The mark on its own for the tab; like everything else here it ships in the jar. -->
+    <link rel="icon" th:href="@{/favicon.ico}" sizes="any">
+    <link rel="icon" type="image/png" th:href="@{/img/favicon-32.png}" sizes="32x32">
+    <link rel="apple-touch-icon" th:href="@{/img/apple-touch-icon.png}">
     <!-- The tables POST, so every request needs the CSRF token; the scripts read it here. -->
     <meta name="_csrf" th:content="${_csrf != null} ? ${_csrf.token} : ''">
     <meta name="_csrf_header" th:content="${_csrf != null} ? ${_csrf.headerName} : ''">
@@ -23,9 +27,10 @@
                 aria-label="Toggle navigation">
             <span class="navbar-toggler-icon"></span>
         </button>
-        <a class="navbar-brand navbar-brand-autodark d-none-navbar-horizontal pe-0 pe-md-3" th:href="@{/users}">
-            <svg class="icon text-primary me-2"><use href="#icon-shield-check"></use></svg>
-            <span>cert-alert</span>
+        <!--/* The reversed lockup: the bar is dark, so the navy of the full-colour one
+               would disappear into it. */-->
+        <a class="navbar-brand d-none-navbar-horizontal pe-0 pe-md-3" th:href="@{/users}">
+            <img th:src="@{/img/logo-white.png}" alt="CertAlert" class="navbar-brand-image logo">
         </a>
 
         <div class="navbar-nav flex-row order-md-last">

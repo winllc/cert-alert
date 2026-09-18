@@ -1,3 +1,5 @@
+<img src="src/main/resources/static/img/logo.png" alt="CertAlert" height="64">
+
 # cert-alert
 
 Scrapes an LDAP directory for the certificates its entries publish, caches the details
@@ -379,6 +381,13 @@ so its own paging and search controls match the card they sit in.
 Tabler's icon package is 6.8MB of individual SVGs, so rather than ship all of it for a
 dozen glyphs, the icons used here are inlined as a sprite in
 `templates/fragments/icons.html`, regenerated from the package when the set changes.
+
+The logo lives in `static/img/` and ships in the jar like everything else. Two variants,
+because the application has a dark bar and light pages: `logo.png` in full colour for the
+sign-in page and anywhere on white, and `logo-white.png` reversed for the navigation bar,
+where the navy of the full-colour one would disappear into the background. `logo-mark.png`
+is the mark without the wordmark, which is what the favicons are cut from. The artifact and
+the configuration prefix stay `cert-alert`; the name on the page is CertAlert.
 
 Each page carries a roll-up of the certificate states across that object type, then a card
 holding the filters and the table. Expanding a row fetches that entry's cached certificate

@@ -50,7 +50,9 @@ import org.springframework.security.web.util.matcher.RequestMatcher;
 public class SecurityConfig {
 
     private static final String[] PUBLIC_PATHS = {
-        "/login", "/css/**", "/js/**", "/webjars/**", "/favicon.ico", "/error"
+        // The images among them: the sign-in page carries the logo, and nobody has signed
+        // in when it is served.
+        "/login", "/css/**", "/js/**", "/img/**", "/webjars/**", "/favicon.ico", "/error"
     };
 
     /** Administrators, or anyone signed in, depending on how the application is configured. */

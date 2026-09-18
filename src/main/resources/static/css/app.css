@@ -315,3 +315,18 @@ tr.notification-unread td:first-child {
     border-radius: 2px;
     display: inline-block;
 }
+
+/*
+ * The logo. Sized by height so the lockup keeps its proportions wherever it appears, and
+ * given a width bound so a narrow window scales it down rather than pushing the navigation
+ * off the bar.
+ */
+.logo {
+    height: 1.75rem;
+    width: auto;
+    max-width: 100%;
+}
+
+.logo-lg {
+    height: 3rem;
+}
