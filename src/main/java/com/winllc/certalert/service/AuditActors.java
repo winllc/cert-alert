@@ -25,6 +25,9 @@ public final class AuditActors {
     /** The job that asks the issuing authorities what they have revoked. */
     public static final String REVOCATION = "revocation";
 
+    /** The job that deletes finished certificates from the directory. */
+    public static final String CLEANUP = "certificate cleanup";
+
     /** The job that deletes entries the directory has stopped publishing. */
     public static final String PRUNE = "prune";
 

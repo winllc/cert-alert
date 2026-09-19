@@ -48,6 +48,15 @@ access to dn.subtree="ou=servers,dc=example,dc=test"
         by users read
         by anonymous none
 
+# The certificate attribute, which the cleanup job deletes values from. Write rather than
+# read, and scoped to that one attribute: this is the only thing the application removes
+# from the directory, and it should be able to remove nothing else. A deployment that
+# leaves cert-alert.ldap.certificate-cleanup off does not need this grant at all.
+access to attrs=userCertificate
+        by dn.exact="cn=cert-alert,ou=services,dc=example,dc=test" write
+        by users read
+        by anonymous none
+
 access to *
         by dn.exact="cn=cert-alert,ou=services,dc=example,dc=test" read
         by self read

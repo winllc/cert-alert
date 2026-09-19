@@ -9,6 +9,7 @@ import com.winllc.certalert.ldap.ChangelogProperties;
 import com.winllc.certalert.service.CertificateRefreshService;
 import com.winllc.certalert.service.ChangelogConnector;
 import com.winllc.certalert.service.ChangelogCursorStore;
+import com.winllc.certalert.service.CertificateCleanupService;
 import com.winllc.certalert.service.DirectoryPruneService;
 import com.winllc.certalert.service.DirectorySyncService;
 import com.winllc.certalert.service.ResourceNotFoundException;
@@ -42,6 +43,7 @@ public class DirectoryApiController {
     private final DirectorySyncService syncService;
     private final CertificateRefreshService refreshService;
     private final DirectoryPruneService pruneService;
+    private final CertificateCleanupService cleanupService;
     private final DirectoryUserRepository userRepository;
     private final DirectoryServerRepository serverRepository;
     private final SyncRunRepository syncRunRepository;
@@ -54,6 +56,7 @@ public class DirectoryApiController {
             DirectorySyncService syncService,
             CertificateRefreshService refreshService,
             DirectoryPruneService pruneService,
+            CertificateCleanupService cleanupService,
             DirectoryUserRepository userRepository,
             DirectoryServerRepository serverRepository,
             SyncRunRepository syncRunRepository,
@@ -63,6 +66,7 @@ public class DirectoryApiController {
         this.syncService = syncService;
         this.refreshService = refreshService;
         this.pruneService = pruneService;
+        this.cleanupService = cleanupService;
         this.userRepository = userRepository;
         this.serverRepository = serverRepository;
         this.syncRunRepository = syncRunRepository;
@@ -106,6 +110,24 @@ public class DirectoryApiController {
     @GetMapping("/sync/prune/preview")
     public Map<String, Long> prunePreview() {
         return Map.of("prunable", pruneService.countPrunable());
+    }
+
+    /**
+     * Deletes from the directory the certificates it should not still be publishing.
+     *
+     * <p>Does nothing at all unless {@code cert-alert.ldap.certificate-cleanup.enabled} is
+     * set: running it by hand is bringing a scheduled job forward, not a way around the
+     * switch that says this deployment permits writing to the directory.
+     */
+    @PostMapping("/sync/certificate-cleanup")
+    public CertificateCleanupService.Result cleanUpCertificates() {
+        return cleanupService.run();
+    }
+
+    /** What that would remove, without removing it. */
+    @GetMapping("/sync/certificate-cleanup/preview")
+    public CertificateCleanupService.Preview certificateCleanupPreview() {
+        return cleanupService.preview();
     }
 
     /** The most recent runs, newest first. */

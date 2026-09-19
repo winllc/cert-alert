@@ -25,6 +25,14 @@ public enum AuditAction {
     CERTIFICATE_REMOVED("Certificate withdrawn"),
 
     /**
+     * This application deleted a certificate from the directory entry. Distinct from the
+     * record above, which is the directory having done it: that is something noticed, and
+     * this is something done - the only thing here that removes data from somebody else's
+     * system of record.
+     */
+    CERTIFICATE_DELETED("Certificate deleted from the directory"),
+
+    /**
      * An authority was asked about a certificate and said it had been revoked. Recorded
      * against the entry because it is the most consequential thing that can be learned
      * about one, and it is learned from somewhere other than the directory.

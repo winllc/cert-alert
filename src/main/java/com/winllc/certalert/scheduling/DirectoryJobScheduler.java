@@ -4,6 +4,7 @@ import com.winllc.certalert.domain.SyncJob;
 import com.winllc.certalert.ldap.LdapProperties;
 import com.winllc.certalert.config.NotificationProperties;
 import com.winllc.certalert.service.AuditService;
+import com.winllc.certalert.service.CertificateCleanupService;
 import com.winllc.certalert.service.CertificateRefreshService;
 import com.winllc.certalert.service.DirectoryPruneService;
 import com.winllc.certalert.service.DirectorySyncService;
@@ -32,6 +33,9 @@ import org.springframework.stereotype.Component;
  *   <li><b>revocation</b> asks the issuing authorities which of the cached certificates
  *       they have revoked - the one question about a certificate that the certificate
  *       cannot answer. It reads no LDAP and runs after both sweeps.
+ *   <li><b>certificate cleanup</b> deletes from the directory the certificates it should
+ *       not still be publishing - revoked ones above all. The only job here that writes to
+ *       the directory, and off by default for that reason.
  *   <li><b>prune</b> removes entries the directory has stopped publishing. It is off by
  *       default: deleting records is not something to start doing on its own.
  *   <li><b>audit retention</b> trims the audit trail, and is off by default for the same
@@ -59,6 +63,7 @@ public class DirectoryJobScheduler {
     private final NotificationService notificationService;
     private final NotificationProperties notificationProperties;
     private final RevocationService revocationService;
+    private final CertificateCleanupService cleanupService;
     private final LdapProperties properties;
 
     private final Map<SyncJob, AtomicBoolean> running = new EnumMap<>(SyncJob.class);
@@ -71,6 +76,7 @@ public class DirectoryJobScheduler {
             NotificationService notificationService,
             NotificationProperties notificationProperties,
             RevocationService revocationService,
+            CertificateCleanupService cleanupService,
             LdapProperties properties) {
         this.syncService = syncService;
         this.refreshService = refreshService;
@@ -79,6 +85,7 @@ public class DirectoryJobScheduler {
         this.notificationService = notificationService;
         this.notificationProperties = notificationProperties;
         this.revocationService = revocationService;
+        this.cleanupService = cleanupService;
         this.properties = properties;
         for (SyncJob job : SyncJob.values()) {
             running.put(job, new AtomicBoolean(false));
@@ -140,6 +147,19 @@ public class DirectoryJobScheduler {
     @Scheduled(cron = "${cert-alert.revocation.cron}", zone = "UTC")
     public void checkRevocation() {
         runOnce(SyncJob.REVOCATION, revocationService::checkAll);
+    }
+
+    /**
+     * Removing from the directory the certificates it should not still be publishing. Off
+     * by default and checked here as well as in the service, so that a deployment which has
+     * not turned it on does no work at all rather than doing the work and finding nothing.
+     */
+    @Scheduled(cron = "${cert-alert.ldap.certificate-cleanup.cron}", zone = "UTC")
+    public void cleanUpCertificates() {
+        if (!properties.getCertificateCleanup().isEnabled()) {
+            return;
+        }
+        runOnce(SyncJob.CERTIFICATE_CLEANUP, cleanupService::run);
     }
 
     @Scheduled(cron = "${cert-alert.ldap.prune.cron}", zone = "UTC")

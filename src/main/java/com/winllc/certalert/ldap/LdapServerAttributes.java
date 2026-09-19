@@ -13,11 +13,9 @@ import javax.naming.directory.ModificationItem;
 import javax.naming.directory.SearchControls;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.ldap.autoconfigure.LdapConnectionDetails;
 import org.springframework.ldap.core.ContextMapper;
 import org.springframework.ldap.core.DirContextOperations;
 import org.springframework.ldap.core.LdapTemplate;
-import org.springframework.ldap.core.support.LdapContextSource;
 import org.springframework.stereotype.Component;
 
 /**
@@ -28,11 +26,9 @@ import org.springframework.stereotype.Component;
  * cached in between, because a copy of an attribute that can be edited in two places is a
  * copy that will disagree with itself.
  *
- * <p>Rooted at nothing, like the changelog connection and for the same reason: a cached
- * entry carries the distinguished name the directory gave it, which is absolute, and the
- * shared context source would resolve it again under {@code spring.ldap.base}. Built here
- * rather than published as a bean, or Spring Boot would take it for the application's own
- * context source and the sweep would start looking for {@code ou=people} at the root.
+ * <p>Works through {@link DirectoryEntryConnection}, which is rooted at nothing: a cached
+ * entry carries the absolute name the directory gave it, and the application's own context
+ * source would resolve that again under {@code spring.ldap.base}.
  */
 @Component
 public class LdapServerAttributes {
@@ -45,21 +41,10 @@ public class LdapServerAttributes {
     private final boolean credentialled;
 
     public LdapServerAttributes(
-            LdapConnectionDetails connectionDetails, DirectoryEntryMapper mapper, LdapProperties properties) {
+            DirectoryEntryConnection connection, DirectoryEntryMapper mapper, LdapProperties properties) {
 
-        LdapContextSource contextSource = new LdapContextSource();
-        contextSource.setUrls(connectionDetails.getUrls());
-        // Empty on purpose: see the class javadoc.
-        contextSource.setBase("");
-        this.credentialled = connectionDetails.getUsername() != null
-                && !connectionDetails.getUsername().isBlank();
-        if (credentialled) {
-            contextSource.setUserDn(connectionDetails.getUsername());
-            contextSource.setPassword(connectionDetails.getPassword());
-        }
-        contextSource.afterPropertiesSet();
-
-        this.template = new LdapTemplate(contextSource);
+        this.template = connection.template();
+        this.credentialled = connection.isCredentialled();
         this.mapper = mapper;
         this.properties = properties;
     }

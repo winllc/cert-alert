@@ -20,6 +20,8 @@ public class LdapProperties {
 
     private final Sync sync = new Sync();
     private final Prune prune = new Prune();
+
+    private final CertificateCleanup certificateCleanup = new CertificateCleanup();
     private final User user = new User();
     private final Server server = new Server();
 
@@ -52,6 +54,10 @@ public class LdapProperties {
 
     public Prune getPrune() {
         return prune;
+    }
+
+    public CertificateCleanup getCertificateCleanup() {
+        return certificateCleanup;
     }
 
     public User getUser() {
@@ -191,6 +197,111 @@ public class LdapProperties {
 
         public void setAfter(Duration after) {
             this.after = after;
+        }
+    }
+
+    /**
+     * Removing certificates the directory should not still be publishing, bound from
+     * {@code cert-alert.ldap.certificate-cleanup}.
+     *
+     * <p>The only part of this application that deletes anything from the directory
+     * itself. Everything else here reads it and keeps an index; this writes, and what it
+     * writes cannot be undone from here.
+     */
+    public static class CertificateCleanup {
+
+        /**
+         * Off by default, and more firmly than the prune is. That removes an entry from a
+         * cache; this removes a value from the directory, which is somebody else's system
+         * of record.
+         */
+        private boolean enabled = false;
+
+        /** Weekly, and clear of the sweeps and the revocation check. */
+        private String cron = "0 0 3 * * SAT";
+
+        /** Whether certificates whose validity has run out are removed. */
+        private boolean removeExpired = true;
+
+        /**
+         * How long after expiry. Long enough that a certificate is unmistakably finished
+         * with - a clock skewed by a day, or a renewal that ran late, must not be enough
+         * to have the old one deleted out from under it.
+         */
+        private Duration expiredAfter = Duration.ofDays(90);
+
+        /** Whether certificates an authority has revoked are removed. */
+        private boolean removeRevoked = true;
+
+        /**
+         * How long after the revocation was found. Shorter than the expiry window on
+         * purpose: an expired certificate is harmless and merely untidy, and a revoked one
+         * that is still published is a certificate something may still pick up and use.
+         */
+        private Duration revokedAfter = Duration.ofDays(7);
+
+        /**
+         * The most certificates one run will remove. A cap rather than a target: the first
+         * run against a directory that has never been cleaned up would otherwise rewrite
+         * tens of thousands of entries in one go, and a mistake caught after five hundred
+         * removals is a different kind of morning from one caught after fifty thousand.
+         */
+        private int maxPerRun = 500;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getCron() {
+            return cron;
+        }
+
+        public void setCron(String cron) {
+            this.cron = cron;
+        }
+
+        public boolean isRemoveExpired() {
+            return removeExpired;
+        }
+
+        public void setRemoveExpired(boolean removeExpired) {
+            this.removeExpired = removeExpired;
+        }
+
+        public Duration getExpiredAfter() {
+            return expiredAfter;
+        }
+
+        public void setExpiredAfter(Duration expiredAfter) {
+            this.expiredAfter = expiredAfter;
+        }
+
+        public boolean isRemoveRevoked() {
+            return removeRevoked;
+        }
+
+        public void setRemoveRevoked(boolean removeRevoked) {
+            this.removeRevoked = removeRevoked;
+        }
+
+        public Duration getRevokedAfter() {
+            return revokedAfter;
+        }
+
+        public void setRevokedAfter(Duration revokedAfter) {
+            this.revokedAfter = revokedAfter;
+        }
+
+        public int getMaxPerRun() {
+            return maxPerRun;
+        }
+
+        public void setMaxPerRun(int maxPerRun) {
+            this.maxPerRun = maxPerRun;
         }
     }
 

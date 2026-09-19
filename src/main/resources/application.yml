@@ -120,6 +120,25 @@ cert-alert:
     # rather than waiting for the next sweep. Off by default: a directory that publishes no
     # changelog, or does not let this account read it, would leave it erroring on a loop, and
     # the sweeps already keep the cache correct on their own.
+    # Deleting from the directory the certificates it should not still be publishing -
+    # revoked ones above all, since something that reads the directory and does not check
+    # revocation will pick one up and use it. The only job here that writes to the
+    # directory, and what it writes cannot be undone from here, so it is off by default and
+    # the windows are generous. Check GET /api/v1/sync/certificate-cleanup/preview first,
+    # and grant the service account write on the certificate attribute and nothing else.
+    certificate-cleanup:
+      enabled: false
+      cron: "0 0 3 * * SAT"
+      remove-expired: true
+      # Long enough that a skewed clock or a late renewal cannot make one eligible.
+      expired-after: 90d
+      remove-revoked: true
+      # Shorter: an expired certificate is untidy, a published revoked one is a hazard.
+      revoked-after: 7d
+      # A cap rather than a target. A mistake caught after 500 removals is a different kind
+      # of morning from one caught after 50,000.
+      max-per-run: 500
+
     changelog:
       enabled: false
       base-dn: cn=changelog

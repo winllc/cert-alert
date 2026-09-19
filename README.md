@@ -704,6 +704,67 @@ GET  /api/v1/revocation        the counts, and whether OCSP is possible here
 POST /api/v1/revocation/check  run it now (admin)
 ```
 
+### Removing what should not still be published
+
+A revoked certificate that is still in the directory is not untidy, it is a hazard:
+anything that reads the directory and does not check revocation will pick it up and use it.
+An expired one is merely untidy — it clutters the entry and is counted in every report.
+There is an optional job that deletes both.
+
+```yaml
+cert-alert:
+  ldap:
+    certificate-cleanup:
+      enabled: true
+      cron: "0 0 3 * * SAT"
+      expired-after: 90d
+      revoked-after: 7d
+      max-per-run: 500
+```
+
+**Off by default, and more firmly than the prune is.** Everything else here reads the
+directory and keeps an index of it. This writes, and what it writes cannot be undone from
+here: the value is gone from somebody else's system of record, and the only copy of it was
+the one that was deleted. So —
+
+- **Grace periods on both sides.** Ninety days after expiry, because a skewed clock or a
+  renewal that ran late must not be enough to have the old certificate deleted out from
+  under it; seven days after a revocation is found, which is shorter on purpose.
+- **A cap per run.** The first run against a directory nobody has ever cleaned up would
+  otherwise rewrite tens of thousands of entries in one go, and a mistake caught after five
+  hundred removals is a different kind of morning from one caught after fifty thousand.
+  Revoked certificates are taken first, so a run that hits the cap spends it on the ones
+  that matter.
+- **A preview**, which counts what would go and takes nothing:
+
+```
+GET  /api/v1/sync/certificate-cleanup/preview
+POST /api/v1/sync/certificate-cleanup          (administrators)
+```
+
+- **An audit record per certificate removed**, naming which and why, against the entry it
+  was taken from.
+
+The work is one search and one modify per entry: the cache holds a fingerprint rather than
+the bytes, so the entry's certificates are read, the values with matching fingerprints are
+picked out, and those exact values are deleted in a single modification — never a replace
+of the whole attribute, which on a multi-valued one is the difference between removing a
+certificate and removing all of them. The directory is written first and the cache second,
+so a crash in between leaves a certificate deleted from the directory and still in the
+index, which the next sweep corrects. The other order would leave it deleted from the index
+and still published.
+
+**The service account needs write on the certificate attribute and nothing else.** Without
+it every removal is refused, which is counted and logged rather than retried — the
+directory's access control has the last word on this, and should:
+
+```
+access to attrs=userCertificate
+        by dn.exact="cn=cert-alert,ou=services,dc=example,dc=test" write
+        by users read
+        by anonymous none
+```
+
 ### The audit trail
 
 Every entry carries a history: what happened to it, when, and who did it. It shows up in
@@ -992,6 +1053,8 @@ for.
 | `POST` | `/api/v1/sync/servers`              | Scrape IC Non-Person Entities now        |
 | `POST` | `/api/v1/sync/refresh`              | Re-evaluate cached expiry                |
 | `POST` | `/api/v1/sync/prune`                | Remove entries unseen past the window     |
+| `POST` | `/api/v1/sync/certificate-cleanup`  | Delete finished certificates from the directory |
+| `GET`  | `/api/v1/sync/certificate-cleanup/preview` | What that would delete            |
 | `GET`  | `/api/v1/sync/prune/preview`        | How many the next prune would remove      |
 | `GET`  | `/api/v1/sync/runs`                 | The run log, newest first                |
 | `GET`  | `/api/v1/stats/users`               | Certificate roll-up across IC Persons    |
@@ -1043,6 +1106,7 @@ revocation under `cert-alert.revocation` and the trim under `cert-alert.audit`.
 | **servers** | `0 0 4 * * *`     | Scrapes IC Non-Person Entities, staggered from the above  |
 | **refresh** | `0 15 * * * *`    | Re-evaluates cached expiry; reads no LDAP                 |
 | **revocation** | `0 30 5 * * *` | Asks the authorities what they have revoked; reads no LDAP |
+| **certificate cleanup** | `0 0 3 * * SAT` | Deletes finished certificates from the directory; off unless turned on |
 | **prune**   | `0 0 6 * * SUN`   | Removes entries the directory has stopped publishing      |
 | **audit retention** | `0 30 3 * * SUN` | Trims the audit trail; off unless turned on        |
 | **expiry round-up** | `0 0 7 * * *` | Tells each point of contact what of theirs is expiring |
@@ -1060,6 +1124,10 @@ already expired, notAfter inside the warning window), which is a small indexed s
 nor the clock: it asks the certificates' own authorities, which is a different system, on a
 different network path, with its own failure modes. It runs after both sweeps so it is
 asking about a current cache. See [Revocation](#revocation).
+
+**Why the certificate cleanup is off by default.** It is the only job here that writes to
+the directory, and deletions there cannot be undone from this side. See
+[Removing what should not still be published](#removing-what-should-not-still-be-published).
 
 **Why prune is off by default.** Deleting directory records is not something to start doing
 silently. It works on how long an entry has gone unseen rather than by diffing a sweep's
@@ -1221,6 +1289,11 @@ Scraping, under `cert-alert.ldap`:
 | `sync.users-cron`    | `0 0 2 * * *`  | IC Person sweep                          |
 | `sync.servers-cron`  | `0 0 4 * * *`  | IC Non-Person Entity sweep               |
 | `sync.refresh-cron`  | `0 15 * * * *` | Expiry re-evaluation                     |
+| `certificate-cleanup.enabled` | `false` | Whether finished certificates are deleted from the directory |
+| `certificate-cleanup.cron` | `0 0 3 * * SAT` | When that runs                       |
+| `certificate-cleanup.remove-expired` / `.expired-after` | `true` / `90d` | Delete certificates finished with for this long |
+| `certificate-cleanup.remove-revoked` / `.revoked-after` | `true` / `7d` | Delete revoked ones this long after finding out |
+| `certificate-cleanup.max-per-run` | `500` | Most removals in one run                  |
 | `prune.enabled`      | `false` | Whether stale entries are deleted at all        |
 | `prune.cron`         | `0 0 6 * * SUN` | Prune schedule                          |
 | `prune.after`        | `30d`   | How long an entry may go unseen before deletion |

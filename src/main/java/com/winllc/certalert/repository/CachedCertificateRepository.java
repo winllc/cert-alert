@@ -89,4 +89,43 @@ public interface CachedCertificateRepository extends JpaRepository<CachedCertifi
     List<CachedCertificate> findForServers(@Param("ids") Collection<Long> ids);
 
     long countByRevocationStatus(RevocationStatus status);
+
+    // --- what the directory should not still be publishing ---------------------------------
+
+    /**
+     * Certificates whose validity ran out before this. Ordered by expiry, oldest first, so
+     * a capped run works through the most finished-with ones rather than an arbitrary
+     * slice of them.
+     *
+     * <p>The owner's id comes back with the row rather than being reached for afterwards:
+     * the association is lazy, and the job that reads these groups them by entry outside
+     * any transaction.
+     */
+    @Query("select c.id as id, c.user.id as userId, c.server.id as serverId from CachedCertificate c "
+            + "where c.notAfter is not null and c.notAfter < :before order by c.notAfter, c.id")
+    List<CleanupCandidate> findExpiredBefore(@Param("before") Instant before, Pageable pageable);
+
+    /** Certificates an authority has revoked, found out about before this. */
+    @Query("select c.id as id, c.user.id as userId, c.server.id as serverId from CachedCertificate c "
+            + "where c.revocationStatus = :status "
+            + "and c.revocationCheckedAt is not null and c.revocationCheckedAt < :before "
+            + "order by c.revocationCheckedAt, c.id")
+    List<CleanupCandidate> findRevokedBefore(
+            @Param("status") RevocationStatus status, @Param("before") Instant before, Pageable pageable);
+
+    /** A certificate to remove, and the entry that publishes it. */
+    interface CleanupCandidate {
+        Long getId();
+
+        Long getUserId();
+
+        Long getServerId();
+    }
+
+    @Query("select count(c) from CachedCertificate c where c.notAfter is not null and c.notAfter < :before")
+    long countExpiredBefore(@Param("before") Instant before);
+
+    @Query("select count(c) from CachedCertificate c where c.revocationStatus = :status "
+            + "and c.revocationCheckedAt is not null and c.revocationCheckedAt < :before")
+    long countRevokedBefore(@Param("status") RevocationStatus status, @Param("before") Instant before);
 }

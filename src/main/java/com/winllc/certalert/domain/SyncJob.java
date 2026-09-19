@@ -16,5 +16,8 @@ public enum SyncJob {
     PRUNE,
 
     /** Asks the issuing authorities which cached certificates have been revoked. */
-    REVOCATION
+    REVOCATION,
+
+    /** Removes certificates from the directory that it should not still be publishing. */
+    CERTIFICATE_CLEANUP
 }
