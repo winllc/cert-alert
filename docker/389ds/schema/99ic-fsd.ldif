@@ -1,0 +1,133 @@
+# IC Full Service Directory attributes and object classes, FSD v2021-NOV.
+#
+# Enough of the specification for cert-alert to have something faithful to scrape: every
+# attribute named in the `cert-alert.ldap.user` and `cert-alert.ldap.server` mapping that
+# no stock schema already defines. 389 Directory Server's own schema supplies the rest
+# (uid, cn, sn, givenName, displayName, mail, title, telephoneNumber, employeeType, o, ou,
+# description, userCertificate, userPassword).
+#
+# The 99 prefix is the convention: schema files load in name order, and this has to come
+# after the standard ones it derives from.
+#
+# Two notes on the OIDs below:
+#
+#   - The specification marks several attributes "OID TBD" and leaves them to the
+#     implementing IC Element. Those are defined here under 1.3.6.1.4.1.99999.1, a
+#     deliberately bogus private arc. They are fine for a stand-in and must not be used
+#     anywhere real.
+#   - preferredName and serverPOC are both published as 2.16.840.1.101.2.2.2.201. A
+#     directory cannot hold the same OID twice, so serverPOC keeps the published value -
+#     it is the one this application joins on - and preferredName moves to the local arc.
+dn: cn=schema
+#
+# --- IC Person -------------------------------------------------------------------------
+#
+attributeTypes: ( 2.16.840.1.101.2.2.1.154 NAME 'icEmail'
+  DESC 'IC Person email address on the IC network'
+  EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE X-ORIGIN 'IC FSD v2021-NOV' )
+attributeTypes: ( 2.16.840.1.101.2.2.1.155 NAME 'internetEmail'
+  DESC 'IC Person email address on the public internet'
+  EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE X-ORIGIN 'IC FSD v2021-NOV' )
+attributeTypes: ( 2.16.840.1.101.2.2.1.156 NAME 'niprnetEmail'
+  DESC 'IC Person email address on NIPRNet'
+  EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE X-ORIGIN 'IC FSD v2021-NOV' )
+attributeTypes: ( 2.16.840.1.101.2.2.1.157 NAME 'siprnetEmail'
+  DESC 'IC Person email address on SIPRNet'
+  EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE X-ORIGIN 'IC FSD v2021-NOV' )
+attributeTypes: ( 2.16.840.1.101.2.2.1.133 NAME 'rank'
+  DESC 'Military rank'
+  EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE X-ORIGIN 'IC FSD v2021-NOV' )
+attributeTypes: ( 1.3.6.1.4.1.99999.1.7 NAME 'preferredName'
+  DESC 'The name the person prefers to be known by (published OID collides with serverPOC)'
+  EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE X-ORIGIN 'cert-alert stand-in' )
+#
+# --- Shared by people and non-person entities -------------------------------------------
+#
+attributeTypes: ( 2.16.840.1.101.2.2.1.160 NAME 'icNetworks'
+  DESC 'IC networks the entity is present on'
+  EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 X-ORIGIN 'IC FSD v2021-NOV' )
+attributeTypes: ( 2.16.840.1.101.2.2.1.161 NAME 'resourceSecurityMark'
+  DESC 'Classification banner for the entry'
+  EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE X-ORIGIN 'IC FSD v2021-NOV' )
+attributeTypes: ( 1.3.6.1.4.1.99999.1.1 NAME 'countryOfAffiliation'
+  DESC 'ISO 3166 trigraph of the country the entity is affiliated with'
+  EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE X-ORIGIN 'cert-alert stand-in' )
+attributeTypes: ( 1.3.6.1.4.1.99999.1.2 NAME 'dutyOrganization'
+  DESC 'Organization the entity works for day to day'
+  EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 X-ORIGIN 'cert-alert stand-in' )
+attributeTypes: ( 1.3.6.1.4.1.99999.1.8 NAME 'dutySubOrganization'
+  DESC 'Sub-organization within the duty organization'
+  EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 X-ORIGIN 'cert-alert stand-in' )
+attributeTypes: ( 1.3.6.1.4.1.99999.1.3 NAME 'adminOrganization'
+  DESC 'Organization administratively responsible for the entity'
+  EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE X-ORIGIN 'cert-alert stand-in' )
+attributeTypes: ( 1.3.6.1.4.1.99999.1.4 NAME 'isICMember'
+  DESC 'Whether the entity belongs to an IC Element'
+  EQUALITY booleanMatch
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.7 SINGLE-VALUE X-ORIGIN 'cert-alert stand-in' )
+#
+# --- IC Non-Person Entity (server) -------------------------------------------------------
+#
+attributeTypes: ( 2.16.840.1.101.2.2.2.200 NAME 'icServerAddress'
+  DESC 'Network address of the server'
+  EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE X-ORIGIN 'IC FSD v2021-NOV' )
+attributeTypes: ( 2.16.840.1.101.2.2.2.201 NAME 'serverPOC'
+  DESC 'Name of the IC Person or organization responsible for the server'
+  EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE X-ORIGIN 'IC FSD v2021-NOV' )
+attributeTypes: ( 2.16.840.1.101.2.2.2.202 NAME 'serverURL'
+  DESC 'URL the server answers on'
+  EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE X-ORIGIN 'IC FSD v2021-NOV' )
+#
+# The specification defines ATOStatus as a boolean: has an Authority To Operate, or does
+# not. This application carries and displays the status itself ("Authorized", "In
+# Process"), which says more and is what its sample data has always held, so the stand-in
+# defines the attribute as a string to match. A directory that follows the specification
+# literally will hand it TRUE or FALSE, which it will display just as happily.
+attributeTypes: ( 1.3.6.1.4.1.99999.1.5 NAME 'ATOStatus'
+  DESC 'Authority To Operate status'
+  EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE X-ORIGIN 'cert-alert stand-in' )
+attributeTypes: ( 1.3.6.1.4.1.99999.1.6 NAME 'lifeCycleStatus'
+  DESC 'Where the server is in its life cycle'
+  EQUALITY caseIgnoreMatch SUBSTR caseIgnoreSubstringsMatch
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 SINGLE-VALUE X-ORIGIN 'cert-alert stand-in' )
+#
+# --- Object classes ----------------------------------------------------------------------
+#
+# The specification leaves the hierarchy to the implementing IC Element and lists `dn` as
+# a MUST, which is not an attribute type a schema can require. Otherwise this is its
+# suggested definition.
+objectClasses: ( 2.16.840.1.101.2.2.3.73 NAME 'icOrgPerson'
+  DESC 'Intelligence Community Person'
+  SUP inetOrgPerson STRUCTURAL
+  MUST ( countryOfAffiliation $ dutyOrganization $ adminOrganization $ isICMember $
+  icNetworks $ resourceSecurityMark )
+  MAY ( icEmail $ internetEmail $ niprnetEmail $ siprnetEmail $ preferredName $ rank $
+  dutySubOrganization ) X-ORIGIN 'IC FSD v2021-NOV' )
+#
+# userCertificate is a MUST in the specification. It is a MAY here: an entry with no
+# published certificate is exactly the case this application exists to report on, so the
+# stand-in has to be able to hold one.
+objectClasses: ( 2.16.840.1.101.2.2.3.74 NAME 'icOrgServer'
+  DESC 'Intelligence Community Non-Person Entity'
+  SUP top STRUCTURAL
+  MUST ( cn $ uid $ givenName $ employeeType $ countryOfAffiliation $ dutyOrganization $
+  adminOrganization $ isICMember $ ATOStatus $ lifeCycleStatus $ icNetworks $
+  resourceSecurityMark $ serverPOC )
+  MAY ( description $ serverURL $ icServerAddress $ userCertificate $ o $ ou $
+  userPassword $ seeAlso $ dutySubOrganization ) X-ORIGIN 'IC FSD v2021-NOV' )

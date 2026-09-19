@@ -1,0 +1,25 @@
+# The retro changelog, which is the reason this stand-in is 389 Directory Server.
+#
+# It publishes cn=changelog: one changeLogEntry per write, each carrying a monotonic
+# changeNumber, the targetDn that changed and a changeType. That is what cert-alert's
+# changelog connector follows, and it is what OpenLDAP - the stand-in this replaced - does
+# not have, so the connector could only ever be left switched off against it.
+#
+# Applied as a modify rather than an add: the plugin entry ships with the server and comes
+# switched off.
+
+dn: cn=Retro Changelog Plugin,cn=plugins,cn=config
+changetype: modify
+replace: nsslapd-pluginEnabled
+nsslapd-pluginEnabled: on
+-
+# Only the data tree. Without this the changelog also records writes to cn=config, which
+# is noise to anything reading it for directory changes.
+replace: nsslapd-include-suffix
+nsslapd-include-suffix: dc=example,dc=test
+-
+# A stand-in does not need to remember every change ever made, and a changelog that grows
+# without bound is how a demo directory fills a disk. Two days is long enough to see the
+# connector notice a gap if it is stopped over a weekend.
+replace: nsslapd-changelogmaxage
+nsslapd-changelogmaxage: 2d

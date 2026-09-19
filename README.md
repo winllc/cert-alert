@@ -128,7 +128,8 @@ Or with a database and a directory alongside it:
 docker compose up --build
 ```
 
-That brings up three services — PostgreSQL, a stand-in OpenLDAP, and the application —
+That brings up three services — PostgreSQL, a stand-in 389 Directory Server, and the
+application —
 and waits for the first two to be healthy before starting the third. Sign in at
 <http://localhost:8080> as `alice` / `password` and press **Sync directory**.
 
@@ -145,12 +146,34 @@ docker compose up --build
 
 #### The stand-in directory
 
-`docker/openldap/` builds a slapd carrying `docker/openldap/schema/ic-fsd.schema` — the IC
-FSD attributes and the `icOrgPerson` and `icOrgServer` object classes, with the OIDs the
-specification publishes. It is a demo, and looks like one: plaintext LDAP on port 1389,
-passwords in the clear, and a default password on everything.
+`docker/389ds/` builds a **389 Directory Server** carrying
+`docker/389ds/schema/99ic-fsd.ldif` — the IC FSD attributes and the `icOrgPerson` and
+`icOrgServer` object classes, with the OIDs the specification publishes. It is a demo, and
+looks like one: plaintext LDAP on port 1389, and a default password on everything.
 
-The first time its volume is empty it generates a directory. How much is up to you:
+**It publishes `cn=changelog`**, which is why it is 389-ds and not the OpenLDAP stand-in it
+replaced. The retro changelog is switched on at first boot, so
+[the changelog connector](#following-the-changelog) has something to follow and the whole
+feature can be tried rather than described:
+
+```bash
+docker compose up --build   # then, in the application's environment:
+CERT_ALERT_LDAP_CHANGELOG_ENABLED=true
+```
+
+Access control is where 389-ds differs most from what was here before. There is no
+`slapd.conf`: the policy lives in the directory as `aci` attributes on the entries they
+protect, and `docker/389ds/bootstrap/00-base.ldif` carries all of it — the service account
+reads everything but `userPassword`, and writes exactly two things, the managed attributes
+under `ou=servers` and `userCertificate`. **Reading the changelog is a grant of its own**:
+`cn=changelog` is a suffix outside the data tree, so no `aci` on `dc=example,dc=test`
+reaches it, and an account that can read every entry still sees an empty changelog until
+`20-changelog-access.ldif` is applied. That is a real deployment's first surprise with the
+connector, so the stand-in makes the grant explicitly.
+
+The first time its volume is empty it generates a directory and imports it with `ldif2db`,
+offline — an LDAP add per entry is fine for a demo and hopeless for the hundred thousand
+this was built for. How much is up to you:
 
 ```bash
 CERT_ALERT_DUMMY_USERS=5000 CERT_ALERT_DUMMY_SERVERS=1500 docker compose up --build
@@ -165,10 +188,8 @@ ldapsearch -x -H ldap://localhost:1389 \
   -b 'dc=example,dc=test' '(objectClass=icOrgServer)' cn serverPOC
 ```
 
-Two things it cannot demonstrate. It serves plain LDAP, so X.509 sign-in still needs
-keystores of your own. And OpenLDAP publishes no `cn=changelog` — that is a 389 Directory
-Server and Sun/Oracle DSEE feature — so the changelog connector stays off against it and
-the sweeps are what keep the cache current.
+One thing it cannot demonstrate: it serves plain LDAP, so X.509 sign-in still needs
+keystores of your own.
 
 #### Generating the data
 
@@ -179,7 +200,7 @@ directory of your own:
 ```bash
 ./scripts/generate-directory-data.sh --users 500 --servers 200 > directory.ldif
 # -c because the LDIF carries ou=people and ou=servers, which a directory may already have
-ldapadd -c -x -H ldap://localhost:1389 -D 'cn=admin,dc=example,dc=test' -w admin -f directory.ldif
+ldapadd -c -x -H ldap://localhost:1389 -D 'cn=Directory Manager' -w directory-manager -f directory.ldif
 ```
 
 What it produces is deliberate rather than random: the same arguments give the same people
@@ -1226,11 +1247,17 @@ one.
 The page header shows a badge — *Live · change 4,182*, or how far behind it is — whenever
 the connector is switched on.
 
+**Where it has been run.** Against 389 Directory Server's retro changelog, which is what
+the compose stand-in publishes: switch the connector on and an `ldapmodify` against the
+directory shows up in the cache within a poll, with no sweep in between. Add, modify,
+rename and delete all arrive; a write to something neither sweep would collect is counted
+and stepped over. The tests drive the same paths against the in-memory server's own
+changelog. The `dev` profile's embedded directory publishes none, so the connector stays
+off there.
+
 **Caveats.** It runs in every instance that starts it; applying is idempotent so a second
 one is harmless rather than wrong, but it is wasted work — set `auto-start: false` on all
-but one, or add leader election. And the `dev` profile's embedded directory publishes no
-changelog, so the connector stays off there; the tests run against the in-memory server's
-real one.
+but one, or add leader election.
 
 ## How the sync works
 
@@ -1377,7 +1404,7 @@ class SlackAlertNotifier implements AlertNotifier {
 ```
 Dockerfile               three-stage image build
 docker-compose.yml       the application, a PostgreSQL and a stand-in directory
-docker/openldap/         slapd carrying the IC FSD schema, for the compose stack
+docker/389ds/            389 Directory Server carrying the IC FSD schema and a changelog
 scripts/                 the dummy directory generator
 src/main/java/com/winllc/certalert/
 ├── alert/       notifier SPI, dispatcher, log and email channels

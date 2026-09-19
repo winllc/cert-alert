@@ -1,0 +1,49 @@
+# The suffix, the account the application binds as, and who may do what.
+#
+# 389 Directory Server has no slapd.conf: access control lives in the directory itself, as
+# aci attributes on the entries they protect. The four below are the whole policy, and
+# each one is the least this application needs to do its job.
+#
+# The people and servers are generated separately - see scripts/generate-directory-data.sh.
+
+dn: dc=example,dc=test
+objectClass: top
+objectClass: domain
+dc: example
+description: cert-alert stand-in directory
+# Everything this application reads, and nothing it does not. userPassword is excluded
+# from every read below: the bind itself checks the password, and nothing here ever needs
+# to see the hash.
+aci: (targetattr!="userPassword")(version 3.0; acl "cert-alert reads the directory";
+  allow (read, search, compare)
+  userdn="ldap:///cn=cert-alert,ou=services,dc=example,dc=test";)
+# Signed-in people see the directory too; the application shows them entries they did not
+# necessarily bring. Anonymous gets nothing, which is why no aci mentions it.
+aci: (targetattr!="userPassword")(version 3.0; acl "signed-in people read the directory";
+  allow (read, search, compare) userdn="ldap:///all";)
+# The attributes an administrator may make editable in the application. A deployment
+# grants write on exactly the ones it offers and no more: this application is an index
+# over the directory, and the handful of fields somebody decided it should change is all
+# it should be able to change.
+aci: (target="ldap:///ou=servers,dc=example,dc=test")
+  (targetattr="ATOStatus || lifeCycleStatus || icNetworks || description")
+  (version 3.0; acl "cert-alert writes the managed attributes"; allow (write)
+  userdn="ldap:///cn=cert-alert,ou=services,dc=example,dc=test";)
+# The certificate attribute, which the optional cleanup job deletes values from. Needed
+# only by a deployment that turns cert-alert.ldap.certificate-cleanup on.
+aci: (targetattr="userCertificate")
+  (version 3.0; acl "cert-alert removes finished certificates"; allow (write)
+  userdn="ldap:///cn=cert-alert,ou=services,dc=example,dc=test";)
+
+dn: ou=services,dc=example,dc=test
+objectClass: top
+objectClass: organizationalUnit
+ou: services
+
+dn: cn=cert-alert,ou=services,dc=example,dc=test
+objectClass: top
+objectClass: organizationalRole
+objectClass: simpleSecurityObject
+cn: cert-alert
+description: The account cert-alert binds as to sweep the directory and follow its changelog
+userPassword: @SERVICE_PASSWORD@

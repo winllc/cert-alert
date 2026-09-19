@@ -1,0 +1,17 @@
+# Reading the changelog is a separate grant from reading the directory.
+#
+# cn=changelog is a suffix of its own, outside the data tree, so none of the aci attributes
+# on dc=example,dc=test reaches it - and an account that can read every entry in the
+# directory still sees an empty changelog until this is added. That is a real deployment's
+# first surprise with the connector, so the stand-in makes the grant explicitly rather than
+# leaving it to a default.
+#
+# Applied after the plugin has been switched on and the server restarted: cn=changelog does
+# not exist until then.
+
+dn: cn=changelog
+changetype: modify
+add: aci
+aci: (targetattr="*")(version 3.0; acl "cert-alert follows the changelog";
+  allow (read, search, compare)
+  userdn="ldap:///cn=cert-alert,ou=services,dc=example,dc=test";)

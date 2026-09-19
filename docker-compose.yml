@@ -2,9 +2,12 @@
 #
 #   docker compose up --build
 #
-# Three services: PostgreSQL, a stand-in OpenLDAP loaded with generated people and
-# servers, and the application. Everything has a default password and the directory
+# Three services: PostgreSQL, a stand-in 389 Directory Server loaded with generated people
+# and servers, and the application. Everything has a default password and the directory
 # serves plaintext LDAP; this is a demo, not a deployment.
+#
+# The directory publishes cn=changelog, so the changelog connector can be tried here:
+# set CERT_ALERT_LDAP_CHANGELOG_ENABLED=true in the application's environment.
 #
 # Sign in at http://localhost:8080 as alice / password, then press Sync directory.
 #
@@ -34,12 +37,14 @@ services:
       retries: 10
     restart: unless-stopped
 
-  openldap:
+  directory:
     build:
       context: .
-      dockerfile: docker/openldap/Dockerfile
+      dockerfile: docker/389ds/Dockerfile
     environment:
-      LDAP_ADMIN_PASSWORD: ${CERT_ALERT_LDAP_ADMIN_PASSWORD:-admin}
+      # dscontainer's own, read when it creates the instance.
+      DS_DM_PASSWORD: ${CERT_ALERT_LDAP_ADMIN_PASSWORD:-directory-manager}
+      DS_SUFFIX_NAME: ${CERT_ALERT_LDAP_BASE:-dc=example,dc=test}
       LDAP_SERVICE_PASSWORD: ${CERT_ALERT_LDAP_PASSWORD:-cert-alert}
       # How much dummy data to generate the first time the volume is empty. Raise these to
       # see the tables and the paged sweep under load; 100k is the case this was built for,
@@ -48,14 +53,16 @@ services:
       LDAP_DUMMY_USERS: ${CERT_ALERT_DUMMY_USERS:-100}
       LDAP_DUMMY_SERVERS: ${CERT_ALERT_DUMMY_SERVERS:-40}
     volumes:
-      - ldap-data:/var/lib/ldap
-      # Mount a directory of your own here to load it instead of generating one. Anything
-      # but 00-base.ldif is loaded in name order.
+      # Everything the directory has - configuration, database, schema - lives here, which
+      # is what makes resetting it `docker compose down -v` and nothing else.
+      - ldap-data:/data
+      # Mount a directory of your own here to load it instead of generating one; the files
+      # are loaded in name order.
       # - ./my-directory:/bootstrap:ro
     ports:
       # Exposed so you can point ldapsearch at it; the application reaches it over the
       # compose network and does not need this.
-      - "1389:389"
+      - "1389:3389"
     restart: unless-stopped
 
   cert-alert:
@@ -66,14 +73,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      openldap:
+      directory:
         condition: service_healthy
     environment:
       SPRING_PROFILES_ACTIVE: postgres
       CERT_ALERT_DB_URL: jdbc:postgresql://postgres:5432/certalert
       CERT_ALERT_DB_USER: certalert
       CERT_ALERT_DB_PASSWORD: ${CERT_ALERT_DB_PASSWORD:-certalert}
-      CERT_ALERT_LDAP_URL: ${CERT_ALERT_LDAP_URL:-ldap://openldap:389}
+      CERT_ALERT_LDAP_URL: ${CERT_ALERT_LDAP_URL:-ldap://directory:3389}
       CERT_ALERT_LDAP_BASE: ${CERT_ALERT_LDAP_BASE:-dc=example,dc=test}
       CERT_ALERT_LDAP_USER: ${CERT_ALERT_LDAP_USER:-cn=cert-alert,ou=services,dc=example,dc=test}
       CERT_ALERT_LDAP_PASSWORD: ${CERT_ALERT_LDAP_PASSWORD:-cert-alert}
