@@ -79,6 +79,7 @@
                             <div class="card-body cert-detail p-3">
                                 <table>
                                     <tr th:replace="~{fragments/detail :: attribute('Duty organization', ${user.dutyOrganization})}"></tr>
+                                    <tr th:replace="~{fragments/detail :: attribute('Duty sub-organization', ${user.dutySubOrganization})}"></tr>
                                     <tr th:replace="~{fragments/detail :: attribute('Admin organization', ${user.adminOrganization})}"></tr>
                                     <tr th:replace="~{fragments/detail :: attribute('Country of affiliation', ${user.countryOfAffiliation})}"></tr>
                                     <tr>

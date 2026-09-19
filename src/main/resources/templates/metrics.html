@@ -208,6 +208,54 @@
                         </div>
                     </div>
 
+                    <!--/* What has been issued, which is a different question from what is
+                           expiring: expiry says what falls due, issuance says what the
+                           estate is doing. A renewal programme that has started, or a
+                           policy that has gone from three years to ninety days, shows up
+                           here first. */-->
+                    <div class="col-12 col-lg-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Issuance</h3>
+                                <span class="card-subtitle text-secondary ms-2">what has been issued lately</span>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table card-table table-vcenter">
+                                    <tbody>
+                                    <tr><td>Issued in the last 30 days</td>
+                                        <td class="mono text-end" data-metric="issued30">&mdash;</td></tr>
+                                    <tr><td>Issued in the last 90 days</td>
+                                        <td class="mono text-end" data-metric="issued90">&mdash;</td></tr>
+                                    <tr><td>Issued in the last year</td>
+                                        <td class="mono text-end" data-metric="issued365">&mdash;</td></tr>
+                                    <tr><td>Average validity</td>
+                                        <td class="mono text-end" data-metric="averageValidity">&mdash;</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="card-footer text-secondary small">
+                                Averaged over the last year, so a policy that has changed is not
+                                hidden by the one it replaced.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-12 col-lg-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Issuing authorities</h3>
+                                <span class="card-subtitle text-secondary ms-2">who stands behind them</span>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table card-table table-vcenter">
+                                    <tbody id="metrics-issuers">
+                                    <tr><td class="text-secondary">Loading&hellip;</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
                     <!--/* What the issuing authorities say, which is the one thing about a
                            certificate that the certificate cannot tell you. "Not checked"
                            leads because it is the number that decides what the others are
@@ -229,11 +277,56 @@
                                         <td class="mono text-end" data-metric="revocationUnknown">&mdash;</td></tr>
                                     <tr><td>Not checked</td>
                                         <td class="mono text-end" data-metric="revocationNotChecked">&mdash;</td></tr>
+                                    <tr><td class="text-secondary">Revoked in the last 30 days</td>
+                                        <td class="mono text-end" data-metric="revokedLast30">&mdash;</td></tr>
+                                    <tr><td class="text-secondary">Revoked in the last year</td>
+                                        <td class="mono text-end" data-metric="revokedLast365">&mdash;</td></tr>
+                                    <tr><td class="text-secondary">Oldest answer</td>
+                                        <td class="mono text-end" data-metric="revocationOldest">&mdash;</td></tr>
                                     </tbody>
                                 </table>
                             </div>
                             <div class="card-footer text-secondary small">
                                 Only the certificates an entry currently holds are asked about.
+                                <span data-metric="revocationReasons"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!--/* Where the estate actually is. An agency-level count says
+                           "Example Agency holds forty thousand certificates", which is
+                           true and of no use; the office inside it is the level at which
+                           somebody answers for one. People and servers are counted apart,
+                           because an office with four hundred people and two servers is a
+                           different thing from one with four hundred servers. */-->
+                    <div class="col-12 col-lg-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">People by organization</h3>
+                                <span class="card-subtitle text-secondary ms-2">as the directory has it</span>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table card-table table-vcenter">
+                                    <tbody id="metrics-user-attributes">
+                                    <tr><td class="text-secondary">Loading&hellip;</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-12 col-lg-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Servers by organization</h3>
+                                <span class="card-subtitle text-secondary ms-2">as the directory has it</span>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table card-table table-vcenter">
+                                    <tbody id="metrics-server-attributes">
+                                    <tr><td class="text-secondary">Loading&hellip;</td></tr>
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                     </div>

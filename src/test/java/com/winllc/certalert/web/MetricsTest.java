@@ -86,9 +86,33 @@ class MetricsTest {
         holder.refreshCertificateSummary();
         userRepository.save(holder);
 
+        holder.setDutyOrganization("Example Agency");
+        holder.setDutySubOrganization("Enterprise IT");
+        holder.setEmployeeType("Civilian");
+        // One of them has been revoked, and one has been asked about and found good, so
+        // the revocation counts have more than a single state in them.
+        holder.getCertificates().get(0).recordRevocation(
+                com.winllc.certalert.domain.RevocationStatus.REVOKED,
+                com.winllc.certalert.domain.RevocationMethod.CRL,
+                now.minus(Duration.ofDays(3)),
+                "KEY_COMPROMISE",
+                "CRL from http://crl.example.gov/ca.crl",
+                now);
+        holder.getCertificates().get(1).recordRevocation(
+                com.winllc.certalert.domain.RevocationStatus.GOOD,
+                com.winllc.certalert.domain.RevocationMethod.CRL,
+                null,
+                null,
+                "CRL from http://crl.example.gov/ca.crl",
+                now);
+        userRepository.save(holder);
+
         DirectoryUser empty = new DirectoryUser("uid=empty,ou=people");
         empty.setUid("empty");
         empty.refreshIdentifiers("empty@example.gov");
+        empty.setDutyOrganization("Example Agency");
+        empty.setDutySubOrganization("Field Operations");
+        empty.setEmployeeType("Contractor");
         empty.markSynced(now);
         empty.refreshCertificateSummary();
         userRepository.save(empty);
@@ -168,6 +192,54 @@ class MetricsTest {
                 .andExpect(jsonPath("$.risks.BROAD_WILDCARD").value(1))
                 .andExpect(jsonPath("$.risks.MANY_NAMES").value(1))
                 .andExpect(jsonPath("$.risks.BARE_HOSTNAME").value(0));
+    }
+
+    /**
+     * What has been issued, which is a different question from what is expiring - and the
+     * one that says whether a renewal programme has started or a policy has changed.
+     */
+    @Test
+    void countsWhatHasBeenIssuedAndForHowLong() throws Exception {
+        mockMvc.perform(get("/api/v1/metrics"))
+                .andExpect(status().isOk())
+                // Three issued a month ago; the fourth is from last year.
+                .andExpect(jsonPath("$.issuance.last30Days").value(0))
+                .andExpect(jsonPath("$.issuance.last90Days").value(3))
+                .andExpect(jsonPath("$.issuance.last365Days").value(3))
+                // The database works this one out, so it is worth proving it comes back
+                // with the right answer rather than merely coming back: 35, 230 and 90
+                // days of validity, averaged.
+                .andExpect(jsonPath("$.issuance.averageValidityDays").value(118))
+                .andExpect(jsonPath("$.issuance.issuers.length()").value(1))
+                .andExpect(jsonPath("$.issuance.issuers[0].count").value(4));
+    }
+
+    @Test
+    void countsWhatTheAuthoritiesHaveSaid() throws Exception {
+        mockMvc.perform(get("/api/v1/metrics"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.revocation.byStatus.REVOKED").value(1))
+                .andExpect(jsonPath("$.revocation.byStatus.GOOD").value(1))
+                // Not checked is its own number, and not the same as not revoked.
+                .andExpect(jsonPath("$.revocation.byStatus.NOT_CHECKED").value(2))
+                .andExpect(jsonPath("$.revocation.revokedLast30Days").value(1))
+                .andExpect(jsonPath("$.revocation.reasons[0].name").value("KEY_COMPROMISE"))
+                .andExpect(jsonPath("$.revocation.oldestCheck").isNotEmpty());
+    }
+
+    /**
+     * Where the estate is, at the level somebody actually answers for it. An agency-level
+     * count says "Example Agency holds everything", which is true and of no use.
+     */
+    @Test
+    void groupsTheDirectoryByWhatItSaysAboutItself() throws Exception {
+        mockMvc.perform(get("/api/v1/metrics"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.attributes.userDutyOrganizations[0].name").value("Example Agency"))
+                .andExpect(jsonPath("$.attributes.userDutyOrganizations[0].count").value(2))
+                .andExpect(jsonPath("$.attributes.userDutySubOrganizations.length()").value(2))
+                .andExpect(jsonPath("$.attributes.userEmployeeTypes.length()").value(2))
+                .andExpect(jsonPath("$.attributes.serverDutyOrganizations.length()").value(0));
     }
 
     @Test

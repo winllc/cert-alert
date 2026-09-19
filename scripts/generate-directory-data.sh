@@ -268,6 +268,16 @@ for one in "${SURNAMES[@]}"; do SURNAME_LOWER+=("$(lower "$one")"); done
 # LDIF
 # ---------------------------------------------------------------------------------------
 
+# The offices inside each agency. Reporting that stops at the agency says "Example Agency
+# holds forty thousand certificates", which is true and of no use to anybody - so the
+# generated directory has a second level for it to group by.
+SUB_ORGANIZATIONS=("Mission Systems" "Enterprise IT" "Cyber Defense" "Field Operations" "Records")
+
+# sub_organization_for <index> -> one of them
+sub_organization_for() {
+    printf '%s' "${SUB_ORGANIZATIONS[$(( $1 % ${#SUB_ORGANIZATIONS[@]} ))]}"
+}
+
 # Written to the people entries as they go by, so the servers can name a real person.
 POC_ADDRESSES=()
 POC_NAMES=()
@@ -298,6 +308,7 @@ telephoneNumber: +1 555 $phone
 employeeType: $employee_type
 countryOfAffiliation: USA
 dutyOrganization: $organization
+dutySubOrganization: $(sub_organization_for "$index")
 adminOrganization: $organization
 isICMember: TRUE
 icNetworks: JWICS
@@ -330,6 +341,7 @@ lifeCycleStatus: $lifecycle
 employeeType: NPE
 countryOfAffiliation: USA
 dutyOrganization: $organization
+dutySubOrganization: $(sub_organization_for "$index")
 adminOrganization: $organization
 isICMember: TRUE
 icNetworks: JWICS

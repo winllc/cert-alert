@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -38,6 +39,9 @@ public class MetricsService {
     private static final int MONTHS_BACK = 12;
 
     private static final int MONTHS_FORWARD = 12;
+
+    /** How many rows a distribution shows before it stops being a summary. */
+    private static final int TOP_VALUES = 10;
 
     private final MetricsRepository metrics;
     private final CachedCertificateRepository certificates;
@@ -81,7 +85,9 @@ public class MetricsService {
                 monthlySeries(now),
                 notificationCounts(),
                 riskCounts(),
-                revocationCounts(),
+                issuance(now),
+                revocation(now),
+                attributes(),
                 projects.count());
     }
 
@@ -99,15 +105,63 @@ public class MetricsService {
     }
 
     /**
+     * What has been issued lately, for how long, and by whom.
+     *
+     * <p>The average validity is taken over the last year rather than over everything: a
+     * directory holds certificates issued under policies nobody remembers, and averaging
+     * those in hides the thing worth seeing, which is what the policy is now.
+     */
+    private Metrics.Issuance issuance(Instant now) {
+        Double averageSeconds = metrics.averageValiditySeconds(now.minus(365, ChronoUnit.DAYS));
+        return new Metrics.Issuance(
+                metrics.countIssuedBetween(now.minus(30, ChronoUnit.DAYS), now),
+                metrics.countIssuedBetween(now.minus(90, ChronoUnit.DAYS), now),
+                metrics.countIssuedBetween(now.minus(365, ChronoUnit.DAYS), now),
+                averageSeconds == null ? null : Math.round(averageSeconds / 86_400d),
+                named(metrics.countByIssuer(top())));
+    }
+
+    /**
      * What the authorities have said, and - the number worth reading first - how much has
      * never been asked about. Not checked is not the same as not revoked.
      */
-    private Map<String, Long> revocationCounts() {
-        Map<String, Long> counts = new LinkedHashMap<>();
+    private Metrics.Revocation revocation(Instant now) {
+        Map<String, Long> byStatus = new LinkedHashMap<>();
         for (RevocationStatus status : RevocationStatus.values()) {
-            counts.put(status.name(), certificates.countByRevocationStatus(status));
+            byStatus.put(status.name(), certificates.countByRevocationStatus(status));
         }
-        return counts;
+        return new Metrics.Revocation(
+                byStatus,
+                metrics.countRevokedBetween(now.minus(30, ChronoUnit.DAYS), now),
+                metrics.countRevokedBetween(now.minus(365, ChronoUnit.DAYS), now),
+                named(metrics.countByRevocationReason()),
+                metrics.oldestRevocationCheck(),
+                metrics.newestRevocationCheck());
+    }
+
+    /** The directory grouped by what it says about itself, people and servers apart. */
+    private Metrics.Attributes attributes() {
+        return new Metrics.Attributes(
+                named(metrics.countUsersByDutyOrganization(top())),
+                named(metrics.countUsersByDutySubOrganization(top())),
+                named(metrics.countUsersByEmployeeType(top())),
+                named(metrics.countServersByDutyOrganization(top())),
+                named(metrics.countServersByDutySubOrganization(top())),
+                named(metrics.countServersByEmployeeType(top())));
+    }
+
+    /**
+     * Enough rows to see the shape and not so many that the page becomes the table it is
+     * summarising. A long tail is a finding in itself, and the tables are where it is read.
+     */
+    private static PageRequest top() {
+        return PageRequest.of(0, TOP_VALUES);
+    }
+
+    private static List<Metrics.NameCount> named(List<MetricsRepository.NameCount> rows) {
+        return rows.stream()
+                .map(row -> new Metrics.NameCount(row.getName(), row.getTotal()))
+                .toList();
     }
 
     private Map<String, Long> certificateCounts() {

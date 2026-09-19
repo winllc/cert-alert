@@ -102,6 +102,10 @@ public class DirectoryUser extends DirectoryEntry {
     @Column(name = "duty_organization", length = 255)
     private String dutyOrganization;
 
+    /** The part of the duty organization this entry belongs to, where the directory says. */
+    @Column(name = "duty_sub_organization", length = 255)
+    private String dutySubOrganization;
+
     @Column(name = "admin_organization", length = 255)
     private String adminOrganization;
 
@@ -345,6 +349,14 @@ public class DirectoryUser extends DirectoryEntry {
 
     public void setDutyOrganization(String dutyOrganization) {
         this.dutyOrganization = dutyOrganization;
+    }
+
+    public String getDutySubOrganization() {
+        return dutySubOrganization;
+    }
+
+    public void setDutySubOrganization(String dutySubOrganization) {
+        this.dutySubOrganization = dutySubOrganization;
     }
 
     public String getAdminOrganization() {

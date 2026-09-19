@@ -101,6 +101,7 @@ class DevLdifGenerator {
         entry.append("employeeType: ").append(employeeType).append('\n');
         entry.append("countryOfAffiliation: USA\n");
         entry.append("dutyOrganization: Example Agency\n");
+        entry.append("dutySubOrganization: Enterprise IT\n");
         entry.append("adminOrganization: Example Agency\n");
         entry.append("isICMember: TRUE\n");
         entry.append("icNetworks: JWICS\n");
@@ -136,6 +137,7 @@ class DevLdifGenerator {
         entry.append("employeeType: NPE\n");
         entry.append("countryOfAffiliation: USA\n");
         entry.append("dutyOrganization: Example Agency\n");
+        entry.append("dutySubOrganization: Enterprise IT\n");
         entry.append("adminOrganization: Example Agency\n");
         entry.append("isICMember: TRUE\n");
         entry.append("icNetworks: JWICS\n");

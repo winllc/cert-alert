@@ -88,6 +88,12 @@ attributetype ( 1.3.6.1.4.1.99999.1.2 NAME 'dutyOrganization'
     SUBSTR caseIgnoreSubstringsMatch
     SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 )
 
+attributetype ( 1.3.6.1.4.1.99999.1.8 NAME 'dutySubOrganization'
+    DESC 'Sub-organization within the duty organization'
+    EQUALITY caseIgnoreMatch
+    SUBSTR caseIgnoreSubstringsMatch
+    SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 )
+
 attributetype ( 1.3.6.1.4.1.99999.1.3 NAME 'adminOrganization'
     DESC 'Organization administratively responsible for the entity'
     EQUALITY caseIgnoreMatch
@@ -154,7 +160,8 @@ objectclass ( 2.16.840.1.101.2.2.3.73 NAME 'icOrgPerson'
     STRUCTURAL
     MUST ( countryOfAffiliation $ dutyOrganization $ adminOrganization $ isICMember $
            icNetworks $ resourceSecurityMark )
-    MAY ( icEmail $ internetEmail $ niprnetEmail $ siprnetEmail $ preferredName $ rank ) )
+    MAY ( icEmail $ internetEmail $ niprnetEmail $ siprnetEmail $ preferredName $ rank $
+          dutySubOrganization ) )
 
 # userCertificate is a MUST in the specification. It is a MAY here: an entry with no
 # published certificate is exactly the case this application exists to report on, so the
@@ -167,4 +174,4 @@ objectclass ( 2.16.840.1.101.2.2.3.74 NAME 'icOrgServer'
            adminOrganization $ isICMember $ ATOStatus $ lifeCycleStatus $ icNetworks $
            resourceSecurityMark $ serverPOC )
     MAY ( description $ serverURL $ icServerAddress $ userCertificate $ o $ ou $
-          userPassword $ seeAlso ) )
+          userPassword $ seeAlso $ dutySubOrganization ) )

@@ -25,6 +25,7 @@ public enum UserField {
     RANK(LdapProperties.User::getRank),
     COUNTRY_OF_AFFILIATION(LdapProperties.User::getCountryOfAffiliation),
     DUTY_ORGANIZATION(LdapProperties.User::getDutyOrganization),
+    DUTY_SUB_ORGANIZATION(LdapProperties.User::getDutySubOrganization),
     ADMIN_ORGANIZATION(LdapProperties.User::getAdminOrganization),
     IS_IC_MEMBER(LdapProperties.User::getIcMember),
     IC_NETWORKS(LdapProperties.User::getIcNetworks),

@@ -18,6 +18,7 @@ public enum ServerField {
     EMPLOYEE_TYPE(LdapProperties.Server::getEmployeeType),
     COUNTRY_OF_AFFILIATION(LdapProperties.Server::getCountryOfAffiliation),
     DUTY_ORGANIZATION(LdapProperties.Server::getDutyOrganization),
+    DUTY_SUB_ORGANIZATION(LdapProperties.Server::getDutySubOrganization),
     ADMIN_ORGANIZATION(LdapProperties.Server::getAdminOrganization),
     IS_IC_MEMBER(LdapProperties.Server::getIcMember),
     IC_NETWORKS(LdapProperties.Server::getIcNetworks),

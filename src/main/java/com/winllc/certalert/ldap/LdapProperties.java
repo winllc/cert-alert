@@ -259,6 +259,13 @@ public class LdapProperties {
         /** IC FSD: icOrgPerson dutyOrganization (mandatory). */
         private String dutyOrganization = "dutyOrganization";
 
+        /**
+         * IC FSD: icOrgPerson dutySubOrganization. Optional, and the finer of the two
+         * organizational answers - a duty organization is an agency, and this is the part
+         * of it somebody actually works in.
+         */
+        private String dutySubOrganization = "dutySubOrganization";
+
         /** IC FSD: icOrgPerson adminOrganization (mandatory). */
         private String adminOrganization = "adminOrganization";
 
@@ -416,6 +423,14 @@ public class LdapProperties {
             this.dutyOrganization = dutyOrganization;
         }
 
+        public String getDutySubOrganization() {
+            return dutySubOrganization;
+        }
+
+        public void setDutySubOrganization(String dutySubOrganization) {
+            this.dutySubOrganization = dutySubOrganization;
+        }
+
         public String getAdminOrganization() {
             return adminOrganization;
         }
@@ -538,6 +553,13 @@ public class LdapProperties {
         /** IC FSD: icOrgServer dutyOrganization (mandatory). */
         private String dutyOrganization = "dutyOrganization";
 
+        /**
+         * IC FSD: icOrgServer dutySubOrganization. Optional, and the finer of the two
+         * organizational answers - a duty organization is an agency, and this is the part
+         * of it somebody actually works in.
+         */
+        private String dutySubOrganization = "dutySubOrganization";
+
         /** IC FSD: icOrgServer adminOrganization (mandatory). */
         private String adminOrganization = "adminOrganization";
 
@@ -648,6 +670,14 @@ public class LdapProperties {
 
         public void setDutyOrganization(String dutyOrganization) {
             this.dutyOrganization = dutyOrganization;
+        }
+
+        public String getDutySubOrganization() {
+            return dutySubOrganization;
+        }
+
+        public void setDutySubOrganization(String dutySubOrganization) {
+            this.dutySubOrganization = dutySubOrganization;
         }
 
         public String getAdminOrganization() {

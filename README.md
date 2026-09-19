@@ -36,6 +36,9 @@ Two details from the spec shape the design:
   `siprnetEmail` are all single-valued and all optional, on top of inetOrgPerson's `mail`.
   Each is stored in its own column; `cert-alert.ldap.user.email-precedence` decides which
   is shown as primary.
+- **Organization has two levels.** `dutyOrganization` is the agency; `dutySubOrganization`
+  is the office inside it, and is optional. Both are read and both are reported on, because
+  the agency-level answer on a directory this size is one row.
 - **`serverPOC` holds a name, not an address**, and is single-valued: *"Name of an IC
   Person or IC Element organizational point of contact responsible for an IC Non-Person
   Entity"*. See [the user ↔ server join](#the-user--server-join) for how that is handled.
@@ -749,6 +752,26 @@ written without deleting or hiding what is already there.
 `/metrics` reports on the directory as a whole rather than on one entry: how many
 certificates are cached and in what state, what is falling due in seven days and thirty and
 ninety, what the directory is signing with, and how many people have been told about it.
+
+It also reports on the two things that happen *to* certificates rather than to the clock:
+
+- **Issuance** — how many were issued in the last thirty days, ninety and year, the average
+  validity over the last year, and which authorities issued them. A renewal programme that
+  has started, or a policy that has gone from three-year certificates to ninety-day ones,
+  shows up here before it shows up anywhere else. The average is taken over the last year on
+  purpose: a directory holds certificates issued under policies nobody remembers, and
+  averaging those in hides what the policy is now.
+- **Revocation** — the counts by state, how many were revoked in the last thirty days and
+  the last year, the authorities' own reasons, and how stale the oldest answer is. *Not
+  checked* is a number of its own, because it is not the same as *not revoked*.
+
+**Where the estate is** comes from the directory's own attributes: people and servers each
+broken down by duty organization, duty sub-organization and employee type. Counted over
+entries rather than certificates, and the two kinds counted apart — an office with four
+hundred people and two servers is a different thing from one with four hundred servers, and
+an agency-level count says "Example Agency holds forty thousand certificates", which is true
+and of no use to anybody. A value the directory does not publish reads as *not stated*
+rather than being left out, because an attribute nobody fills in is itself a finding.
 
 **Issued against expiring** is the chart worth looking at. A bar per month for a year
 either side of today: to the left, when certificates were issued; to the right, when they

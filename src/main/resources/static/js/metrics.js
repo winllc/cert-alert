@@ -95,6 +95,30 @@
         }).join('');
     }
 
+    /**
+     * One attribute's values under a heading. Several of these stack into one card,
+     * because they are three answers to the same question - where in the organization is
+     * this - and three cards would make them look like three subjects.
+     */
+    function group(heading, rows) {
+        return '<tr><th colspan="3" class="text-secondary fw-normal pt-3">' + escape(heading) + '</th></tr>'
+            + distribution(
+                rows,
+                function (row) { return row.name || 'Not stated'; },
+                function (row) { return row.count; },
+                'Nothing cached yet.');
+    }
+
+    /** The authorities' own words for why, where they gave one. */
+    function reasons(rows) {
+        if (!rows || rows.length === 0) {
+            return '';
+        }
+        return ' ' + rows.map(function (row) {
+            return escape(row.name) + ' ' + row.count;
+        }).join(', ') + '.';
+    }
+
     function stat(id, value) {
         $('[data-metric="' + id + '"]').text(value === undefined || value === null ? '—' : value);
     }
@@ -110,7 +134,10 @@
                 var expiry = metrics.expiry || {};
                 var notifications = metrics.notifications || {};
                 var risks = metrics.risks || {};
+                var issuance = metrics.issuance || {};
                 var revocation = metrics.revocation || {};
+                var byStatus = revocation.byStatus || {};
+                var attributes = metrics.attributes || {};
 
                 stat('certificates', certificates.total);
                 stat('valid', certificates.VALID || 0);
@@ -136,10 +163,35 @@
                 stat('riskManyNames', risks.MANY_NAMES);
                 stat('riskManyDomains', risks.MANY_DOMAINS);
                 stat('riskBareHostname', risks.BARE_HOSTNAME);
-                stat('revoked', revocation.REVOKED);
-                stat('revocationGood', revocation.GOOD);
-                stat('revocationUnknown', revocation.UNKNOWN);
-                stat('revocationNotChecked', revocation.NOT_CHECKED);
+                stat('revoked', byStatus.REVOKED);
+                stat('revocationGood', byStatus.GOOD);
+                stat('revocationUnknown', byStatus.UNKNOWN);
+                stat('revocationNotChecked', byStatus.NOT_CHECKED);
+                stat('revokedLast30', revocation.revokedLast30Days);
+                stat('revokedLast365', revocation.revokedLast365Days);
+                // Null until something has been checked, which is not the same as zero.
+                stat('revocationOldest', revocation.oldestCheck
+                    ? String(revocation.oldestCheck).substring(0, 10) : null);
+                $('[data-metric="revocationReasons"]').html(reasons(revocation.reasons));
+                stat('issued30', issuance.last30Days);
+                stat('issued90', issuance.last90Days);
+                stat('issued365', issuance.last365Days);
+                stat('averageValidity', issuance.averageValidityDays == null
+                    ? null : issuance.averageValidityDays + ' days');
+
+                $('#metrics-issuers').html(distribution(
+                    issuance.issuers,
+                    function (row) { return row.name; },
+                    function (row) { return row.count; },
+                    'No certificates cached yet.'));
+                $('#metrics-user-attributes').html(
+                    group('Duty organization', attributes.userDutyOrganizations)
+                    + group('Duty sub-organization', attributes.userDutySubOrganizations)
+                    + group('Employee type', attributes.userEmployeeTypes));
+                $('#metrics-server-attributes').html(
+                    group('Duty organization', attributes.serverDutyOrganizations)
+                    + group('Duty sub-organization', attributes.serverDutySubOrganizations)
+                    + group('Employee type', attributes.serverEmployeeTypes));
 
                 $('#metrics-chart').html(chart(metrics.months));
                 $('#metrics-keys').html(distribution(

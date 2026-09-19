@@ -222,6 +222,7 @@ public class DirectoryPersistenceService {
         user.setRank(entry.get(UserField.RANK));
         user.setCountryOfAffiliation(entry.get(UserField.COUNTRY_OF_AFFILIATION));
         user.setDutyOrganization(entry.get(UserField.DUTY_ORGANIZATION));
+        user.setDutySubOrganization(entry.get(UserField.DUTY_SUB_ORGANIZATION));
         user.setAdminOrganization(entry.get(UserField.ADMIN_ORGANIZATION));
         user.setIcMember(parseBoolean(entry.get(UserField.IS_IC_MEMBER)));
         user.setIcNetworks(entry.get(UserField.IC_NETWORKS));
@@ -243,6 +244,7 @@ public class DirectoryPersistenceService {
         server.setEmployeeType(entry.get(ServerField.EMPLOYEE_TYPE));
         server.setCountryOfAffiliation(entry.get(ServerField.COUNTRY_OF_AFFILIATION));
         server.setDutyOrganization(entry.get(ServerField.DUTY_ORGANIZATION));
+        server.setDutySubOrganization(entry.get(ServerField.DUTY_SUB_ORGANIZATION));
         server.setAdminOrganization(entry.get(ServerField.ADMIN_ORGANIZATION));
         server.setIcMember(parseBoolean(entry.get(ServerField.IS_IC_MEMBER)));
         server.setIcNetworks(entry.get(ServerField.IC_NETWORKS));
