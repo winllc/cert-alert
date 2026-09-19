@@ -79,6 +79,12 @@ public class SecurityConfig {
                 .permitAll()
                 .requestMatchers("/actuator/**")
                 .hasRole("ADMIN")
+                // The administration page reads the whole audit trail: who has been here,
+                // what they touched and when. The endpoint behind it checks the same thing
+                // for itself, because a table is asked for directly as often as it is
+                // reached through the page it sits on.
+                .requestMatchers("/admin", "/api/v1/audit/summary")
+                .hasRole("ADMIN")
                 // Triggering a sweep of the whole directory, and above all pruning it, is
                 // not something a reader gets to do.
                 .requestMatchers(

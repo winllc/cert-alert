@@ -77,17 +77,12 @@
         <div class="row g-3 align-items-end">
             <div class="col-12 col-md-auto">
                 <label class="form-label" for="audit-kind">Kind</label>
+                <!--/* From the enum, so a kind of event added to it appears here the day
+                       it is added rather than whenever somebody remembers this list. */-->
                 <select id="audit-kind" class="form-select">
                     <option value="">Anything</option>
-                    <option value="ENTRY_DISCOVERED">Discovered</option>
-                    <option value="CERTIFICATE_CACHED">Certificate published</option>
-                    <option value="CERTIFICATE_REMOVED">Certificate withdrawn</option>
-                    <option value="CERTIFICATE_STATUS_CHANGED">Certificate status changed</option>
-                    <option value="CONTACT_ADDED">Point of contact added</option>
-                    <option value="CONTACT_REMOVED">Point of contact removed</option>
-                    <option value="ALERT_SENT">Alert sent</option>
-                    <option value="ALERT_FAILED">Alert failed</option>
-                    <option value="ENTRY_PRUNED">Pruned</option>
+                    <option th:each="action : ${actions}" th:value="${action.name()}"
+                            th:text="${action.label()}">Discovered</option>
                 </select>
             </div>
             <div class="col d-flex justify-content-md-end align-items-center">

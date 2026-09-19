@@ -219,12 +219,22 @@ class DetailPageTest {
     }
 
     /**
-     * A search table takes its subject from the request, so it is worth saying out loud that
-     * it cannot be pointed at everything at once.
+     * Leaving the subject out asks for the whole trail across every entry, which is the
+     * administration page's table and not something a reader gets by dropping a parameter.
      */
     @Test
-    void theAuditTableWillNotServeEverySubjectAtOnce() throws Exception {
+    void aReaderCannotPointTheAuditTableAtEverySubjectAtOnce() throws Exception {
         mockMvc.perform(post(AUDIT + "?subjectType=USER")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request())
+                        .with(csrf()))
+                .andExpect(status().isForbidden());
+    }
+
+    /** An id without the type to read it against is a malformed request, not a denial. */
+    @Test
+    void anIdWithoutItsSubjectTypeIsRejected() throws Exception {
+        mockMvc.perform(post(AUDIT + "?subjectId=" + userId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(request())
                         .with(csrf()))

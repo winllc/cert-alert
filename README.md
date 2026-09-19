@@ -510,9 +510,10 @@ server, so the UI shows the controls only where they will work.
 ### The audit trail
 
 Every entry carries a history: what happened to it, when, and who did it. It shows up in
-two places. Expanding a row on either table gives the last ten, newest first — the quick
+three places. Expanding a row on either table gives the last ten, newest first — the quick
 look, with a link through. The **details page** for that entry carries the whole thing as a
-search table of its own: paged, ordered, searchable, and narrowed by kind of event.
+search table of its own: paged, ordered, searchable, and narrowed by kind of event. The
+**administration page** carries all of it at once (see below).
 
 | Recorded | When |
 |----------|------|
@@ -652,6 +653,31 @@ runs on may be able to reach nothing at all.
 The text templates carry their own template resolver (`EmailTemplateConfig`), because a
 resolver carries one template mode; it answers only for `email/*.txt` and leaves every page
 to the resolver Spring Boot configures.
+
+#### The administration page
+
+`/admin` is the system audit log: every record, across every entry, in one search table.
+Above it are counts — how much trail there is, how much of it is from the last day and the
+last week, how many distinct people and jobs appear in it — and the span it covers, which
+together say whether anything is running at all.
+
+| Narrowed by | How |
+|---|---|
+| Kind of event | a select built from the enum, so a new kind appears the day it is added |
+| About | people, servers, or both; and a box searching a record's name and DN at once |
+| Who did it | part of a name — a person as the directory names them, or a job: `sync`, `changelog`, `expiry refresh`, `prune` |
+| When | a date range, either end optional |
+
+An entry's own history stays open to anyone signed in: a person looking at a server can see
+what has been done to it, and an audit trail nobody may read holds nobody to account. The
+whole trail at once is an administrator's, because read end to end it says who has been
+here, what they touched and when. Asking `/api/v1/datatables/audit` without a subject is
+that same request, so it checks for itself rather than trusting the page it is usually
+reached through.
+
+Records outlive what they describe. A row links to its entry only while there is one to
+link to; after a prune the DN it carried is what is left, and the log still says the entry
+was pruned.
 
 ### The details pages
 

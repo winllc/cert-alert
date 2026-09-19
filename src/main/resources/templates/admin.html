@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Administration')}"></head>
+<body>
+<svg th:replace="~{fragments/icons :: sprite}"></svg>
+
+<div class="page">
+    <header th:replace="~{fragments/layout :: navbar('admin')}"></header>
+
+    <div class="page-wrapper">
+        <div th:replace="~{fragments/layout :: pageheader('Administration',
+             'Everything that has happened here, across every entry')}"></div>
+
+        <div class="page-body">
+            <div class="container-xl">
+                <!--/* How much trail there is, and how much of it is recent. The last two
+                       together say whether anything is running at all. */-->
+                <div class="row row-deck row-cards mb-3">
+                    <div class="col-6 col-sm-3">
+                        <div class="card card-sm">
+                            <div class="card-body">
+                                <div class="h3 mb-0" id="audit-total">&ndash;</div>
+                                <div class="text-secondary">Records kept</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-sm-3">
+                        <div class="card card-sm">
+                            <div class="card-body">
+                                <div class="h3 mb-0" id="audit-last-day">&ndash;</div>
+                                <div class="text-secondary">Last 24 hours</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-sm-3">
+                        <div class="card card-sm">
+                            <div class="card-body">
+                                <div class="h3 mb-0" id="audit-last-week">&ndash;</div>
+                                <div class="text-secondary">Last 7 days</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-sm-3">
+                        <div class="card card-sm">
+                            <div class="card-body">
+                                <div class="h3 mb-0" id="audit-actors">&ndash;</div>
+                                <div class="text-secondary">People and jobs</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">System audit log</h3>
+                        <div class="card-actions text-secondary small" id="audit-span"></div>
+                    </div>
+                    <div class="card-body border-bottom py-3">
+                        <div class="row g-3 align-items-end">
+                            <div class="col-12 col-md-auto">
+                                <label class="form-label" for="audit-kind">Kind of event</label>
+                                <select id="audit-kind" class="form-select">
+                                    <option value="">Any</option>
+                                    <option th:each="action : ${actions}" th:value="${action.name()}"
+                                            th:text="${action.label()}">Discovered</option>
+                                </select>
+                            </div>
+                            <div class="col-12 col-md-auto">
+                                <label class="form-label" for="audit-subject-type">About</label>
+                                <select id="audit-subject-type" class="form-select">
+                                    <option value="">People and servers</option>
+                                    <option value="USER">People</option>
+                                    <option value="SERVER">Servers</option>
+                                </select>
+                            </div>
+                            <div class="col-12 col-md-auto">
+                                <!--/* A person as the directory names them, or one of the jobs. */-->
+                                <label class="form-label" for="audit-actor">Who did it</label>
+                                <input type="text" id="audit-actor" class="form-control"
+                                       placeholder="a name, or sync, prune, changelog">
+                            </div>
+                            <div class="col-12 col-md-auto">
+                                <label class="form-label" for="audit-from">Happened between</label>
+                                <div class="input-group" style="max-width: 20rem;">
+                                    <input type="date" id="audit-from" class="form-control" aria-label="from">
+                                    <span class="input-group-text">to</span>
+                                    <input type="date" id="audit-to" class="form-control" aria-label="to">
+                                </div>
+                            </div>
+                            <div class="col d-flex justify-content-md-end align-items-center">
+                                <span id="applied-filters" class="text-secondary small"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table id="audit-table" class="table card-table table-vcenter audit-table"
+                               style="width:100%">
+                            <thead>
+                            <tr>
+                                <th>When</th>
+                                <th>Kind</th>
+                                <th>About</th>
+                                <th>What happened</th>
+                                <th>Who</th>
+                                <th>Channel</th>
+                                <th>To</th>
+                            </tr>
+                            </thead>
+                            <tfoot>
+                            <tr class="column-search">
+                                <th></th>
+                                <th></th>
+                                <th><input type="text" class="form-control form-control-sm"
+                                           placeholder="Name or DN" data-filter="subject"></th>
+                                <th><input type="text" class="form-control form-control-sm"
+                                           placeholder="What happened"></th>
+                                <th></th>
+                                <th></th>
+                                <th></th>
+                            </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+
+                <p class="text-secondary mt-3 small">
+                    Records are written when something changes - an entry discovered or pruned, a certificate
+                    published, withdrawn or moved between states, a point of contact or address edited, a
+                    project joined or left, an alert delivered or refused. A sweep that finds the directory
+                    exactly as it left it writes nothing here. Records outlive what they describe: an entry
+                    pruned from the directory leaves its history behind, named by the DN it had.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div th:replace="~{fragments/layout :: scripts}"></div>
+<script th:src="@{/js/admin.js}"></script>
+</body>
+</html>

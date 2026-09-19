@@ -104,6 +104,15 @@
                         <span class="nav-link-title">Metrics</span>
                     </a>
                 </li>
+                <!--/* Administrators only: the page reads the whole audit trail. */-->
+                <li class="nav-item" th:classappend="${active == 'admin'} ? 'active'" th:if="${isAdmin}">
+                    <a class="nav-link" th:href="@{/admin}">
+                        <span class="nav-link-icon d-md-none d-lg-inline-block">
+                            <svg class="icon"><use href="#icon-shield-check"></use></svg>
+                        </span>
+                        <span class="nav-link-title">Admin</span>
+                    </a>
+                </li>
                 <li class="nav-item" th:classappend="${active == 'notifications'} ? 'active'">
                     <a class="nav-link" th:href="@{/notifications}">
                         <span class="nav-link-icon d-md-none d-lg-inline-block">

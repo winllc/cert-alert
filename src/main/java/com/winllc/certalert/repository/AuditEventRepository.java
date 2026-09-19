@@ -28,6 +28,17 @@ public interface AuditEventRepository extends DataTablesRepository<AuditEvent, L
 
     long countByAction(com.winllc.certalert.domain.AuditAction action);
 
+    long countByOccurredAtAfter(Instant since);
+
+    @Query("select count(distinct e.actor) from AuditEvent e")
+    long countDistinctActors();
+
+    @Query("select min(e.occurredAt) from AuditEvent e")
+    Instant earliest();
+
+    @Query("select max(e.occurredAt) from AuditEvent e")
+    Instant latest();
+
     @Modifying
     @Query("delete from AuditEvent e where e.occurredAt < :cutoff")
     int deleteByOccurredAtBefore(@Param("cutoff") Instant cutoff);

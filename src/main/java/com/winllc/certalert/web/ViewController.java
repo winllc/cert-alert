@@ -1,5 +1,6 @@
 package com.winllc.certalert.web;
 
+import com.winllc.certalert.domain.AuditAction;
 import com.winllc.certalert.domain.CachedCertificate;
 import com.winllc.certalert.domain.DirectoryServer;
 import com.winllc.certalert.domain.DirectoryUser;
@@ -69,6 +70,7 @@ public class ViewController {
         // Every value a server's serverPOC could name them by, which is what the join uses.
         model.addAttribute("identifiers", userRepository.findIdentifiersById(id));
         model.addAttribute("projects", projectService.forUser(id));
+        model.addAttribute("actions", AuditAction.values());
         return "user-detail";
     }
 
@@ -80,6 +82,7 @@ public class ViewController {
         model.addAttribute("server", server);
         model.addAttribute("certificates", byExpiry(server.getCertificates()));
         model.addAttribute("projects", projectService.forServer(id));
+        model.addAttribute("actions", AuditAction.values());
         return "server-detail";
     }
 
@@ -107,6 +110,17 @@ public class ViewController {
     @GetMapping("/metrics")
     public String metrics() {
         return "metrics";
+    }
+
+    /**
+     * Administration: the audit trail across every entry, which the filter chain keeps to
+     * administrators. The kinds of event come from the enum rather than a list in the
+     * template, so a new one appears in the filter the day it is added.
+     */
+    @GetMapping("/admin")
+    public String admin(Model model) {
+        model.addAttribute("actions", AuditAction.values());
+        return "admin";
     }
 
     @GetMapping("/notifications")
