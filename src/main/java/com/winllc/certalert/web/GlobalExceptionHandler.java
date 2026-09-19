@@ -1,6 +1,6 @@
 package com.winllc.certalert.web;
 
-import com.winllc.certalert.service.ContactAlreadyExistsException;
+import com.winllc.certalert.service.AlreadyExistsException;
 import com.winllc.certalert.service.ProbeUnavailableException;
 import com.winllc.certalert.service.ResourceNotFoundException;
 import java.util.LinkedHashMap;
@@ -32,10 +32,15 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
         return problem;
     }
 
-    @ExceptionHandler(ContactAlreadyExistsException.class)
-    public ProblemDetail handleDuplicate(ContactAlreadyExistsException e) {
+    /**
+     * Something the caller asked to add is already there. The title comes from whoever
+     * raised it rather than being fixed here: four different things raise this, and only
+     * one of them is a point of contact.
+     */
+    @ExceptionHandler(AlreadyExistsException.class)
+    public ProblemDetail handleDuplicate(AlreadyExistsException e) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
-        problem.setTitle("Already a point of contact");
+        problem.setTitle(e.getTitle());
         return problem;
     }
 

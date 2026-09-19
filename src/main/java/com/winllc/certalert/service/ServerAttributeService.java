@@ -341,13 +341,17 @@ public class ServerAttributeService {
     private void requireUnused(String attribute, String label, Long self) {
         definitions.findByLdapAttributeIgnoreCase(attribute).ifPresent(existing -> {
             if (!existing.getId().equals(self)) {
-                throw new ContactAlreadyExistsException(
-                        "%s is already managed here, as '%s'".formatted(existing.getLdapAttribute(), existing.getName()));
+                throw new AlreadyExistsException(
+                        "Attribute already managed",
+                        "%s is already managed here, as '%s'"
+                                .formatted(existing.getLdapAttribute(), existing.getName()));
             }
         });
         definitions.findByNameIgnoreCase(label).ifPresent(existing -> {
             if (!existing.getId().equals(self)) {
-                throw new ContactAlreadyExistsException("There is already an attribute called " + existing.getName());
+                throw new AlreadyExistsException(
+                        "Attribute already managed",
+                        "There is already an attribute called " + existing.getName());
             }
         });
     }

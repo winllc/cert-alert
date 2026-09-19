@@ -71,12 +71,14 @@ public class ServerContactService {
         DirectoryUser user = userRepository.findById(userId).orElseThrow(() -> ResourceNotFoundException.user(userId));
 
         if (contactRepository.existsByServerIdAndUserId(serverId, userId)) {
-            throw new ContactAlreadyExistsException(
+            throw new AlreadyExistsException(
+                    "Already a point of contact",
                     "%s is already a point of contact for this server".formatted(displayNameOf(user)));
         }
         String address = normalise(user.getEmail());
         if (address != null && contactRepository.existsByServerIdAndEmail(serverId, address)) {
-            throw new ContactAlreadyExistsException(
+            throw new AlreadyExistsException(
+                    "Already a point of contact",
                     "%s is already a point of contact for this server".formatted(address));
         }
 
@@ -99,14 +101,16 @@ public class ServerContactService {
             throw new IllegalArgumentException("'%s' is not an email address".formatted(email));
         }
         if (contactRepository.existsByServerIdAndEmail(serverId, address)) {
-            throw new ContactAlreadyExistsException(
+            throw new AlreadyExistsException(
+                    "Already a point of contact",
                     "%s is already a point of contact for this server".formatted(address));
         }
 
         DirectoryUser owner = resolveOwner(address);
         if (owner != null) {
             if (contactRepository.existsByServerIdAndUserId(serverId, owner.getId())) {
-                throw new ContactAlreadyExistsException(
+                throw new AlreadyExistsException(
+                        "Already a point of contact",
                         "%s is already a point of contact for this server".formatted(displayNameOf(owner)));
             }
             ServerContact contact = ServerContact.forUser(server, owner, addedBy, Instant.now(clock));

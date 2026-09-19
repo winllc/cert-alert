@@ -90,7 +90,7 @@ class ProjectTest {
         projectService.create("Payroll", null, "alice");
 
         assertThatThrownBy(() -> projectService.create("payroll", null, "alice"))
-                .isInstanceOf(ContactAlreadyExistsException.class);
+                .isInstanceOf(AlreadyExistsException.class);
         assertThatThrownBy(() -> projectService.create("  ", null, "alice"))
                 .isInstanceOf(IllegalArgumentException.class);
     }

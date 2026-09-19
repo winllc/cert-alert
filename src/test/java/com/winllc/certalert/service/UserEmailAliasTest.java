@@ -187,7 +187,7 @@ class UserEmailAliasTest {
 
         assertThatThrownBy(() ->
                         aliasService.add(userId, "EXTRA@example.gov", UserEmailAlias.Kind.PERSONAL, null, "alice"))
-                .isInstanceOf(ContactAlreadyExistsException.class);
+                .isInstanceOf(AlreadyExistsException.class);
         assertThatThrownBy(() -> aliasService.add(userId, "the team", UserEmailAlias.Kind.GROUP, null, "alice"))
                 .isInstanceOf(IllegalArgumentException.class);
     }

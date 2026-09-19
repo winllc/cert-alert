@@ -266,6 +266,28 @@ class ServerAttributeApiTest {
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("id=\"attribute-form\"")));
     }
 
+    /**
+     * The refusal has to name what is already there. This one used to come back titled
+     * "Already a point of contact", because one exception served four unrelated kinds of
+     * duplicate - which is a refusal that sends whoever reads it to the wrong page.
+     */
+    @Test
+    void definingTheSameAttributeTwiceIsRefusedInItsOwnWords() throws Exception {
+        define("ATOStatus", "ATO status", "TEXT", false, "null");
+
+        mockMvc.perform(post(ADMIN)
+                        .with(admin())
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"ldapAttribute":"atostatus","name":"Something else","type":"TEXT",
+                                 "multiValued":false,"options":null}"""))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.title").value("Attribute already managed"))
+                .andExpect(jsonPath("$.detail")
+                        .value(org.hamcrest.Matchers.containsString("already managed here")));
+    }
+
     private void define(String attribute, String name, String type, boolean multiValued, String options)
             throws Exception {
         mockMvc.perform(post(ADMIN)

@@ -147,13 +147,20 @@ class ServerContactControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"userId\":%d}".formatted(aliceId))
                         .with(csrf()))
-                .andExpect(status().isConflict());
+                .andExpect(status().isConflict())
+                // The refusal names what is already there. Four different things answer
+                // with a 409 here, and a title that says "point of contact" over a
+                // duplicate project name sends whoever reads it to the wrong place.
+                .andExpect(jsonPath("$.title").value("Already a point of contact"))
+                .andExpect(jsonPath("$.detail")
+                        .value(org.hamcrest.Matchers.containsString("already a point of contact")));
 
         mockMvc.perform(post(contacts())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"alice@example.gov\"}")
                         .with(csrf()))
-                .andExpect(status().isConflict());
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.title").value("Already a point of contact"));
     }
 
     @Test

@@ -61,7 +61,8 @@ public class ProjectService {
     public Project create(String name, String description, String createdBy) {
         String trimmed = requireName(name);
         if (projects.existsByNameIgnoreCase(trimmed)) {
-            throw new ContactAlreadyExistsException("A project called '%s' already exists".formatted(trimmed));
+            throw new AlreadyExistsException(
+                    "Project already exists", "A project called '%s' already exists".formatted(trimmed));
         }
         Project project = projects.save(new Project(trimmed, description, createdBy, Instant.now(clock)));
         log.info("Created project '{}', by {}", trimmed, createdBy);
@@ -74,7 +75,8 @@ public class ProjectService {
         String trimmed = requireName(name);
         projects.findByNameIgnoreCase(trimmed).ifPresent(other -> {
             if (!other.getId().equals(id)) {
-                throw new ContactAlreadyExistsException("A project called '%s' already exists".formatted(trimmed));
+                throw new AlreadyExistsException(
+                    "Project already exists", "A project called '%s' already exists".formatted(trimmed));
             }
         });
         project.rename(trimmed, description);

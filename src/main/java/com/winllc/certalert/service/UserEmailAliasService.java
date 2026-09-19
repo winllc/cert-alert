@@ -64,7 +64,8 @@ public class UserEmailAliasService {
             throw new IllegalArgumentException("'%s' is not an email address".formatted(address));
         }
         if (aliasRepository.existsByUserIdAndAddress(userId, normalised)) {
-            throw new ContactAlreadyExistsException(
+            throw new AlreadyExistsException(
+                    "Already an address",
                     "%s is already one of this person's addresses".formatted(normalised));
         }
 

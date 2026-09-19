@@ -220,11 +220,11 @@ class ServerAttributeTest {
 
         assertThatThrownBy(() -> attributes.create(
                         "atostatus", "Something else", null, ServerAttributeType.TEXT, false, null, null, "alice"))
-                .isInstanceOf(ContactAlreadyExistsException.class)
+                .isInstanceOf(AlreadyExistsException.class)
                 .hasMessageContaining("already managed");
         assertThatThrownBy(() -> attributes.create(
                         "lifeCycleStatus", "ATO status", null, ServerAttributeType.TEXT, false, null, null, "alice"))
-                .isInstanceOf(ContactAlreadyExistsException.class)
+                .isInstanceOf(AlreadyExistsException.class)
                 .hasMessageContaining("already an attribute called");
     }
 
