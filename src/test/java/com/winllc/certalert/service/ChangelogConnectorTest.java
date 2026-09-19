@@ -80,6 +80,10 @@ class ChangelogConnectorTest {
         registry.add("cert-alert.ldap.changelog.enabled", () -> "true");
         // The tests drive the loop; nothing should poll behind them.
         registry.add("cert-alert.ldap.changelog.auto-start", () -> "false");
+        // These cases prime the connector with a poll of their own; the first-run import is
+        // ChangelogFirstRunTest's subject, and a sweep here would populate the cache the
+        // changes are supposed to be what fills.
+        registry.add("cert-alert.ldap.changelog.full-sync-on-first-run", () -> "false");
         // The in-memory server has no schema, so 'changeNumber>=N' would compare as text.
         // The connector re-checks every number it reads, which is what this leans on.
         registry.add("cert-alert.ldap.changelog.filter", () -> "(objectClass=changeLogEntry)");
@@ -248,6 +252,18 @@ class ChangelogConnectorTest {
         connector.pollOnce();
 
         assertThat(userRepository.findByDn(dn)).isEmpty();
+    }
+
+    @Test
+    void withTheFirstRunImportOffTheCacheIsLeftToTheSweeps() {
+        // The directory holds people from the other cases; @BeforeEach emptied the cache and
+        // primed the cursor, and nothing has changed since. With the import off, following
+        // alone finds none of them.
+        assertThat(userRepository.count()).isZero();
+
+        connector.pollOnce();
+
+        assertThat(userRepository.count()).isZero();
     }
 
     @Test

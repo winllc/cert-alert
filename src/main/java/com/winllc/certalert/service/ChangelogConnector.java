@@ -24,6 +24,10 @@ import org.springframework.stereotype.Service;
  * replaced twenty minutes ago. This connector closes that window: it reads the changelog
  * from where it last got to, applies each change, and records its new position.
  *
+ * <p>It does not populate a cache, it keeps one current, so the first start with no stored
+ * position reads the whole directory before it begins following - otherwise switching the
+ * connector on against an empty cache would leave it empty until the first sweep.
+ *
  * <p>Its position lives in the database, so a restart resumes rather than replaying the
  * directory's history or skipping whatever happened while it was down. Three things it takes
  * care to get right:
@@ -159,7 +163,10 @@ public class ChangelogConnector implements SmartLifecycle {
     public int pollOnce() {
         Instant now = Instant.now(clock);
         ChangelogBounds bounds = changelogClient.readBounds();
-        ChangelogCursor cursor = cursorStore.loadOrCreate(startingPoint(bounds), now);
+        // Asked for separately, and outside a transaction, because starting fresh may mean
+        // reading the whole directory first - which is not something to do with a database
+        // connection held open. Once there is a cursor this is one indexed read per poll.
+        ChangelogCursor cursor = cursorStore.find().orElseGet(() -> startFresh(bounds, now));
 
         if (hasGap(cursor, bounds)) {
             handleGap(cursor, bounds, now);
@@ -221,22 +228,62 @@ public class ChangelogConnector implements SmartLifecycle {
 
         if (properties.isFullSyncOnGap()) {
             // The only way back to a correct cache is to read the tree again.
-            log.warn("Running a full sweep to recover from the changelog gap");
-            syncService.syncUsers();
-            syncService.syncServers();
+            fullSweep("Running a full sweep to recover from the changelog gap");
         } else {
             log.warn("cert-alert.ldap.changelog.full-sync-on-gap is off; the cache may be stale until the next sweep");
         }
     }
 
+    // --- reading the whole tree ----------------------------------------------------------
+
+    /**
+     * Reads the directory in full, on this thread.
+     *
+     * <p>It is the same sweep the schedule runs, so it is recorded as a sync run and
+     * attributed like one. On a large directory it takes a while, and the poll loop waits
+     * for it: there is nothing useful to apply on top of a cache that is not there yet.
+     */
+    private void fullSweep(String reason) {
+        log.warn(reason);
+        syncService.syncUsers();
+        // Shutdown interrupts the worker; between the two sweeps is a place to notice,
+        // rather than making a stop wait out a second read of the tree.
+        if (Thread.currentThread().isInterrupted()) {
+            throw new IllegalStateException("Interrupted between sweeps");
+        }
+        syncService.syncServers();
+    }
+
     // --- cursor persistence ------------------------------------------------------------
+
+    /**
+     * Starts following from nothing: imports the directory, then takes up a position.
+     *
+     * <p>Following a changelog keeps a cache current; it never populates one. Switched on
+     * against an empty cache, the connector would park at the newest change and apply what
+     * happened after it, leaving everything that was already there unseen until a sweep. So
+     * the first start reads the tree.
+     *
+     * <p>Two orderings matter. The bounds were read <em>before</em> the import, so anything
+     * that changes while it runs is read again afterwards rather than falling between the
+     * two - applying a change is idempotent, so the overlap costs nothing. And the cursor is
+     * written <em>after</em> the import, so an import that fails leaves no position behind
+     * and the next poll starts it over rather than following on from a cache that was never
+     * filled.
+     */
+    private ChangelogCursor startFresh(ChangelogBounds bounds, Instant now) {
+        if (properties.isFullSyncOnFirstRun()) {
+            fullSweep("No changelog position stored yet; importing the directory before following it");
+        }
+        return cursorStore.loadOrCreate(startingPoint(bounds), now);
+    }
 
     /**
      * Where to begin with no stored position.
      *
-     * <p>From the latest change by default: the cache is populated by a full sweep, and
-     * replaying the directory's entire retained history to arrive at the same state would be
-     * work for nothing.
+     * <p>From the latest change by default: the cache has just been populated by a full
+     * sweep, and replaying the directory's entire retained history to arrive at the same
+     * state would be work for nothing.
      */
     private long startingPoint(ChangelogBounds bounds) {
         if (properties.getStartFrom() == ChangelogProperties.StartPosition.BEGINNING) {

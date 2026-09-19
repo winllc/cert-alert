@@ -50,6 +50,21 @@ public class ChangelogProperties {
     private StartPosition startFrom = StartPosition.LATEST;
 
     /**
+     * Whether the first poll with no stored position reads the whole tree before it starts
+     * following.
+     *
+     * <p>It should. Following the changelog only keeps a cache current; it never populates
+     * one. With {@link StartPosition#LATEST} the connector parks at the directory's newest
+     * change and applies what happens from then on, so switching it on against an empty
+     * cache and nothing else would leave that cache empty until the nightly sweep. This
+     * makes enabling the connector sufficient on its own.
+     *
+     * <p>It runs once, when there is no cursor - not on every restart. Turn it off where the
+     * baseline is established some other way and a full read at startup is not wanted.
+     */
+    private boolean fullSyncOnFirstRun = true;
+
+    /**
      * Whether discovering that the directory has discarded changes this connector had not
      * reached should trigger a full sweep. It should: the alternative is carrying on with a
      * cache that is quietly missing whatever was in the gap.
@@ -74,8 +89,8 @@ public class ChangelogProperties {
     public enum StartPosition {
         /**
          * Only changes made from now on. The right default: the initial state of the cache
-         * comes from a full sweep, and replaying the directory's entire history to reach the
-         * same place would be pointless work.
+         * comes from a full sweep - {@link #isFullSyncOnFirstRun()} runs one - and replaying
+         * the directory's entire history to reach the same place would be pointless work.
          */
         LATEST,
 
@@ -137,6 +152,14 @@ public class ChangelogProperties {
 
     public void setStartFrom(StartPosition startFrom) {
         this.startFrom = startFrom;
+    }
+
+    public boolean isFullSyncOnFirstRun() {
+        return fullSyncOnFirstRun;
+    }
+
+    public void setFullSyncOnFirstRun(boolean fullSyncOnFirstRun) {
+        this.fullSyncOnFirstRun = fullSyncOnFirstRun;
     }
 
     public boolean isFullSyncOnGap() {

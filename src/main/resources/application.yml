@@ -129,6 +129,10 @@ cert-alert:
       # LATEST or BEGINNING. LATEST is right after a full sweep has populated the cache;
       # replaying the directory's whole retained history would reach the same place.
       start-from: LATEST
+      # Following a changelog keeps a cache current, it does not populate one. With no
+      # stored position the connector reads the whole tree once before it starts following,
+      # so switching it on is enough on its own. It runs once, not on every restart.
+      full-sync-on-first-run: true
       # A trimmed changelog means changes were lost to the connector; the only way back to a
       # correct cache is to read the tree again.
       full-sync-on-gap: true

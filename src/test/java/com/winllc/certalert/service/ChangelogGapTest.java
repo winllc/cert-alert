@@ -66,6 +66,10 @@ class ChangelogGapTest {
         registry.add("cert-alert.ldap.server.search-base", () -> "ou=servers");
         registry.add("cert-alert.ldap.changelog.enabled", () -> "true");
         registry.add("cert-alert.ldap.changelog.auto-start", () -> "false");
+        // These cases prime the connector with a poll of their own; the first-run import is
+        // ChangelogFirstRunTest's subject, and a sweep here would populate the cache the
+        // changes are supposed to be what fills.
+        registry.add("cert-alert.ldap.changelog.full-sync-on-first-run", () -> "false");
         registry.add("cert-alert.ldap.changelog.filter", () -> "(objectClass=changeLogEntry)");
     }
 

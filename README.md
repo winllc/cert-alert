@@ -900,6 +900,23 @@ change, and records its new position. **Off by default**: a directory that publi
 changelog, or does not let this account read it, would leave it erroring in a loop, and the
 sweeps keep the cache correct on their own.
 
+### The first start imports the directory
+
+Following a changelog keeps a cache current; it never populates one. With `start-from:
+LATEST` the connector takes up position at the directory's newest change and applies what
+happens after it, so switched on against an empty cache and left alone it would leave that
+cache empty until the nightly sweep. So the first poll with no stored position reads the
+whole tree first, through the same sweep the schedule runs — recorded in `sync_run` and
+visible at `GET /api/v1/sync/runs` like any other. Enabling the connector is enough on its
+own.
+
+It runs **once**, when `changelog_cursor` holds no row — not on every restart, which resumes
+from the stored position as before. The changelog bounds are read before the import and the
+cursor written after it, so a change made while the tree is being read is applied again
+rather than lost, and an import that fails leaves no position behind for the connector to
+follow on from. Set `full-sync-on-first-run: false` where the baseline is established some
+other way and a full read at startup is not wanted.
+
 ### It re-reads rather than replaying
 
 A `changeLogEntry` carries the modifications themselves, as an LDIF fragment. This ignores
@@ -1020,6 +1037,7 @@ Scraping, under `cert-alert.ldap`:
 | `changelog.poll-interval` | `10s` | Wait after a poll that found nothing      |
 | `changelog.batch-size` | `500` | Most changes read in one poll                  |
 | `changelog.start-from` | `LATEST` | `LATEST` or `BEGINNING`, with no stored position |
+| `changelog.full-sync-on-first-run` | `true` | Import the directory on the first start, before following |
 | `changelog.full-sync-on-gap` | `true` | Sweep when the changelog has been trimmed past the cursor |
 | `user.*`, `server.*` | FSD names | Search base, filter, and attribute names      |
 
