@@ -85,6 +85,14 @@ public class SecurityConfig {
                 // reached through the page it sits on.
                 .requestMatchers("/admin", "/api/v1/audit/summary")
                 .hasRole("ADMIN")
+                // Defining what this deployment keeps about its servers adds a field to
+                // every server at once, and retiring one takes every value with it; setting
+                // a value is the same decision made about one server. Reading either is
+                // ordinary: they are attributes of a server, shown with the rest of it.
+                .requestMatchers("/api/v1/admin/**")
+                .hasRole("ADMIN")
+                .requestMatchers(HttpMethod.PUT, "/api/v1/servers/*/attributes/**")
+                .hasRole("ADMIN")
                 // Triggering a sweep of the whole directory, and above all pruning it, is
                 // not something a reader gets to do.
                 .requestMatchers(

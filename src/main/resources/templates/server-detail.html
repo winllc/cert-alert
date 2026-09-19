@@ -97,6 +97,16 @@
                 </div>
 
 
+                <!--/* What this deployment keeps about a server on top of the directory's
+                       schema. Empty until an administrator defines something, so the card
+                       hides itself rather than sitting there saying nothing. */-->
+                <div class="card mt-3 d-none" id="server-attributes" th:attr="data-server-id=${server.id}">
+                    <div class="card-header"><h3 class="card-title">Managed attributes</h3></div>
+                    <div class="card-body">
+                        <div class="attribute-list"></div>
+                    </div>
+                </div>
+
                 <!--/* What this entry is for, which the directory has no way to say. */-->
                 <div class="card mt-3" th:if="${!#lists.isEmpty(projects)}">
                     <div class="card-header"><h3 class="card-title">Projects</h3></div>
@@ -114,6 +124,7 @@
 
 <div th:replace="~{fragments/layout :: scripts}"></div>
 <script th:src="@{/js/server-contacts.js}"></script>
+<script th:src="@{/js/server-attributes.js}"></script>
 <script th:src="@{/js/audit-table.js}"></script>
 <script>
     // The contacts editor is written for the expanded row of the servers table; on this

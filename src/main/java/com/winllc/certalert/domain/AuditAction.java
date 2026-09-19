@@ -36,6 +36,12 @@ public enum AuditAction {
 
     ADDRESS_REMOVED("Address removed"),
 
+    /** A managed attribute was given a value, or given a different one. */
+    ATTRIBUTE_SET("Attribute set"),
+
+    /** A managed attribute was emptied. */
+    ATTRIBUTE_CLEARED("Attribute cleared"),
+
     /** Put into a project, or taken out of one. */
     PROJECT_JOINED("Added to a project"),
 

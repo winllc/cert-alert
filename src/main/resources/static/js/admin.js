@@ -143,3 +143,187 @@
         });
     });
 })(jQuery);
+
+/*
+ * The managed attributes an administrator defines for servers.
+ *
+ * Kept apart from the log above it: one is a record of what has happened, the other decides
+ * what this deployment keeps about a server. They share a page because they share an
+ * audience.
+ */
+(function (window, $) {
+    'use strict';
+
+    var TYPE_LABEL = {TEXT: 'Free text', CHOICE: 'Drop-down', BOOLEAN: 'Yes or no'};
+
+    function message(text, isError) {
+        $('#attribute-message').text(text || '')
+            .toggleClass('text-danger', !!isError)
+            .toggleClass('text-secondary', !isError);
+    }
+
+    function problem(xhr, fallback) {
+        if (xhr.status === 401) {
+            CertAlert.handleUnauthorized(xhr);
+            return null;
+        }
+        var detail = xhr.responseJSON && (xhr.responseJSON.detail || xhr.responseJSON.title);
+        return detail || fallback;
+    }
+
+    function row(attribute) {
+        var choices = attribute.options.length
+            ? attribute.options.map(function (option) {
+                return '<span class="badge bg-blue-lt me-1">' + CertAlert.escapeHtml(option) + '</span>';
+            }).join('')
+            : '<span class="text-secondary">—</span>';
+
+        return '<tr data-attribute-id="' + attribute.id + '">'
+            + '<td><div class="fw-medium">' + CertAlert.escapeHtml(attribute.name) + '</div>'
+            + (attribute.description
+                ? '<div class="text-secondary small">' + CertAlert.escapeHtml(attribute.description) + '</div>'
+                : '')
+            + '</td>'
+            + '<td>' + CertAlert.escapeHtml(TYPE_LABEL[attribute.type] || attribute.type) + '</td>'
+            + '<td>' + (attribute.multiValued ? 'Several' : 'One') + '</td>'
+            + '<td>' + choices + '</td>'
+            + '<td class="mono">' + (attribute.serversHolding || 0) + '</td>'
+            + '<td class="text-end">'
+            + '<button type="button" class="btn btn-sm attribute-edit me-1">Edit</button>'
+            + '<button type="button" class="btn btn-sm btn-ghost-danger attribute-delete">Retire</button>'
+            + '</td></tr>';
+    }
+
+    var definitions = [];
+
+    function load() {
+        return $.getJSON('/api/v1/admin/server-attributes')
+            .done(function (result) {
+                definitions = result;
+                $('#attribute-definitions').html(result.length
+                    ? result.map(row).join('')
+                    : '<tr><td colspan="6" class="text-secondary">'
+                        + 'Nothing defined yet. What is added here becomes a field on every server.'
+                        + '</td></tr>');
+            })
+            .fail(function (xhr) {
+                var detail = problem(xhr, 'Could not read the managed attributes.');
+                if (detail) {
+                    $('#attribute-definitions').html(
+                        '<tr><td colspan="6" class="text-secondary">' + CertAlert.escapeHtml(detail) + '</td></tr>');
+                }
+            });
+    }
+
+    function reset() {
+        $('#attribute-id').val('');
+        $('#attribute-name').val('');
+        $('#attribute-description').val('');
+        $('#attribute-type').val('TEXT');
+        $('#attribute-multi').val('false');
+        $('#attribute-options').val('');
+        $('#attribute-submit').text('Add attribute');
+        $('#attribute-cancel').addClass('d-none');
+        showFields();
+    }
+
+    /** A boolean is one value by definition, and only a drop-down has anything to choose from. */
+    function showFields() {
+        var type = $('#attribute-type').val();
+        $('#attribute-options-field').toggleClass('d-none', type !== 'CHOICE');
+        $('#attribute-multi').prop('disabled', type === 'BOOLEAN');
+        if (type === 'BOOLEAN') {
+            $('#attribute-multi').val('false');
+        }
+    }
+
+    function edit(attribute) {
+        $('#attribute-id').val(attribute.id);
+        $('#attribute-name').val(attribute.name);
+        $('#attribute-description').val(attribute.description || '');
+        $('#attribute-type').val(attribute.type);
+        $('#attribute-multi').val(String(attribute.multiValued));
+        $('#attribute-options').val(attribute.options.join('\n'));
+        $('#attribute-submit').text('Save changes');
+        $('#attribute-cancel').removeClass('d-none');
+        showFields();
+        message('');
+        $('#attribute-name').trigger('focus');
+    }
+
+    $(function () {
+        if ($('#server-attribute-admin').length === 0) {
+            return;
+        }
+        load();
+        showFields();
+
+        $('#attribute-type').on('change', showFields);
+        $('#attribute-cancel').on('click', function () {
+            reset();
+            message('');
+        });
+
+        $('#attribute-form').on('submit', function (event) {
+            event.preventDefault();
+            var id = $('#attribute-id').val();
+            var body = {
+                name: $('#attribute-name').val(),
+                description: $('#attribute-description').val(),
+                type: $('#attribute-type').val(),
+                multiValued: $('#attribute-multi').val() === 'true',
+                options: $('#attribute-options').val().split('\n')
+                    .map(function (line) { return line.trim(); })
+                    .filter(Boolean)
+            };
+            $.ajax({
+                url: '/api/v1/admin/server-attributes' + (id ? '/' + id : ''),
+                type: id ? 'PUT' : 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify(body)
+            })
+                .done(function (saved) {
+                    message((id ? 'Saved ' : 'Added ') + saved.name);
+                    reset();
+                    load();
+                })
+                .fail(function (xhr) {
+                    var detail = problem(xhr, 'Could not save that attribute.');
+                    if (detail) {
+                        message(detail, true);
+                    }
+                });
+        });
+
+        $('#attribute-definitions').on('click', '.attribute-edit', function () {
+            var id = $(this).closest('tr').data('attribute-id');
+            var attribute = definitions.find(function (candidate) { return candidate.id === id; });
+            if (attribute) {
+                edit(attribute);
+            }
+        });
+
+        $('#attribute-definitions').on('click', '.attribute-delete', function () {
+            var $row = $(this).closest('tr');
+            var id = $row.data('attribute-id');
+            var attribute = definitions.find(function (candidate) { return candidate.id === id; });
+            var held = attribute ? (attribute.serversHolding || 0) : 0;
+            var warning = 'Retire ' + (attribute ? attribute.name : 'this attribute') + '?'
+                + (held ? ' ' + held + ' server(s) hold a value for it, which goes too.' : '');
+            if (!window.confirm(warning)) {
+                return;
+            }
+            $.ajax({url: '/api/v1/admin/server-attributes/' + id, type: 'DELETE'})
+                .done(function () {
+                    message('Retired ' + (attribute ? attribute.name : 'the attribute'));
+                    load();
+                })
+                .fail(function (xhr) {
+                    var detail = problem(xhr, 'Could not retire that attribute.');
+                    if (detail) {
+                        message(detail, true);
+                    }
+                });
+        });
+    });
+})(window, jQuery);

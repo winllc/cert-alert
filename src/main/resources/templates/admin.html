@@ -50,6 +50,74 @@
                     </div>
                 </div>
 
+                <!--/* What this deployment keeps about a server beyond the directory's own
+                       schema. Defined here; filled in on each server's page. */-->
+                <div class="card mb-3" id="server-attribute-admin">
+                    <div class="card-header">
+                        <h3 class="card-title">Server attributes</h3>
+                        <div class="card-actions text-secondary small">
+                            Added here, filled in on a server's page
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table card-table table-vcenter">
+                            <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Kind</th>
+                                <th>Values</th>
+                                <th>Choices</th>
+                                <th>Servers holding it</th>
+                                <th></th>
+                            </tr>
+                            </thead>
+                            <tbody id="attribute-definitions">
+                            <tr><td colspan="6" class="text-secondary">Loading…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="card-body border-top">
+                        <form id="attribute-form" class="row g-2 align-items-end">
+                            <input type="hidden" id="attribute-id">
+                            <div class="col-12 col-md-2">
+                                <label class="form-label" for="attribute-name">Name</label>
+                                <input type="text" id="attribute-name" class="form-control" maxlength="120"
+                                       placeholder="Environment" required>
+                            </div>
+                            <div class="col-12 col-md-3">
+                                <label class="form-label" for="attribute-description">What it is for</label>
+                                <input type="text" id="attribute-description" class="form-control" maxlength="500"
+                                       placeholder="shown under the control">
+                            </div>
+                            <div class="col-6 col-md-2">
+                                <label class="form-label" for="attribute-type">Kind</label>
+                                <select id="attribute-type" class="form-select">
+                                    <option value="TEXT">Free text</option>
+                                    <option value="CHOICE">Drop-down</option>
+                                    <option value="BOOLEAN">Yes or no</option>
+                                </select>
+                            </div>
+                            <div class="col-6 col-md-2">
+                                <label class="form-label" for="attribute-multi">Values</label>
+                                <select id="attribute-multi" class="form-select">
+                                    <option value="false">One</option>
+                                    <option value="true">Several</option>
+                                </select>
+                            </div>
+                            <div class="col-12 col-md-3" id="attribute-options-field">
+                                <label class="form-label" for="attribute-options">Choices, one per line</label>
+                                <textarea id="attribute-options" class="form-control" rows="2"
+                                          placeholder="Production&#10;Staging&#10;Development"></textarea>
+                            </div>
+                            <div class="col-12 d-flex align-items-center gap-2">
+                                <button type="submit" class="btn btn-primary" id="attribute-submit">Add attribute</button>
+                                <button type="button" class="btn d-none" id="attribute-cancel">Cancel</button>
+                                <span id="attribute-message" class="text-secondary small"></span>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
                 <div class="card">
                     <div class="card-header">
                         <h3 class="card-title">System audit log</h3>

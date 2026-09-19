@@ -654,6 +654,33 @@ The text templates carry their own template resolver (`EmailTemplateConfig`), be
 resolver carries one template mode; it answers only for `email/*.txt` and leaves every page
 to the resolver Spring Boot configures.
 
+### Managed attributes
+
+The FSD schema is the directory's and fixed. What a team actually wants recorded against a
+server — which environment it is, whether it is in scope for an audit, which budget pays for
+it — is not in that schema and will not be added to it, so an administrator defines it here
+instead and it is filled in per server.
+
+| Kind | Holds | One or several |
+|---|---|---|
+| Free text | anything typed | either |
+| Drop-down | one of the values the definition lists | either |
+| Yes or no | set or unset | one, always |
+
+A boolean cannot be multi-valued — a second value would have to contradict the first — and
+"no" is stored as the absence of the attribute, so an unset switch and an off one are the
+same thing everywhere.
+
+Defining them is administration: one added becomes a field on every server at once, and
+retiring one takes every value with it. Setting a value on a server is an administrator's
+too; anyone signed in sees what a server holds, as part of the server.
+
+Once servers hold values, what a definition may become is bounded by them, and every refusal
+names what is in the way: an option still in use cannot be taken off the list, "several"
+cannot become "one" while a server holds two, and the kind cannot change underneath values
+recorded as something else. Each change is recorded against the server, so its history says
+who set what and when.
+
 #### The administration page
 
 `/admin` is the system audit log: every record, across every entry, in one search table.
