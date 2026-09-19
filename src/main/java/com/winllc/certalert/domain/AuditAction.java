@@ -52,6 +52,13 @@ public enum AuditAction {
 
     PROJECT_LEFT("Removed from a project"),
 
+    /**
+     * Somebody asked a server's endpoint what it was serving. Recorded because it is an
+     * outbound connection this application made on somebody's behalf, and the answer
+     * decided whether a certificate was believed to be installed.
+     */
+    ENDPOINT_PROBED("Endpoint probed"),
+
     /** An alert was handed to a delivery channel and the channel accepted it. */
     ALERT_SENT("Alert sent"),
 

@@ -1,6 +1,7 @@
 package com.winllc.certalert.web;
 
 import com.winllc.certalert.service.ContactAlreadyExistsException;
+import com.winllc.certalert.service.ProbeUnavailableException;
 import com.winllc.certalert.service.ResourceNotFoundException;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -35,6 +36,18 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     public ProblemDetail handleDuplicate(ContactAlreadyExistsException e) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
         problem.setTitle("Already a point of contact");
+        return problem;
+    }
+
+    /**
+     * Asked to probe something there is no probing: an entry that says nowhere it lives, or
+     * probing switched off here. A refusal about this request rather than a fault, and
+     * distinct from an endpoint that answered by being unreachable - which is a result.
+     */
+    @ExceptionHandler(ProbeUnavailableException.class)
+    public ProblemDetail handleProbeUnavailable(ProbeUnavailableException e) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
+        problem.setTitle(e.getTitle());
         return problem;
     }
 

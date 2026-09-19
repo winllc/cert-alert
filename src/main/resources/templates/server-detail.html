@@ -122,6 +122,36 @@
                            th:href="@{/projects/{id}(id=${project.id})}" th:text="${project.name}">Project</a>
                     </div>
                 </div>
+                <!--/* What the server is actually serving, as against what the directory
+                       says it has. The two drift apart in one direction: a renewal recorded
+                       and never installed reads as healthy everywhere else on this page.
+                       Only shown to somebody who may run it - it opens a connection from
+                       here to there - and only where the entry says where "there" is. */-->
+                <div class="card mt-3" id="endpoint-probe" th:if="${mayProbe}"
+                     th:attr="data-server-id=${server.id},data-port=${probePort}">
+                    <div class="card-header">
+                        <h3 class="card-title">Endpoint</h3>
+                        <div class="card-actions">
+                            <div class="input-group input-group-flat w-auto">
+                                <span class="input-group-text">Port</span>
+                                <input type="number" class="form-control probe-port" min="1" max="65535"
+                                       th:value="${probePort}" style="width: 7rem">
+                                <button class="btn btn-primary ms-2 probe-run" type="button">
+                                    <svg class="icon"><use href="#icon-refresh"></use></svg>
+                                    Check
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="probe-idle text-secondary">
+                            Opens a TLS connection and reads the certificate the server presents, then compares
+                            it with the most recently issued one the directory publishes.
+                        </div>
+                        <div class="probe-result"></div>
+                    </div>
+                </div>
+
                 <div th:replace="~{fragments/detail :: certificates(${certificates})}"></div>
                 <div th:replace="~{fragments/detail :: audit('SERVER', ${server.id})}"></div>
             </div>
@@ -133,6 +163,7 @@
 <script th:src="@{/js/server-contacts.js}"></script>
 <script th:src="@{/js/server-attributes.js}"></script>
 <script th:src="@{/js/audit-table.js}"></script>
+<script th:src="@{/js/server-probe.js}"></script>
 <script>
     // The contacts editor is written for the expanded row of the servers table; on this
     // page the same block is in a card, and it is attached the same way.

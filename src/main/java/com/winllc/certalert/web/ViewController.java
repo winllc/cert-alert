@@ -6,16 +6,21 @@ import com.winllc.certalert.domain.CachedCertificate;
 import com.winllc.certalert.domain.DirectoryServer;
 import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.domain.Project;
+import com.winllc.certalert.config.ProbeProperties;
 import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.DirectoryUserRepository;
+import com.winllc.certalert.security.ServerAccessPolicy;
 import com.winllc.certalert.service.CertificateIssuance;
+import com.winllc.certalert.service.EndpointAddress;
 import com.winllc.certalert.service.ProjectService;
+import com.winllc.certalert.service.ServerProbeService;
 import com.winllc.certalert.service.ResourceNotFoundException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Controller;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.ui.Model;
@@ -40,6 +45,9 @@ public class ViewController {
     private final DirectoryServerRepository serverRepository;
     private final ProjectService projectService;
     private final CredentialProperties credentials;
+    private final ServerProbeService probeService;
+    private final ServerAccessPolicy accessPolicy;
+    private final ProbeProperties probeProperties;
     private final Clock clock;
 
     public ViewController(
@@ -47,11 +55,17 @@ public class ViewController {
             DirectoryServerRepository serverRepository,
             ProjectService projectService,
             CredentialProperties credentials,
+            ServerProbeService probeService,
+            ServerAccessPolicy accessPolicy,
+            ProbeProperties probeProperties,
             Clock clock) {
         this.userRepository = userRepository;
         this.serverRepository = serverRepository;
         this.projectService = projectService;
         this.credentials = credentials;
+        this.probeService = probeService;
+        this.accessPolicy = accessPolicy;
+        this.probeProperties = probeProperties;
         this.clock = clock;
     }
 
@@ -93,13 +107,21 @@ public class ViewController {
 
     @GetMapping("/servers/{id}")
     @Transactional(readOnly = true)
-    public String server(@PathVariable Long id, Model model) {
+    public String server(@PathVariable Long id, Model model, Authentication authentication) {
         DirectoryServer server =
                 serverRepository.findWithCertificatesById(id).orElseThrow(() -> ResourceNotFoundException.server(id));
         model.addAttribute("server", server);
         model.addAttribute("certificates", byExpiry(server.getCertificates()));
         model.addAttribute("projects", projectService.forServer(id));
         model.addAttribute("actions", AuditAction.values());
+        // The probe opens a connection to somewhere else, so the card is offered only to
+        // the people who may run it - and only where there is somewhere to run it against.
+        model.addAttribute(
+                "mayProbe",
+                probeProperties.isEnabled()
+                        && EndpointAddress.of(server, null, probeProperties.getDefaultPort()).isPresent()
+                        && accessPolicy.mayManageContacts(id, authentication));
+        model.addAttribute("probePort", probeService.defaultPortFor(server));
         return "server-detail";
     }
 

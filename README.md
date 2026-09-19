@@ -575,6 +575,51 @@ flagging. The assessment happens at parse time, so a sweep is what refreshes it;
 migration that added the columns backfills what was already cached from the stored names,
 well enough to find the wildcards before the next sweep runs.
 
+### What the server is actually serving
+
+The directory records what was **issued**. Whether it was ever **installed** is known only
+to the endpoint, and those two drift apart in one direction: a renewal recorded in the
+directory and never deployed reads as perfectly healthy on every page here, right up to the
+morning the old certificate expires.
+
+So a server's details page has an **Endpoint** card. It opens a TLS connection — what
+`openssl s_client -connect host:port -servername host` does — reads the certificate the
+server presents, and compares it with the most recently issued one the directory publishes:
+
+| Finding | What it means |
+|---|---|
+| **Serving the current certificate** | what came back is the newest one published |
+| **Serving a superseded certificate** | the endpoint's certificate *is* published, but an older one — the renewal never got installed |
+| **Certificate not published by the directory** | the directory has never held what the endpoint is serving |
+| **Nothing published to compare with** | the entry publishes no certificate, so there is nothing to check against |
+| **Expired** / **Not valid yet** | the presented certificate's own dates |
+| **Name does not match** | the host asked for is not one the certificate is good for |
+| **Self-signed** | issuer and subject are the same |
+| **No intermediate certificates sent** | the leaf and nothing else, which builds a path on a machine that already holds the intermediate and fails on one that does not |
+
+```
+POST /api/v1/servers/{id}/probe?port=8443
+```
+
+**The port is the only thing the caller chooses.** The host comes from the entry —
+`serverURL` first, since a URL is the one attribute that says what a server answers to by
+name (and its port, where it names one), then `icServerAddress`. A caller choosing the host
+would be choosing which machine this application connects to, which is a different thing
+from choosing between the ports of a machine the directory already names.
+
+The handshake deliberately trusts every chain, because an expired or self-signed
+certificate is exactly what is worth reporting and a validating trust manager would hang up
+before it could be read. Nothing is sent over the connection and nothing read from it is
+believed: the certificate is judged against the directory, which is the only thing here that
+is trusted.
+
+Nothing is stored — the answer is true at the moment it is asked and stops being true the
+next time somebody restarts a service. The audit trail records that it was asked and by
+whom. Who may ask is the same question as who may manage the server's contacts: a point of
+contact, an administrator of a project it belongs to, or an administrator. Set
+`cert-alert.probe.enabled: false` to remove it entirely on a network where reaching a
+server from here is not something this application should be doing.
+
 ### The audit trail
 
 Every entry carries a history: what happened to it, when, and who did it. It shows up in
@@ -849,6 +894,7 @@ for.
 | `GET`  | `/api/v1/stats/servers`             | Certificate roll-up across servers       |
 | `GET`  | `/api/v1/users/{id}/certificates`   | Cached certificate detail for a person   |
 | `GET`  | `/api/v1/servers/{id}/certificates` | Cached certificate detail for a server   |
+| `POST` | `/api/v1/servers/{id}/probe?port=`  | Ask the endpoint what it is serving       |
 | `GET`  | `/api/v1/servers/{id}/contacts`     | Both lists of points of contact          |
 | `POST` | `/api/v1/servers/{id}/contacts`     | Add one: `{"userId":…}` or `{"email":…}` |
 | `DELETE` | `/api/v1/servers/{id}/contacts/{contactId}` | Remove one                   |
@@ -1080,6 +1126,15 @@ What counts as one issuance, under `cert-alert.credentials`:
 | Property      | Default | Purpose                                                     |
 |---------------|---------|-------------------------------------------------------------|
 | `pair-window` | `7d`    | How far apart a person's signing and encryption certificates may be issued and still be one renewal |
+
+The endpoint probe, under `cert-alert.probe`:
+
+| Property          | Default | Purpose                                              |
+|-------------------|---------|------------------------------------------------------|
+| `enabled`         | `true`  | Off removes the card and refuses the endpoint         |
+| `default-port`    | `443`   | Offered when the entry's URL names no port            |
+| `connect-timeout` | `5s`    | How long to wait for the connection                   |
+| `read-timeout`    | `5s`    | How long to wait for the handshake                    |
 
 Access, under `cert-alert.security`:
 

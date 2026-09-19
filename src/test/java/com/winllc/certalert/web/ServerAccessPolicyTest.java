@@ -232,6 +232,36 @@ class ServerAccessPolicyTest {
                 .andExpect(jsonPath("$.directory[0]").value("published@example.gov"));
     }
 
+    /**
+     * Probing asks the same question, because it is the same relationship: the people with
+     * something to do with this server. It opens a connection from here to there, so it is
+     * not something to leave to anybody who can reach the page.
+     */
+    @Test
+    void probingIsForThePeopleTheServerBelongsTo() throws Exception {
+        // These entries say nowhere they live, so there is nothing to connect to - a
+        // refusal about the request, not a fault. What is being tested is who may ask.
+        mockMvc.perform(post(probe(theirServerId) + "?port=1")
+                        .with(csrf())
+                        .with(principal(publishedId, "published")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.title").value("Nowhere to probe"));
+
+        mockMvc.perform(post(probe(otherServerId) + "?port=1")
+                        .with(csrf())
+                        .with(principal(publishedId, "published")))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(post(probe(theirServerId) + "?port=1")
+                        .with(csrf())
+                        .with(principal(strangerId, "stranger")))
+                .andExpect(status().isForbidden());
+    }
+
+    private String probe(Long serverId) {
+        return "/api/v1/servers/" + serverId + "/probe";
+    }
+
     private String contacts(Long serverId) {
         return "/api/v1/servers/" + serverId + "/contacts";
     }

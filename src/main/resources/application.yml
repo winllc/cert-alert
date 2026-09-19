@@ -260,6 +260,16 @@ cert-alert:
   # hosts that do not exist yet; forty names means one key for forty things. Both are
   # judgements rather than rules - a load balancer fronting forty services has forty names
   # for a reason - so where "too many" starts is configuration.
+  # Asking a server's endpoint what it is actually serving, from its page. The one
+  # outbound connection here that is not to the directory or the mail server, and the only
+  # one somebody causes by pressing a button - so it can be switched off wholesale.
+  probe:
+    enabled: true
+    # Offered when the entry's serverURL names no port.
+    default-port: 443
+    connect-timeout: 5s
+    read-timeout: 5s
+
   # A person is issued two certificates at once - one to sign with, one to be encrypted to -
   # and a CA signs them minutes apart. This is how close together they have to be to count
   # as one renewal; wider apart means one was renewed and the other was not.

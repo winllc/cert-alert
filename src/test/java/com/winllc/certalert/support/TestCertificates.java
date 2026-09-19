@@ -139,6 +139,15 @@ public final class TestCertificates {
         }
     }
 
+    /**
+     * The key behind every certificate minted here, so a test can serve one over TLS as
+     * well as publish it. One key for all of them is deliberate - key generation is the
+     * slow part - and means any certificate from this class can be served by any server.
+     */
+    public static KeyPair sharedKeyPair() {
+        return KEY_PAIR;
+    }
+
     /** A key pair of a given kind, for the same reason. */
     public static KeyPair keyPair(String algorithm, int size) {
         try {
