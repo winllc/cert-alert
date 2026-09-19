@@ -87,6 +87,25 @@ image. The split is what makes rebuilds cheap — the dependency layer is ~78MB 
 only when `build.gradle.kts` does, while the application layer is a couple of hundred
 kilobytes and changes on every commit.
 
+It is built on **Red Hat's Universal Base Image** — `ubi9/openjdk-21` to build and
+`ubi9/openjdk-21-runtime` to run. UBI is freely redistributable and needs no subscription
+to pull or to run, and it is what a RHEL or OpenShift estate already has a patching story
+for, which inside an accredited network is worth more than a smaller image. Both tags are
+build arguments, so a real build pins them and a move to UBI 10 is an argument rather than
+an edit:
+
+```bash
+docker build \
+  --build-arg UBI_JDK_IMAGE=registry.access.redhat.com/ubi9/openjdk-21:1.23-1 \
+  --build-arg UBI_JRE_IMAGE=registry.access.redhat.com/ubi9/openjdk-21-runtime:1.23-1 \
+  -t cert-alert:latest .
+```
+
+It runs as the image's own uid 185 rather than a user of its own making, with everything
+owned by that uid and group 0 and the group given the owner's permissions — which is what
+lets it start under OpenShift's default policy, where the container gets an arbitrary uid
+that is only ever a member of group 0.
+
 ```bash
 docker run --rm -p 8080:8080 \
   -e SPRING_PROFILES_ACTIVE=postgres \
