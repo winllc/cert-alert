@@ -45,7 +45,10 @@ public class ProjectController {
                 .map(project -> {
                     ProjectRepository.ProjectSize size = sizes.get(project.getId());
                     return ProjectRow.from(
-                            project, size == null ? 0 : size.getMembers(), size == null ? 0 : size.getServers());
+                            project,
+                            size == null ? 0 : size.getMembers(),
+                            size == null ? 0 : size.getAdmins(),
+                            size == null ? 0 : size.getServers());
                 })
                 .toList();
     }
@@ -78,6 +81,22 @@ public class ProjectController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void removeMember(@PathVariable Long id, @PathVariable Long userId) {
         projectService.removeMember(id, userId);
+    }
+
+    /**
+     * Gives somebody the running of this project. Administrators only: it hands over the
+     * contact lists of every server in the project, and the notices about them.
+     */
+    @PostMapping("/{id}/admins/{userId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void addAdmin(@PathVariable Long id, @PathVariable Long userId) {
+        projectService.addAdmin(id, userId);
+    }
+
+    @DeleteMapping("/{id}/admins/{userId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void removeAdmin(@PathVariable Long id, @PathVariable Long userId) {
+        projectService.removeAdmin(id, userId);
     }
 
     @PostMapping("/{id}/servers/{serverId}")

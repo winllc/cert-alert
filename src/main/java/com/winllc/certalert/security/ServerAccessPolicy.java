@@ -22,8 +22,13 @@ import org.springframework.transaction.annotation.Transactional;
  * <ul>
  *   <li>a point of contact for a server manages that server's contacts, from either place a
  *       contact comes from - named in the directory's {@code serverPOC}, or added here;
- *   <li>a member of a project manages the contacts of every server in it.
+ *   <li>an administrator of a project manages the contacts of every server in it.
  * </ul>
+ *
+ * <p>Being <em>in</em> a project is not enough. Membership is a grouping - it says what a
+ * person has to do with a piece of work - and handing everybody in it the contact lists of
+ * every server in it makes the grouping into an authority nobody granted. Running the
+ * project is the role that carries that, and an administrator gives it out.
  *
  * <p>Administrators keep the lot, and {@code cert-alert.security.contact-editors:
  * AUTHENTICATED} still opens it to anyone signed in. What nobody gets is a server they have
@@ -66,7 +71,7 @@ public class ServerAccessPolicy {
             // configuration holding no entry, which the branch above has already answered.
             return false;
         }
-        return isPointOfContact(userId, serverId) || sharesProject(userId, serverId);
+        return isPointOfContact(userId, serverId) || administersProject(userId, serverId);
     }
 
     /**
@@ -79,7 +84,7 @@ public class ServerAccessPolicy {
                 .and((root, query, builder) -> builder.equal(root.get("id"), serverId)));
     }
 
-    private boolean sharesProject(Long userId, Long serverId) {
-        return projects.existsSharedMembership(userId, serverId);
+    private boolean administersProject(Long userId, Long serverId) {
+        return projects.existsAdminOfServer(userId, serverId);
     }
 }

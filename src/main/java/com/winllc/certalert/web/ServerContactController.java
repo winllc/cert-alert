@@ -37,8 +37,8 @@ import org.springframework.web.bind.annotation.RestController;
  * is a cached copy and not editable here, and what was added here, which is.
  *
  * <p>Who may edit is a question about this server rather than about the application, so it
- * is answered here rather than in the filter chain: a point of contact for the server, or a
- * member of a project it belongs to, manages its contacts, as do administrators. See
+ * is answered here rather than in the filter chain: a point of contact for the server, or an
+ * administrator of a project it belongs to, manages its contacts, as do administrators. See
  * {@link ServerAccessPolicy}. The read says which it is, so the UI shows the controls to
  * the people they will work for rather than offering them and then refusing.
  */
@@ -124,7 +124,8 @@ public class ServerContactController {
     private void requireManagement(Long serverId, Authentication authentication) {
         if (!accessPolicy.mayManageContacts(serverId, authentication)) {
             throw new AccessDeniedException(
-                    "You are not a point of contact for this server, or a member of a project it belongs to");
+                    "You are not a point of contact for this server, "
+                            + "or an administrator of a project it belongs to");
         }
     }
 

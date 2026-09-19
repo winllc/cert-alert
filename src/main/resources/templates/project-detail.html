@@ -49,13 +49,30 @@
                                 <div class="contacts-group" th:if="${#lists.isEmpty(members)}">
                                     <span class="text-secondary">Nobody yet</span>
                                 </div>
+                                <!--/* A star marks whoever runs the project: they manage the
+                                       points of contact on its servers and hear about those
+                                       certificates expiring. Administrators hand it over. */-->
                                 <div class="contacts-group">
-                                    <span class="badge bg-blue-lt contact-badge" th:each="member : ${members}">
+                                    <span class="badge contact-badge" th:each="member : ${members}"
+                                          th:classappend="${adminIds.contains(member.id)} ? 'bg-green-lt' : 'bg-blue-lt'">
+                                        <svg class="icon icon-sm me-1" th:if="${adminIds.contains(member.id)}"
+                                             title="Runs this project"><use href="#icon-shield-check"></use></svg>
                                         <a th:href="@{/users/{id}(id=${member.id})}"
                                            th:text="${member.displayName != null} ? ${member.displayName} : ${member.uid}">Name</a>
+                                        <button type="button" class="btn btn-sm btn-ghost-secondary py-0 px-1 ms-1
+                                                project-toggle-admin" th:if="${isAdmin}"
+                                                th:attr="data-user-id=${member.id},
+                                                         data-admin=${adminIds.contains(member.id)}"
+                                                th:text="${adminIds.contains(member.id)} ? 'Step down' : 'Make admin'">
+                                            Make admin
+                                        </button>
                                         <button type="button" class="btn-close ms-2 project-remove-user"
                                                 th:attr="data-user-id=${member.id}" aria-label="Remove"></button>
                                     </span>
+                                </div>
+                                <div class="text-secondary small mt-2" th:if="${!#lists.isEmpty(members)}">
+                                    A project administrator manages the points of contact on every server here,
+                                    and is told when their certificates are expiring.
                                 </div>
                                 <div class="contacts-add mt-2 ps-0">
                                     <div class="contacts-search">

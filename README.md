@@ -485,19 +485,23 @@ shows the directory's value with a **+n added** badge beside it.
 
 #### Who may edit them
 
-**Whoever is associated with the server**, which is a question about that server rather than
+**Whoever is answerable for the server**, which is a question about that server rather than
 about the application:
 
 | May manage a server's contacts | How |
 |---|---|
 | A point of contact for it | named in the directory's `serverPOC` by any value that names them, or added here |
-| A member of a project it belongs to | the project is what says these servers are one system |
+| A **project administrator** of a project it belongs to | see [project administrators](#project-administrators) |
 | An administrator | as with everything else |
 
 The people who know who belongs on a contact list are the people already on it, and the
-people who own the project the server is part of. Waiting on an administrator to add a
+people who run the project the server is part of. Waiting on an administrator to add a
 colleague is how a list goes stale, and a stale list is a certificate nobody is told about.
 Nobody gets a server they have nothing to do with: the refusal is a 403 saying exactly that.
+
+Being *in* a project is not enough. Membership is a grouping — it says what a person has to
+do with a piece of work — and handing everybody in it the contact lists of every server in it
+would make the grouping into an authority nobody granted.
 
 `cert-alert.security.contact-editors: AUTHENTICATED` still opens it to anyone signed in,
 where that suits the deployment. The addresses a person answers to stay with that setting
@@ -728,6 +732,26 @@ reached through.
 Records outlive what they describe. A row links to its entry only while there is one to
 link to; after a prune the DN it carried is what is left, and the log still says the entry
 was pruned.
+
+### Project administrators
+
+A project has members, and some of them **run** it. The role carries exactly two things, and
+they are the same thing from two directions:
+
+- the **points of contact** on every server in the project are theirs to manage;
+- they are **told when those certificates are expiring** — on the page as a sweep notices,
+  and in the daily round-up, alongside the servers' own points of contact.
+
+That is the answer to a directory whose `serverPOC` is stale or names a person who left: the
+people who know what a system is for can keep its contacts right, without an administrator in
+the loop, and hear about it when they do not.
+
+Only an administrator grants it (`POST /api/v1/projects/{id}/admins/{userId}`), even where
+`contact-editors: AUTHENTICATED` lets everybody curate projects — it hands over the contact
+lists of every server in the project. Somebody made a project administrator is made a member
+too, because there is no running a project from outside it; stepping down leaves them in it,
+and leaving it gives up the role. Both are recorded against the person, so their history says
+who gave them the project and when.
 
 ### The details pages
 

@@ -36,6 +36,11 @@ public enum AuditAction {
 
     ADDRESS_REMOVED("Address removed"),
 
+    /** Given the running of a project: its servers' contacts, and its expiry notices. */
+    PROJECT_ADMIN_ADDED("Made a project administrator"),
+
+    PROJECT_ADMIN_REMOVED("No longer a project administrator"),
+
     /** A managed attribute was given a value, or given a different one. */
     ATTRIBUTE_SET("Attribute set"),
 

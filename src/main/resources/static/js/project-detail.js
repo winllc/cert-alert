@@ -28,6 +28,16 @@
             });
     }
 
+    /** Handing the running of the project over, or taking it back. */
+    function bindAdminToggles(projectId) {
+        $('#project-page').on('click', '.project-toggle-admin', function () {
+            var $button = $(this);
+            var userId = $button.data('user-id');
+            var isAdmin = String($button.data('admin')) === 'true';
+            change('/api/v1/projects/' + projectId + '/admins/' + userId, isAdmin ? 'DELETE' : 'POST');
+        });
+    }
+
     /**
      * @param search  endpoint that takes ?q= and returns rows
      * @param label   what to show for a row
@@ -93,6 +103,7 @@
         $('.project-remove-server').on('click', function () {
             change('/api/v1/projects/' + projectId + '/servers/' + $(this).data('server-id'), 'DELETE');
         });
+        bindAdminToggles(projectId);
 
         picker(
             $('#project-user-input'), $('#project-user-suggestions'), projectId,

@@ -4,6 +4,7 @@ import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.domain.ServerContact;
 import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.DirectoryUserRepository;
+import com.winllc.certalert.repository.ProjectRepository;
 import com.winllc.certalert.repository.ServerContactRepository;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -20,6 +21,10 @@ import org.springframework.transaction.annotation.Transactional;
  * by it - which now includes the addresses added to a person, so a list resolves to
  * everybody on it.
  *
+ * <p>The people who run a project the server belongs to hear about it as well. They are not
+ * points of contact - the directory has never heard of them - but they are answerable for
+ * the thing the server is part of, which is the whole of what the role is for.
+ *
  * <p>What cannot be resolved to a person is still a recipient, as an address. A server
  * whose only contact is a distribution list nobody has claimed can be written to; it just
  * has nobody to show a notification to when they sign in.
@@ -30,14 +35,17 @@ public class NotificationRecipients {
     private final DirectoryUserRepository userRepository;
     private final DirectoryServerRepository serverRepository;
     private final ServerContactRepository contactRepository;
+    private final ProjectRepository projectRepository;
 
     public NotificationRecipients(
             DirectoryUserRepository userRepository,
             DirectoryServerRepository serverRepository,
-            ServerContactRepository contactRepository) {
+            ServerContactRepository contactRepository,
+            ProjectRepository projectRepository) {
         this.userRepository = userRepository;
         this.serverRepository = serverRepository;
         this.contactRepository = contactRepository;
+        this.projectRepository = projectRepository;
     }
 
     /**
@@ -82,6 +90,13 @@ public class NotificationRecipients {
                 named.forEach(user -> add(byKey, new Recipient(user.getId(), user.getEmail(), displayNameOf(user))));
             }
         });
+
+        // Whoever runs a project this server is in. Keyed like everybody else, so somebody
+        // who is both a contact and a project administrator is told once.
+        for (Long userId : projectRepository.findAdminIdsByServerId(serverId)) {
+            userRepository.findById(userId).ifPresent(user ->
+                    add(byKey, new Recipient(user.getId(), user.getEmail(), displayNameOf(user))));
+        }
 
         return List.copyOf(byKey.values());
     }

@@ -110,6 +110,31 @@ public class ProjectService {
         }
     }
 
+    /**
+     * Gives somebody the running of a project: the contacts on its servers, and the notices
+     * about their certificates. They are made a member too if they were not one - there is
+     * no administering a project from outside it.
+     */
+    @Transactional
+    public void addAdmin(Long projectId, Long userId) {
+        Project project = get(projectId);
+        DirectoryUser user = users.findById(userId).orElseThrow(() -> ResourceNotFoundException.user(userId));
+        if (project.promote(user)) {
+            record(AuditEvent.SubjectRef.of(user), AuditAction.PROJECT_ADMIN_ADDED, project);
+            log.info("{} now runs the project '{}'", user.getDn(), project.getName());
+        }
+    }
+
+    /** Takes the role away. They stay in the project; it was a role, not a membership. */
+    @Transactional
+    public void removeAdmin(Long projectId, Long userId) {
+        Project project = get(projectId);
+        DirectoryUser user = users.findById(userId).orElseThrow(() -> ResourceNotFoundException.user(userId));
+        if (project.demote(user)) {
+            record(AuditEvent.SubjectRef.of(user), AuditAction.PROJECT_ADMIN_REMOVED, project);
+        }
+    }
+
     @Transactional
     public void addServer(Long projectId, Long serverId) {
         Project project = get(projectId);
@@ -135,20 +160,32 @@ public class ProjectService {
         return projects.findByMemberId(userId);
     }
 
+    /** The projects somebody runs, as distinct from the ones they are merely in. */
+    @Transactional(readOnly = true)
+    public List<Project> administeredBy(Long userId) {
+        return projects.findByAdminId(userId);
+    }
+
     @Transactional(readOnly = true)
     public List<Project> forServer(Long serverId) {
         return projects.findByServerId(serverId);
     }
 
     private void record(AuditEvent.SubjectRef subject, AuditAction action, Project project) {
-        auditService.record(AuditEvent.about(
-                        subject,
-                        action,
-                        "%s the project '%s'".formatted(action == AuditAction.PROJECT_JOINED ? "Added to" : "Removed from",
-                                project.getName()),
-                        Instant.now(clock))
+        auditService.record(AuditEvent.about(subject, action, summaryOf(action, project), Instant.now(clock))
                 .by(AuditActors.current(AuditActors.SYSTEM))
                 .to(project.getName()));
+    }
+
+    private String summaryOf(AuditAction action, Project project) {
+        return switch (action) {
+            case PROJECT_JOINED -> "Added to the project '%s'".formatted(project.getName());
+            case PROJECT_LEFT -> "Removed from the project '%s'".formatted(project.getName());
+            case PROJECT_ADMIN_ADDED -> "Now runs the project '%s': its servers' contacts and their expiry notices"
+                    .formatted(project.getName());
+            case PROJECT_ADMIN_REMOVED -> "No longer runs the project '%s'".formatted(project.getName());
+            default -> "The project '%s'".formatted(project.getName());
+        };
     }
 
     private String requireName(String name) {

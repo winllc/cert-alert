@@ -29,7 +29,9 @@ import java.util.Set;
  * payroll migration expires this month".
  *
  * <p>Membership is a set on each side rather than an entity of its own: there is nothing to
- * say about a membership beyond its existence.
+ * say about a membership beyond its existence. Running the project is the exception, and it
+ * is a set of its own - the administrators, who are members as well, kept that way by
+ * {@code ProjectService} so that everything asking who is in a project still gets them.
  */
 @Entity
 @Table(
@@ -63,6 +65,18 @@ public class Project {
                     @JoinColumn(name = "user_id", foreignKey = @ForeignKey(name = "fk_project_user_user")))
     private Set<DirectoryUser> members = new LinkedHashSet<>();
 
+    /**
+     * Who runs it: they manage the points of contact on every server in the project and
+     * hear about those certificates expiring. Always a subset of the members.
+     */
+    @ManyToMany(fetch = FetchType.LAZY, cascade = {CascadeType.PERSIST, CascadeType.MERGE})
+    @JoinTable(
+            name = "project_admin",
+            joinColumns = @JoinColumn(name = "project_id", foreignKey = @ForeignKey(name = "fk_project_admin_project")),
+            inverseJoinColumns =
+                    @JoinColumn(name = "user_id", foreignKey = @ForeignKey(name = "fk_project_admin_user")))
+    private Set<DirectoryUser> admins = new LinkedHashSet<>();
+
     @ManyToMany(fetch = FetchType.LAZY, cascade = {CascadeType.PERSIST, CascadeType.MERGE})
     @JoinTable(
             name = "project_server",
@@ -92,8 +106,24 @@ public class Project {
         return members.add(user);
     }
 
+    /** Leaving the project gives up running it: a non-member cannot administer it. */
     public boolean remove(DirectoryUser user) {
+        admins.remove(user);
         return members.remove(user);
+    }
+
+    /** Makes them an administrator, and a member if they were not one already. */
+    public boolean promote(DirectoryUser user) {
+        members.add(user);
+        return admins.add(user);
+    }
+
+    public boolean demote(DirectoryUser user) {
+        return admins.remove(user);
+    }
+
+    public boolean isAdministeredBy(DirectoryUser user) {
+        return admins.contains(user);
     }
 
     public boolean add(DirectoryServer server) {
@@ -102,6 +132,10 @@ public class Project {
 
     public boolean remove(DirectoryServer server) {
         return servers.remove(server);
+    }
+
+    public Set<DirectoryUser> getAdmins() {
+        return admins;
     }
 
     public Long getId() {

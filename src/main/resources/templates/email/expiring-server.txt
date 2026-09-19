@@ -10,7 +10,8 @@ Other people may be contacts for the same servers, so somebody may be on this al
     [# th:if="${entry.expired}"]Expired [(${entry.daysAbsolute})] day(s) ago, on [(${entry.day})][/][# th:unless="${entry.expired}"]Expires in [(${entry.days})] day(s), on [(${entry.day})][/]
     [(${entry.keyDescription})][# th:if="${entry.hashAlgorithm}"] / [(${entry.hashAlgorithm})][/], issued by [(${entry.issuerDn})]
 [/]
-You are receiving this because you are a point of contact for these servers.
+You are receiving this because you are a point of contact for these servers, or run a
+project they belong to.
 
 This is the daily round-up from cert-alert. It reports what the directory publishes: a
 certificate stops appearing here once the renewed one is published in its place.

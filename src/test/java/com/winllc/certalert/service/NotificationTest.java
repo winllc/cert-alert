@@ -50,6 +50,12 @@ class NotificationTest {
     private ServerContactService contactService;
 
     @Autowired
+    private ProjectService projectService;
+
+    @Autowired
+    private com.winllc.certalert.repository.ProjectRepository projectRepository;
+
+    @Autowired
     private NotificationRepository notifications;
 
     @Autowired
@@ -81,6 +87,7 @@ class NotificationTest {
     @BeforeEach
     void reset() {
         notifications.deleteAll();
+        projectRepository.deleteAll();
         serverRepository.deleteAll();
         userRepository.deleteAll();
     }
@@ -237,6 +244,57 @@ class NotificationTest {
         // One message, listing all three, rather than one message per certificate.
         assertThat(mine).hasSize(1);
         assertThat(mine.getFirst().getMessage()).contains("3 certificate(s) expiring").contains("across 3");
+    }
+
+    /**
+     * Whoever runs a project hears about the servers in it. They are not points of contact -
+     * the directory has never heard of them - but they are answerable for the thing the
+     * server is part of, which is what the role is for.
+     */
+    @Test
+    void whoeverRunsAProjectIsToldAboutItsServers() throws InterruptedException {
+        String runnerDn = directory.addUser("runner", "Run Ner", "runner@example.gov");
+        String serverDn = directory.addServer(
+                "project-server",
+                "https://project-server.example.gov",
+                new String[] {"someone.else@example.gov"},
+                TestCertificates.expiringIn("project-server.example.gov", Duration.ofSeconds(2)));
+        syncService.syncUsers();
+        syncService.syncServers();
+
+        Long runnerId = userRepository.findByDn(runnerDn).orElseThrow().getId();
+        Long serverId = serverRepository.findByDn(serverDn).orElseThrow().getId();
+        var project = projectService.create("Payroll migration", null, "alice");
+        projectService.addAdmin(project.getId(), runnerId);
+        projectService.addServer(project.getId(), serverId);
+
+        Thread.sleep(Duration.ofSeconds(3).toMillis());
+        syncService.syncServers();
+
+        assertThat(notificationService.unreadCount(runnerId)).isEqualTo(1);
+    }
+
+    /** Being in the project is not the same thing, and does not come with the post. */
+    @Test
+    void merelyBeingInTheProjectIsNotTold() {
+        String memberDn = directory.addUser("bystander", "By Stander", "bystander@example.gov");
+        String serverDn = directory.addServer(
+                "quiet-server",
+                "https://quiet-server.example.gov",
+                new String[] {"someone.else@example.gov"},
+                TestCertificates.expiringIn("quiet-server.example.gov", Duration.ofDays(5)));
+        syncService.syncUsers();
+        syncService.syncServers();
+
+        Long memberId = userRepository.findByDn(memberDn).orElseThrow().getId();
+        Long serverId = serverRepository.findByDn(serverDn).orElseThrow().getId();
+        var project = projectService.create("Quiet project", null, "alice");
+        projectService.addMember(project.getId(), memberId);
+        projectService.addServer(project.getId(), serverId);
+
+        notificationService.digest();
+
+        assertThat(notificationService.unreadCount(memberId)).isZero();
     }
 
     /** An address nobody has claimed can still be written to; it just has nobody to show. */

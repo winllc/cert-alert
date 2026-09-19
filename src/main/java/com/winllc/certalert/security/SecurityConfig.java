@@ -124,6 +124,13 @@ public class SecurityConfig {
                 .access(contactEditors(properties))
                 .requestMatchers(HttpMethod.DELETE, "/api/v1/users/*/addresses/**")
                 .access(contactEditors(properties))
+                // Who runs a project is not curation: it hands over the contact lists of
+                // every server in the project, and the notices about their certificates.
+                .requestMatchers(
+                        HttpMethod.POST, "/api/v1/projects/*/admins/**")
+                .hasRole("ADMIN")
+                .requestMatchers(HttpMethod.DELETE, "/api/v1/projects/*/admins/**")
+                .hasRole("ADMIN")
                 // Projects are the same kind of thing: data this application keeps
                 // alongside the directory, curated by the same people.
                 .requestMatchers(HttpMethod.POST, "/api/v1/projects", "/api/v1/projects/**")

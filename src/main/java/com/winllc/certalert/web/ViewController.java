@@ -70,6 +70,7 @@ public class ViewController {
         // Every value a server's serverPOC could name them by, which is what the join uses.
         model.addAttribute("identifiers", userRepository.findIdentifiersById(id));
         model.addAttribute("projects", projectService.forUser(id));
+        model.addAttribute("administers", projectService.administeredBy(id));
         model.addAttribute("actions", AuditAction.values());
         return "user-detail";
     }
@@ -104,6 +105,8 @@ public class ViewController {
                 .sorted(java.util.Comparator.comparing(
                         DirectoryServer::getCommonName, Comparator.nullsLast(Comparator.naturalOrder())))
                 .toList());
+        // Ids rather than entities: the page asks "is this member one of them" per badge.
+        model.addAttribute("adminIds", project.getAdmins().stream().map(DirectoryUser::getId).toList());
         return "project-detail";
     }
 

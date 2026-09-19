@@ -152,6 +152,63 @@ class ProjectTest {
         assertThat(users.findAll(DirectorySpecifications.inProject(null, "members"))).hasSize(2);
     }
 
+    // ---------------------------------------------------------------------------------
+    // Who runs it
+    // ---------------------------------------------------------------------------------
+
+    /** The role is what carries the authority; the membership is only a grouping. */
+    @Test
+    void whoeverRunsItIsAMemberOfItToo() {
+        Project project = projectService.create("Payroll", null, "alice");
+
+        projectService.addAdmin(project.getId(), aliceId);
+
+        assertThat(membersOf(project.getId())).extracting(DirectoryUser::getUid).containsExactly("alice");
+        assertThat(adminsOf(project.getId())).extracting(DirectoryUser::getUid).containsExactly("alice");
+        assertThat(projectService.administeredBy(aliceId)).extracting(Project::getName).containsExactly("Payroll");
+        assertThat(projectService.administeredBy(bobId)).isEmpty();
+        assertThat(auditFor(OwnerType.USER, aliceId)).extracting(AuditEvent::getAction)
+                .containsExactly(AuditAction.PROJECT_ADMIN_ADDED);
+    }
+
+    /** Giving the role back leaves them in the project: it was a role, not a membership. */
+    @Test
+    void steppingDownLeavesThemInTheProject() {
+        Project project = projectService.create("Payroll", null, "alice");
+        projectService.addAdmin(project.getId(), aliceId);
+
+        projectService.removeAdmin(project.getId(), aliceId);
+
+        assertThat(adminsOf(project.getId())).isEmpty();
+        assertThat(membersOf(project.getId())).hasSize(1);
+        assertThat(auditFor(OwnerType.USER, aliceId)).extracting(AuditEvent::getAction)
+                .containsExactly(AuditAction.PROJECT_ADMIN_REMOVED, AuditAction.PROJECT_ADMIN_ADDED);
+    }
+
+    /** Leaving it altogether gives up running it: there is no administering from outside. */
+    @Test
+    void leavingTheProjectGivesUpRunningIt() {
+        Project project = projectService.create("Payroll", null, "alice");
+        projectService.addAdmin(project.getId(), aliceId);
+
+        projectService.removeMember(project.getId(), aliceId);
+
+        assertThat(membersOf(project.getId())).isEmpty();
+        assertThat(adminsOf(project.getId())).isEmpty();
+        assertThat(projectService.administeredBy(aliceId)).isEmpty();
+    }
+
+    @Test
+    void givingTheRoleTwiceChangesNothing() {
+        Project project = projectService.create("Payroll", null, "alice");
+
+        projectService.addAdmin(project.getId(), aliceId);
+        projectService.addAdmin(project.getId(), aliceId);
+
+        assertThat(adminsOf(project.getId())).hasSize(1);
+        assertThat(auditFor(OwnerType.USER, aliceId)).hasSize(1);
+    }
+
     @Test
     void anEntryKnowsWhatProjectsItIsIn() {
         Project first = projectService.create("First", null, "alice");
@@ -180,6 +237,10 @@ class ProjectTest {
 
     private List<DirectoryUser> membersOf(Long projectId) {
         return transactionTemplate.execute(status -> List.copyOf(projectService.get(projectId).getMembers()));
+    }
+
+    private List<DirectoryUser> adminsOf(Long projectId) {
+        return transactionTemplate.execute(status -> List.copyOf(projectService.get(projectId).getAdmins()));
     }
 
     private List<DirectoryServer> serversOf(Long projectId) {

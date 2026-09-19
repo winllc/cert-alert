@@ -117,19 +117,40 @@ class ServerAccessPolicyTest {
     }
 
     @Test
-    void aProjectMemberManagesEveryServerInIt() {
+    void whoeverRunsAProjectManagesEveryServerInIt() {
         var project = projectService.create("Payroll", null, "alice");
-        projectService.addMember(project.getId(), strangerId);
+        projectService.addAdmin(project.getId(), strangerId);
         projectService.addServer(project.getId(), projectServerId);
 
-        Authentication member = signedIn(strangerId, "stranger");
-        assertThat(policy.mayManageContacts(projectServerId, member)).isTrue();
-        assertThat(policy.mayManageContacts(otherServerId, member))
+        Authentication projectAdmin = signedIn(strangerId, "stranger");
+        assertThat(policy.mayManageContacts(projectServerId, projectAdmin)).isTrue();
+        assertThat(policy.mayManageContacts(otherServerId, projectAdmin))
                 .as("a server the project does not hold")
                 .isFalse();
 
         // Taking the server out of the project takes the management right with it.
         projectService.removeServer(project.getId(), projectServerId);
+        assertThat(policy.mayManageContacts(projectServerId, projectAdmin)).isFalse();
+    }
+
+    /**
+     * Being in a project is a grouping, not an authority. Handing everybody in it the
+     * contact lists of every server in it would make it one nobody granted.
+     */
+    @Test
+    void merelyBeingInTheProjectManagesNothing() {
+        var project = projectService.create("Payroll", null, "alice");
+        projectService.addMember(project.getId(), strangerId);
+        projectService.addServer(project.getId(), projectServerId);
+
+        Authentication member = signedIn(strangerId, "stranger");
+        assertThat(policy.mayManageContacts(projectServerId, member)).isFalse();
+
+        projectService.addAdmin(project.getId(), strangerId);
+        assertThat(policy.mayManageContacts(projectServerId, member)).isTrue();
+
+        // And giving the role back leaves them in the project with nothing extra.
+        projectService.removeAdmin(project.getId(), strangerId);
         assertThat(policy.mayManageContacts(projectServerId, member)).isFalse();
     }
 
@@ -174,7 +195,8 @@ class ServerAccessPolicyTest {
                 .andExpect(status().isForbidden())
                 // A refusal that says why, rather than an unexplained 403 or a 500.
                 .andExpect(jsonPath("$.title").value("Not allowed"))
-                .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("point of contact")));
+                .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("point of contact")))
+                .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("administrator of a project")));
 
         assertThat(contacts.findByServerIdOrderByAddedAtAscIdAsc(otherServerId)).isEmpty();
     }
