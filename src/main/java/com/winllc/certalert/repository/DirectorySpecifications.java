@@ -1,5 +1,7 @@
 package com.winllc.certalert.repository;
 
+import com.winllc.certalert.domain.CachedCertificate;
+import com.winllc.certalert.domain.CertificateRisk;
 import com.winllc.certalert.domain.CertificateStatus;
 import com.winllc.certalert.domain.DirectoryEntry;
 import com.winllc.certalert.domain.DirectoryServer;
@@ -248,6 +250,31 @@ public final class DirectorySpecifications {
                 .where(
                         builder.equal(contact.get("server"), root),
                         builder.or(matches.toArray(new Predicate[0]))));
+    }
+
+    /**
+     * Entries holding a certificate whose names are worth a second look - any flag, or one
+     * in particular.
+     *
+     * <p>An exists rather than a join, like the contacts: an entry with three flagged
+     * certificates is one row, not three, and the count beside the table has to agree.
+     */
+    public static <T extends DirectoryEntry> Specification<T> hasRiskyCertificate(CertificateRisk risk) {
+        return (root, query, builder) -> {
+            Subquery<Integer> subquery = query.subquery(Integer.class);
+            Root<CachedCertificate> certificate = subquery.from(CachedCertificate.class);
+            // A certificate hangs off one side or the other, and which one is decided by
+            // what is being searched rather than by trying both: the other side is a
+            // different entity, and comparing it to this root is not a false predicate but
+            // a meaningless one.
+            String owner = DirectoryServer.class.isAssignableFrom(root.getJavaType()) ? "server" : "user";
+            Predicate flagged = risk == null
+                    ? builder.isNotNull(certificate.get("riskFlags"))
+                    : builder.like(certificate.get("riskFlags"), "%" + risk.name() + "%");
+            return builder.exists(subquery
+                    .select(builder.literal(1))
+                    .where(builder.equal(certificate.get(owner), root), flagged));
+        };
     }
 
     /**

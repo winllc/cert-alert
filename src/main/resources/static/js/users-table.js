@@ -9,6 +9,12 @@
         var latestFrom = document.getElementById('latest-from');
         var latestTo = document.getElementById('latest-to');
         var pocName = document.getElementById('poc-name');
+        var riskFilter = document.getElementById('risk-filter');
+        // Arriving from the metrics page with a kind of risk already chosen.
+        var wantedRisk = new URLSearchParams(window.location.search).get('risk');
+        if (wantedRisk) {
+            riskFilter.value = wantedRisk;
+        }
         var applied = document.getElementById('applied-filters');
 
         function readFilters() {
@@ -52,6 +58,9 @@
             if (poc) {
                 filters.poc = poc;
             }
+            if (riskFilter.value) {
+                filters.risk = riskFilter.value;
+            }
             var project = ProjectFilter.selected();
             if (project) {
                 filters.projectId = project;
@@ -70,7 +79,7 @@
             endpoint: '/api/v1/datatables/users',
             statsUrl: '/api/v1/stats/users',
             readFilters: readFilters,
-            filterInputs: [certState, showExpired, withinDays, latestFrom, latestTo, pocName, projectFilter],
+            filterInputs: [certState, showExpired, withinDays, latestFrom, latestTo, pocName, riskFilter, projectFilter],
             // Sort by name, not by expiry: entries with no certificate have a null expiry,
             // and databases disagree about whether nulls sort first or last.
             order: [[1, 'asc']],

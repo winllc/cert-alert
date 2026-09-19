@@ -14,6 +14,12 @@
         var pocUserField = document.getElementById('poc-user-field');
         var pocUserLabel = document.getElementById('poc-user-label');
         var pocUserClear = document.getElementById('poc-user-clear');
+        var riskFilter = document.getElementById('risk-filter');
+        // Arriving from the metrics page with a kind of risk already chosen.
+        var wantedRisk = new URLSearchParams(window.location.search).get('risk');
+        if (wantedRisk) {
+            riskFilter.value = wantedRisk;
+        }
         var applied = document.getElementById('applied-filters');
 
         // Arriving from a person's row filters by them. The id travels rather than the
@@ -74,6 +80,9 @@
             if (contact) {
                 filters.poc = contact;
             }
+            if (riskFilter.value) {
+                filters.risk = riskFilter.value;
+            }
             var project = ProjectFilter.selected();
             if (project) {
                 filters.projectId = project;
@@ -92,7 +101,7 @@
             endpoint: '/api/v1/datatables/servers',
             statsUrl: '/api/v1/stats/servers',
             readFilters: readFilters,
-            filterInputs: [certState, showExpired, withinDays, latestFrom, latestTo, pocInput, pocColumn, projectFilter],
+            filterInputs: [certState, showExpired, withinDays, latestFrom, latestTo, pocInput, pocColumn, riskFilter, projectFilter],
             order: [[1, 'asc']],
             detailUrl: function (row) {
                 return '/api/v1/servers/' + row.id + '/certificates';

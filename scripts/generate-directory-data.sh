@@ -162,6 +162,24 @@ certificate() {
     printf '%s' "$body"
 }
 
+# The spread of subject alternative names, one slot per server by index. Most servers name
+# themselves and nothing else; the rest are the shapes worth finding - a wildcard, one high
+# enough up to cover other people's hosts, a batch of unrelated names, and a name with no
+# domain at all. A page that flags risky names needs some risky names to flag.
+#
+# san_for <index> <name> -> the subjectAltName argument for openssl
+san_for() {
+    local index="$1" name="$2"
+    case $((index % 11)) in
+        4)  printf 'DNS:%s.example.ic.gov,DNS:*.example.ic.gov' "$name" ;;
+        7)  printf 'DNS:%s.example.ic.gov,DNS:*.ic.gov' "$name" ;;
+        9)  printf 'DNS:%s.example.ic.gov,DNS:%s.other.ic.gov,DNS:%s.third.ic.gov,DNS:%s.fourth.ic.gov' \
+                "$name" "$name" "$name" "$name" ;;
+        10) printf 'DNS:%s.example.ic.gov,DNS:%s' "$name" "$name" ;;
+        *)  printf 'DNS:%s.example.ic.gov' "$name" ;;
+    esac
+}
+
 # The spread of expiry states, one slot per entry by index. The seventh gets no
 # certificate at all.
 #                  0: years out   1: warning    2: critical   3: expired    4,5: years out
@@ -383,7 +401,7 @@ while [ "$index" -lt "$SERVERS" ]; do
         "${ATO_STATUS[$((index % ${#ATO_STATUS[@]}))]}" \
         "${LIFECYCLE[$((index % ${#LIFECYCLE[@]}))]}" \
         "${ORGANIZATIONS[$((index % ${#ORGANIZATIONS[@]}))]}" \
-        "$(certificate_for "$index" "$name.example.ic.gov" "DNS:$name.example.ic.gov")"
+        "$(certificate_for "$index" "$name.example.ic.gov" "$(san_for "$index" "$name")")"
     index=$((index + 1))
     [ $((index % 500)) -eq 0 ] && log "  ...$index servers"
 done

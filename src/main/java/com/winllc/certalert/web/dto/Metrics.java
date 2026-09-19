@@ -17,6 +17,7 @@ import java.util.Map;
  * @param expiry what falls due, in windows
  * @param months issued against expiring, by month
  * @param notifications how many people were told, and how many deliveries were attempted
+ * @param risks how many certificates carry each kind of risky name, and how many carry any
  * @param projects how many projects there are
  */
 public record Metrics(
@@ -28,6 +29,7 @@ public record Metrics(
         Map<String, Long> expiry,
         List<MonthPoint> months,
         Map<String, Long> notifications,
+        Map<String, Long> risks,
         long projects) {
 
     /** @param label how it reads: "RSA 2048" */

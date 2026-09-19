@@ -56,7 +56,22 @@
                 </tr>
                 <tr th:replace="~{fragments/detail :: attribute('Signature', ${certificate.signatureAlgorithm})}"></tr>
                 <tr th:replace="~{fragments/detail :: attribute('Hash', ${certificate.hashAlgorithm})}"></tr>
-                <tr th:replace="~{fragments/detail :: attribute('SANs', ${certificate.subjectAlternativeNames})}"></tr>
+                <!--/* The names, how many there are, and what is worrying about them. */-->
+                <tr>
+                    <th>SANs</th>
+                    <td>
+                        <span th:if="${certificate.subjectAlternativeNames == null}" class="text-secondary">&mdash;</span>
+                        <span th:text="${certificate.subjectAlternativeNames}">names</span>
+                        <div class="text-secondary small" th:if="${certificate.subjectAltNameCount != null}"
+                             th:text="${certificate.subjectAltNameCount} + (${certificate.subjectAltNameCount} == 1
+                                      ? ' name' : ' names')">3 names</div>
+                        <div class="mt-1" th:if="${!certificate.risks.isEmpty()}">
+                            <span class="badge me-1" th:each="risk : ${certificate.risks}"
+                                  th:classappend="${risk.severe} ? 'bg-red-lt' : 'bg-yellow-lt'"
+                                  th:title="${risk.why()}" th:text="${risk.label()}">Wildcard</span>
+                        </div>
+                    </td>
+                </tr>
                 <tr>
                     <th>SHA-256</th>
                     <td class="mono" th:text="${certificate.sha256Fingerprint}">abc</td>

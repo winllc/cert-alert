@@ -252,6 +252,14 @@ cert-alert:
       after: 365d
       cron: "0 30 3 * * SUN"
 
+  # What a certificate is good for, as distinct from what state it is in. A wildcard covers
+  # hosts that do not exist yet; forty names means one key for forty things. Both are
+  # judgements rather than rules - a load balancer fronting forty services has forty names
+  # for a reason - so where "too many" starts is configuration.
+  risk:
+    max-subject-alt-names: 20
+    max-domains: 3
+
   # Telling the people concerned, as distinct from the alert channels below - those tell a
   # fixed list of operators about everything as it happens. A certificate crossing into a
   # bad state shows up on the page for each of its points of contact straight away; a daily

@@ -175,6 +175,39 @@
                         </div>
                     </div>
 
+                    <!--/* What certificates are good for, where that is worth a second
+                           look. A certificate can be more than one kind of risky, so these
+                           do not add up to the first row and are not meant to. */-->
+                    <div class="col-12 col-lg-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Risky names</h3>
+                                <span class="card-subtitle text-secondary ms-2">what a stolen key would cover</span>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table card-table table-vcenter">
+                                    <tbody>
+                                    <tr><td>Certificates flagged</td>
+                                        <td class="mono text-end" data-metric="riskAny">—</td></tr>
+                                    <tr><td>Wildcard</td>
+                                        <td class="mono text-end" data-metric="riskWildcard">—</td></tr>
+                                    <tr><td>Broad wildcard</td>
+                                        <td class="mono text-end" data-metric="riskBroadWildcard">—</td></tr>
+                                    <tr><td>Many names</td>
+                                        <td class="mono text-end" data-metric="riskManyNames">—</td></tr>
+                                    <tr><td>Many domains</td>
+                                        <td class="mono text-end" data-metric="riskManyDomains">—</td></tr>
+                                    <tr><td>Bare hostname</td>
+                                        <td class="mono text-end" data-metric="riskBareHostname">—</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="card-footer text-secondary small">
+                                <a href="/servers?risk=any">The servers holding them</a>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="col-12 col-lg-6">
                         <div class="card">
                             <div class="card-header">

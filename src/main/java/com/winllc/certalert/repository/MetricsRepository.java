@@ -70,6 +70,16 @@ public interface MetricsRepository extends JpaRepository<CachedCertificate, Long
     long countExpiringBetween(@Param("from") Instant from, @Param("to") Instant to);
 
     /** One algorithm and how many certificates use it. */
+    /**
+     * How many certificates carry each flag. Counted with a like per flag rather than by
+     * grouping, because the column holds a set: one certificate can be two kinds of risky
+     * and should be counted under both.
+     */
+    @Query("select count(c) from CachedCertificate c where c.riskFlags like concat('%', :flag, '%')")
+    long countByRisk(@Param("flag") String flag);
+
+    long countByRiskFlagsIsNotNull();
+
     interface AlgorithmCount {
         String getAlgorithm();
 

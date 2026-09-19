@@ -71,6 +71,22 @@
                         </div>
                     </div>
                     <div class="col-12 col-md-auto">
+                        <!--/* A certificate is risky for what it is good for, not for what
+                               state it is in: one key for a whole domain, or for forty
+                               things, or for a name that means something different on
+                               every network. */-->
+                        <label class="form-label" for="risk-filter">Risky names</label>
+                        <select id="risk-filter" class="form-select">
+                            <option value="">Any</option>
+                            <option value="any">Anything flagged</option>
+                            <option value="WILDCARD">Wildcard</option>
+                            <option value="BROAD_WILDCARD">Broad wildcard</option>
+                            <option value="MANY_NAMES">Many names</option>
+                            <option value="MANY_DOMAINS">Many domains</option>
+                            <option value="BARE_HOSTNAME">Bare hostname</option>
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-auto">
                         <label class="form-label" for="project-filter">Project</label>
                         <select id="project-filter" class="form-select">
                             <option value="">Any</option>

@@ -184,6 +184,26 @@
         });
     }
 
+    /**
+     * The names a certificate is good for, with what is worrying about them.
+     *
+     * <p>None of these is a fault in itself - a wildcard is a legitimate thing to issue - so
+     * they read as things to look at, with the reason on the badge rather than in a legend
+     * somewhere else.
+     */
+    function sanCell(certificate) {
+        var names = text(certificate.subjectAlternativeNames);
+        var count = certificate.subjectAltNameCount;
+        var risks = certificate.risks || [];
+        var badges = risks.map(function (risk) {
+            return '<span class="badge ' + (risk.severe ? 'bg-red-lt' : 'bg-yellow-lt') + ' me-1"'
+                + ' title="' + escapeHtml(risk.why) + '">' + escapeHtml(risk.label) + '</span>';
+        }).join('');
+        var summary = count ? '<div class="text-secondary small">' + count + ' name'
+            + (count === 1 ? '' : 's') + '</div>' : '';
+        return names + summary + (badges ? '<div class="mt-1">' + badges + '</div>' : '');
+    }
+
     /** Renders the cached details of one certificate as a definition-style block. */
     function certificateBlock(certificate) {
         var rows = [
@@ -197,7 +217,7 @@
                 .filter(Boolean).join(' '))],
             ['Signature', text(certificate.signatureAlgorithm)],
             ['Hash', text(certificate.hashAlgorithm)],
-            ['SANs', text(certificate.subjectAlternativeNames)],
+            ['SANs', sanCell(certificate)],
             ['SHA-256', '<span class="mono">' + text(certificate.sha256Fingerprint) + '</span>']
         ];
         var body = rows.map(function (row) {

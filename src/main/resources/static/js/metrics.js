@@ -109,6 +109,7 @@
                 var entries = metrics.entries || {};
                 var expiry = metrics.expiry || {};
                 var notifications = metrics.notifications || {};
+                var risks = metrics.risks || {};
 
                 stat('certificates', certificates.total);
                 stat('valid', certificates.VALID || 0);
@@ -128,6 +129,12 @@
                 stat('emailed', notifications.emailed);
                 stat('delivered', notifications.delivered);
                 stat('failed', notifications.failed);
+                stat('riskAny', risks.any);
+                stat('riskWildcard', risks.WILDCARD);
+                stat('riskBroadWildcard', risks.BROAD_WILDCARD);
+                stat('riskManyNames', risks.MANY_NAMES);
+                stat('riskManyDomains', risks.MANY_DOMAINS);
+                stat('riskBareHostname', risks.BARE_HOSTNAME);
 
                 $('#metrics-chart').html(chart(metrics.months));
                 $('#metrics-keys').html(distribution(

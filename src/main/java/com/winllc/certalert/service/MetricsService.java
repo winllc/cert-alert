@@ -1,6 +1,7 @@
 package com.winllc.certalert.service;
 
 import com.winllc.certalert.domain.AuditAction;
+import com.winllc.certalert.domain.CertificateRisk;
 import com.winllc.certalert.domain.CertificateStatus;
 import com.winllc.certalert.repository.AuditEventRepository;
 import com.winllc.certalert.repository.CachedCertificateRepository;
@@ -78,7 +79,21 @@ public class MetricsService {
                 expiryWindows(now),
                 monthlySeries(now),
                 notificationCounts(),
+                riskCounts(),
                 projects.count());
+    }
+
+    /**
+     * How many certificates carry each kind of risky name. A certificate can be more than
+     * one kind, so these do not add up to "any" and are not meant to.
+     */
+    private Map<String, Long> riskCounts() {
+        Map<String, Long> counts = new LinkedHashMap<>();
+        counts.put("any", metrics.countByRiskFlagsIsNotNull());
+        for (CertificateRisk risk : CertificateRisk.values()) {
+            counts.put(risk.name(), metrics.countByRisk(risk.name()));
+        }
+        return counts;
     }
 
     private Map<String, Long> certificateCounts() {

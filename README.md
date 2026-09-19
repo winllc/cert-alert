@@ -511,6 +511,36 @@ per-server question.
 Reading the list is open to anyone signed in, and says whether this person may edit *this*
 server, so the UI shows the controls only where they will work.
 
+### Risky names
+
+A certificate's subject alternative names say what it may be used for, and that is where the
+blast radius of one stolen key is decided. Each cached certificate is assessed as it is
+parsed, and what is worrying about it is kept on the row:
+
+| Flag | What it means |
+|---|---|
+| **Wildcard** | one key answers for every name under a domain, including hosts that do not exist yet |
+| **Broad wildcard** | a wildcard over a suffix everybody shares — `*.gov`, `*.ic.gov`, a bare `*` |
+| **Many names** | more than `cert-alert.risk.max-subject-alt-names` (20) |
+| **Many domains** | names spanning more than `cert-alert.risk.max-domains` (3) registrable domains: what it is for is unclear |
+| **Bare hostname** | a name with no domain — `web01`, `localhost` — which resolves differently on every network |
+
+None of these is a fault in itself, which is why they are flags to look at rather than alerts
+to send: a wildcard is a legitimate thing to issue, and a load balancer fronting forty
+services has forty names for a reason. Both thresholds are configuration for exactly that
+reason.
+
+They show up in three places: on the certificate wherever one is rendered — the expanded row
+and the details page — as badges carrying the reason; as a filter on both search tables
+(`?risk=any`, or one flag by name); and counted on the metrics page, which links through to
+the servers holding them.
+
+The count of names is taken from the certificate rather than from the stored list, because
+that list is truncated when it is long — by exactly the names that make a certificate worth
+flagging. The assessment happens at parse time, so a sweep is what refreshes it; the
+migration that added the columns backfills what was already cached from the stored names,
+well enough to find the wildcards before the next sweep runs.
+
 ### The audit trail
 
 Every entry carries a history: what happened to it, when, and who did it. It shows up in

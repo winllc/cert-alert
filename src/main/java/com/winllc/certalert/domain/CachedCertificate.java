@@ -15,6 +15,11 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.SequenceGenerator;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.EnumSet;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Certificate details cached from the directory, so searches and expiry reporting never
@@ -100,6 +105,22 @@ public class CachedCertificate {
 
     @Column(name = "subject_alternative_names", length = 2000)
     private String subjectAlternativeNames;
+
+    /**
+     * How many names the certificate carries, which is not how many are stored: the list is
+     * truncated when it is long, and the count is the honest one from the certificate.
+     */
+    @Column(name = "san_count")
+    private Integer subjectAltNameCount;
+
+    /**
+     * What is worrying about those names, as {@link CertificateRisk} names separated by
+     * commas, or null where nothing is. A string rather than a table because it is read with
+     * the row every time and written once, and because "is there anything" - the question
+     * the tables ask - is then a null check.
+     */
+    @Column(name = "risk_flags", length = 200)
+    private String riskFlags;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 32)
@@ -209,6 +230,45 @@ public class CachedCertificate {
 
     public String getSubjectAlternativeNames() {
         return subjectAlternativeNames;
+    }
+
+    /**
+     * Records what the names are and what is worrying about them. Called with the
+     * certificate in hand, because the stored list may be truncated and the count may not.
+     */
+    public void describeNames(int count, Collection<CertificateRisk> risks) {
+        this.subjectAltNameCount = count;
+        this.riskFlags = risks == null || risks.isEmpty()
+                ? null
+                : risks.stream().map(Enum::name).sorted().collect(Collectors.joining(","));
+    }
+
+    public Integer getSubjectAltNameCount() {
+        return subjectAltNameCount;
+    }
+
+    /** What is worrying about the names, or empty where nothing is. */
+    public Set<CertificateRisk> getRisks() {
+        if (riskFlags == null || riskFlags.isBlank()) {
+            return Set.of();
+        }
+        return Arrays.stream(riskFlags.split(","))
+                .map(String::trim)
+                .filter(flag -> !flag.isEmpty())
+                .map(flag -> {
+                    try {
+                        return CertificateRisk.valueOf(flag);
+                    } catch (IllegalArgumentException e) {
+                        // A flag written by a later version of this application.
+                        return null;
+                    }
+                })
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toCollection(() -> EnumSet.noneOf(CertificateRisk.class)));
+    }
+
+    public boolean isRisky() {
+        return riskFlags != null && !riskFlags.isBlank();
     }
 
     public CertificateStatus getStatus() {

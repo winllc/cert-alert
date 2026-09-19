@@ -1,5 +1,6 @@
 package com.winllc.certalert.service;
 
+import com.winllc.certalert.config.RiskProperties;
 import com.winllc.certalert.domain.CachedCertificate;
 import java.io.ByteArrayInputStream;
 import java.security.PublicKey;
@@ -34,6 +35,12 @@ public class CertificateParser {
     private static final int SAN_TYPE_DNS = 2;
     private static final int MAX_SAN_LENGTH = 2000;
 
+    private final RiskProperties risk;
+
+    public CertificateParser(RiskProperties risk) {
+        this.risk = risk;
+    }
+
     /**
      * Parses one certificate.
      *
@@ -41,7 +48,9 @@ public class CertificateParser {
      */
     public CachedCertificate parse(byte[] der, Instant cachedAt) {
         X509Certificate certificate = readCertificate(der);
-        return new CachedCertificate(
+        List<String> dnsNames = dnsNames(certificate);
+
+        CachedCertificate cached = new CachedCertificate(
                 CertificateFingerprints.sha256(der),
                 certificate.getSerialNumber().toString(16),
                 certificate.getSubjectX500Principal().getName(),
@@ -52,8 +61,16 @@ public class CertificateParser {
                 CertificateAlgorithms.hashAlgorithm(certificate),
                 certificate.getPublicKey().getAlgorithm(),
                 keySize(certificate.getPublicKey()),
-                subjectAlternativeNames(certificate),
+                subjectAlternativeNames(dnsNames),
                 cachedAt);
+
+        // Assessed from the certificate rather than from what was stored: the stored list is
+        // truncated when it is long, and a count taken from it would be short by exactly the
+        // names that make it worth flagging.
+        SubjectAltNames.Assessment assessment =
+                SubjectAltNames.assess(dnsNames, risk.getMaxSubjectAltNames(), risk.getMaxDomains());
+        cached.describeNames(assessment.count(), assessment.risks());
+        return cached;
     }
 
     private X509Certificate readCertificate(byte[] der) {
@@ -74,11 +91,20 @@ public class CertificateParser {
         };
     }
 
-    private String subjectAlternativeNames(X509Certificate certificate) {
+    private String subjectAlternativeNames(List<String> dnsNames) {
+        if (dnsNames.isEmpty()) {
+            return null;
+        }
+        String joined = String.join(", ", dnsNames);
+        return joined.length() <= MAX_SAN_LENGTH ? joined : joined.substring(0, MAX_SAN_LENGTH - 3) + "...";
+    }
+
+    /** The DNS names the certificate is good for, in the order it carries them. */
+    private List<String> dnsNames(X509Certificate certificate) {
         try {
             Collection<List<?>> names = certificate.getSubjectAlternativeNames();
             if (names == null) {
-                return null;
+                return List.of();
             }
             List<String> dnsNames = new ArrayList<>();
             for (List<?> entry : names) {
@@ -86,14 +112,10 @@ public class CertificateParser {
                     dnsNames.add(String.valueOf(entry.get(1)));
                 }
             }
-            if (dnsNames.isEmpty()) {
-                return null;
-            }
-            String joined = String.join(", ", dnsNames);
-            return joined.length() <= MAX_SAN_LENGTH ? joined : joined.substring(0, MAX_SAN_LENGTH - 3) + "...";
+            return dnsNames;
         } catch (CertificateParsingException e) {
             log.debug("Could not parse subject alternative names", e);
-            return null;
+            return List.of();
         }
     }
 }

@@ -3,7 +3,9 @@ package com.winllc.certalert.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.winllc.certalert.config.RiskProperties;
 import com.winllc.certalert.domain.CachedCertificate;
+import com.winllc.certalert.domain.CertificateRisk;
 import com.winllc.certalert.support.TestCertificates;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -15,7 +17,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 
 class CertificateParserTest {
 
-    private final CertificateParser parser = new CertificateParser();
+    private final CertificateParser parser = new CertificateParser(new RiskProperties());
 
     @Test
     void readsTheDetailsWorthCaching() {
@@ -122,5 +124,51 @@ class CertificateParserTest {
         assertThatThrownBy(() -> parser.parse(notACertificate, Instant.now()))
                 .isInstanceOf(CertificateParseException.class)
                 .hasMessageContaining("readable X.509 certificate");
+    }
+
+    // ---------------------------------------------------------------------------------
+    // What the names say
+    // ---------------------------------------------------------------------------------
+
+    /** The assessment is made from the certificate, and cached with it. */
+    @Test
+    void cachesWhatIsWorryingAboutTheNames() {
+        byte[] der = TestCertificates.withNames("web01.example.gov", "web01.example.gov", "*.example.gov");
+
+        CachedCertificate cached = parser.parse(der, Instant.now());
+
+        assertThat(cached.getSubjectAltNameCount()).isEqualTo(2);
+        assertThat(cached.getRisks()).containsExactly(CertificateRisk.WILDCARD);
+        assertThat(cached.isRisky()).isTrue();
+    }
+
+    @Test
+    void anOrdinaryCertificateCarriesNoFlags() {
+        byte[] der = TestCertificates.withNames("web01.example.gov", "web01.example.gov", "www.example.gov");
+
+        CachedCertificate cached = parser.parse(der, Instant.now());
+
+        assertThat(cached.getSubjectAltNameCount()).isEqualTo(2);
+        assertThat(cached.getRisks()).isEmpty();
+        assertThat(cached.isRisky()).isFalse();
+    }
+
+    /**
+     * The stored list is truncated when it is long; the count is not. A count taken from
+     * the stored string would be short by exactly the names that make it worth flagging.
+     */
+    @Test
+    void theCountIsHonestEvenWhenTheListIsTruncated() {
+        String[] names = new String[120];
+        for (int i = 0; i < names.length; i++) {
+            names[i] = "host%03d.verylongdomainname.example.gov".formatted(i);
+        }
+        byte[] der = TestCertificates.withNames(names[0], names);
+
+        CachedCertificate cached = parser.parse(der, Instant.now());
+
+        assertThat(cached.getSubjectAlternativeNames()).endsWith("...");
+        assertThat(cached.getSubjectAltNameCount()).isEqualTo(120);
+        assertThat(cached.getRisks()).contains(CertificateRisk.MANY_NAMES);
     }
 }

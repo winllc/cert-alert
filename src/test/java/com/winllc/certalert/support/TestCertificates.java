@@ -82,6 +82,26 @@ public final class TestCertificates {
         }
     }
 
+    /**
+     * A certificate good for several names, for the tests about what those names say: a
+     * wildcard, a batch of hosts, a name with no domain.
+     */
+    public static byte[] withNames(String commonName, String... dnsNames) {
+        try {
+            Instant now = Instant.now();
+            return certificate(
+                            commonName,
+                            now.minus(Duration.ofDays(1)),
+                            now.plus(Duration.ofDays(365)),
+                            "SHA256withRSA",
+                            KEY_PAIR,
+                            dnsNames)
+                    .getEncoded();
+        } catch (CertificateEncodingException e) {
+            throw new IllegalStateException("Could not encode test certificate", e);
+        }
+    }
+
     /** A key pair of a given kind, for the same reason. */
     public static KeyPair keyPair(String algorithm, int size) {
         try {
@@ -95,6 +115,16 @@ public final class TestCertificates {
 
     private static X509Certificate certificate(
             String commonName, Instant notBefore, Instant notAfter, String signatureAlgorithm, KeyPair keyPair) {
+        return certificate(commonName, notBefore, notAfter, signatureAlgorithm, keyPair, new String[] {commonName});
+    }
+
+    private static X509Certificate certificate(
+            String commonName,
+            Instant notBefore,
+            Instant notAfter,
+            String signatureAlgorithm,
+            KeyPair keyPair,
+            String[] dnsNames) {
         try {
             X500Name name = new X500Name("CN=" + commonName);
             JcaX509v3CertificateBuilder builder = new JcaX509v3CertificateBuilder(
@@ -104,10 +134,11 @@ public final class TestCertificates {
                     Date.from(notAfter),
                     name,
                     keyPair.getPublic());
-            builder.addExtension(
-                    Extension.subjectAlternativeName,
-                    false,
-                    new GeneralNames(new GeneralName(GeneralName.dNSName, commonName)));
+            GeneralName[] names = new GeneralName[dnsNames.length];
+            for (int i = 0; i < dnsNames.length; i++) {
+                names[i] = new GeneralName(GeneralName.dNSName, dnsNames[i]);
+            }
+            builder.addExtension(Extension.subjectAlternativeName, false, new GeneralNames(names));
             ContentSigner signer = new JcaContentSignerBuilder(signatureAlgorithm)
                     .setProvider(BouncyCastleProvider.PROVIDER_NAME)
                     .build(keyPair.getPrivate());

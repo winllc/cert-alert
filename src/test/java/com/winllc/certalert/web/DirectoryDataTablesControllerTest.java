@@ -1,11 +1,13 @@
 package com.winllc.certalert.web;
 
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.winllc.certalert.domain.CachedCertificate;
+import com.winllc.certalert.domain.CertificateRisk;
 import com.winllc.certalert.domain.CertificateStatus;
 import com.winllc.certalert.domain.DirectoryServer;
 import com.winllc.certalert.domain.DirectoryUser;
@@ -436,6 +438,89 @@ class DirectoryDataTablesControllerTest {
     /** The day this many days from now, as the date inputs send it. */
     private String day(int daysFromNow) {
         return LocalDate.ofInstant(Instant.now().plus(Duration.ofDays(daysFromNow)), ZoneOffset.UTC).toString();
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Certificates whose names are worth a second look
+    // ---------------------------------------------------------------------------------
+
+    /** What a certificate is good for, as distinct from what state it is in. */
+    @Test
+    void serversAreFoundByWhatTheirCertificatesAreGoodFor() throws Exception {
+        Instant now = Instant.now();
+        CachedCertificate wildcard = certificate("CN=*.example.gov", now.plus(Duration.ofDays(90)), now);
+        wildcard.describeNames(2, List.of(CertificateRisk.WILDCARD));
+        CachedCertificate sprawling = certificate("CN=batch", now.plus(Duration.ofDays(90)), now);
+        sprawling.describeNames(40, List.of(CertificateRisk.MANY_NAMES, CertificateRisk.MANY_DOMAINS));
+
+        serverRepository.save(server("cn=wild01,ou=servers", "wild01", "wild01.example.gov",
+                List.of("alice@example.gov"), wildcard));
+        serverRepository.save(server("cn=batch01,ou=servers", "batch01", "batch01.example.gov",
+                List.of("alice@example.gov"), sprawling));
+
+        mockMvc.perform(post(SERVERS + "?risk=any").contentType(MediaType.APPLICATION_JSON)
+                        .content(serversRequest(0, 10, null))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recordsFiltered").value(2));
+
+        mockMvc.perform(post(SERVERS + "?risk=WILDCARD").contentType(MediaType.APPLICATION_JSON)
+                        .content(serversRequest(0, 10, null))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recordsFiltered").value(1))
+                .andExpect(jsonPath("$.data[0].commonName").value("wild01"));
+
+        mockMvc.perform(post(SERVERS + "?risk=MANY_DOMAINS").contentType(MediaType.APPLICATION_JSON)
+                        .content(serversRequest(0, 10, null))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recordsFiltered").value(1))
+                .andExpect(jsonPath("$.data[0].commonName").value("batch01"));
+    }
+
+    /** An entry with two flagged certificates is one row, and the count has to agree. */
+    @Test
+    void anEntryWithSeveralFlaggedCertificatesIsCountedOnce() throws Exception {
+        Instant now = Instant.now();
+        CachedCertificate first = certificate("CN=*.a.example.gov", now.plus(Duration.ofDays(90)), now);
+        first.describeNames(1, List.of(CertificateRisk.WILDCARD));
+        CachedCertificate second = certificate("CN=*.b.example.gov", now.plus(Duration.ofDays(120)), now);
+        second.describeNames(1, List.of(CertificateRisk.WILDCARD));
+        serverRepository.save(server("cn=twice01,ou=servers", "twice01", "twice01.example.gov",
+                List.of("alice@example.gov"), first, second));
+
+        mockMvc.perform(post(SERVERS + "?risk=WILDCARD").contentType(MediaType.APPLICATION_JSON)
+                        .content(serversRequest(0, 10, null))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recordsFiltered").value(1));
+    }
+
+    @Test
+    void aKindOfRiskThatDoesNotExistIsARejectedRequest() throws Exception {
+        mockMvc.perform(post(SERVERS + "?risk=SOMETHING_ELSE").contentType(MediaType.APPLICATION_JSON)
+                        .content(serversRequest(0, 10, null))
+                        .with(csrf()))
+                .andExpect(status().isBadRequest());
+    }
+
+    /** The rows carry the flags and the honest count, which is what the page prints. */
+    @Test
+    void theRowsSayWhatIsWorryingAboutTheNames() throws Exception {
+        Instant now = Instant.now();
+        CachedCertificate wildcard = certificate("CN=*.example.gov", now.plus(Duration.ofDays(90)), now);
+        wildcard.describeNames(3, List.of(CertificateRisk.WILDCARD));
+        Long serverId = serverRepository.save(server("cn=wild02,ou=servers", "wild02", "wild02.example.gov",
+                        List.of("alice@example.gov"), wildcard))
+                .getId();
+
+        mockMvc.perform(get("/api/v1/servers/{id}/certificates", serverId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].subjectAltNameCount").value(3))
+                .andExpect(jsonPath("$[0].risks[0].name").value("WILDCARD"))
+                .andExpect(jsonPath("$[0].risks[0].label").value("Wildcard"))
+                .andExpect(jsonPath("$[0].risks[0].severe").value(false));
     }
 
     @Test

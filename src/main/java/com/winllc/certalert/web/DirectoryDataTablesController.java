@@ -1,5 +1,6 @@
 package com.winllc.certalert.web;
 
+import com.winllc.certalert.domain.CertificateRisk;
 import com.winllc.certalert.domain.CertificateStatus;
 import com.winllc.certalert.domain.DirectoryEntry;
 import com.winllc.certalert.domain.DirectoryServer;
@@ -17,6 +18,7 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import org.springframework.data.jpa.datatables.mapping.DataTablesInput;
@@ -71,6 +73,7 @@ public class DirectoryDataTablesController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate latestExpiryFrom,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate latestExpiryTo,
             @RequestParam(required = false) String poc,
+            @RequestParam(required = false) String risk,
             @RequestParam(required = false) Long projectId) {
 
         Specification<DirectoryUser> filter =
@@ -79,6 +82,7 @@ public class DirectoryDataTablesController {
         // On this table a point of contact is what somebody is, not what they have: the
         // search is over the values a serverPOC could name them by.
         filter = filter.and(DirectorySpecifications.namedAsPointOfContactBy(poc));
+        filter = filter.and(riskFilter(risk));
         filter = filter.and(DirectorySpecifications.inProject(projectId, "members"));
         return userRepository.findAll(input, filter, null, DirectoryUserRow::from);
     }
@@ -96,12 +100,14 @@ public class DirectoryDataTablesController {
             @RequestParam(required = false) String poc,
             @RequestParam(required = false) String pocEmail,
             @RequestParam(required = false) Long pocUserId,
+            @RequestParam(required = false) String risk,
             @RequestParam(required = false) Long projectId) {
 
         Specification<DirectoryServer> filter =
                 certificateFilter(certificateStatus, expired, hideExpired, expiringWithinDays, hasCertificates);
         filter = filter.and(latestExpiryFilter(latestExpiryFrom, latestExpiryTo));
         filter = filter.and(pointOfContactFilter(poc != null ? poc : pocEmail, pocUserId));
+        filter = filter.and(riskFilter(risk));
         filter = filter.and(DirectorySpecifications.inProject(projectId, "servers"));
 
         return withContactCounts(serverRepository.findAll(input, filter, null, DirectoryServerRow::from));
@@ -158,6 +164,25 @@ public class DirectoryDataTablesController {
      * into a form means by them: the upper bound is the start of the following day, so a
      * certificate expiring at any hour of it is still inside the range.
      */
+    /**
+     * Entries holding a certificate whose names are worth a second look. {@code any} is
+     * every flag; a flag's own name is that one.
+     */
+    private <T extends DirectoryEntry> Specification<T> riskFilter(String risk) {
+        if (risk == null || risk.isBlank()) {
+            return DirectorySpecifications.unfiltered();
+        }
+        if (risk.equalsIgnoreCase("any")) {
+            return DirectorySpecifications.hasRiskyCertificate(null);
+        }
+        try {
+            return DirectorySpecifications.hasRiskyCertificate(
+                    CertificateRisk.valueOf(risk.trim().toUpperCase(Locale.ROOT)));
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("'%s' is not a kind of certificate risk".formatted(risk));
+        }
+    }
+
     private <T extends DirectoryEntry> Specification<T> latestExpiryFilter(LocalDate from, LocalDate to) {
         return DirectorySpecifications.latestExpiryBetween(
                 from == null ? null : from.atStartOfDay(ZoneOffset.UTC).toInstant(),

@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.winllc.certalert.domain.CachedCertificate;
+import com.winllc.certalert.domain.CertificateRisk;
 import com.winllc.certalert.domain.CertificateStatus;
 import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.repository.CachedCertificateRepository;
@@ -15,6 +16,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -76,6 +78,10 @@ class MetricsTest {
                 now.minus(Duration.ofDays(400)), now.minus(Duration.ofDays(10)), CertificateStatus.EXPIRED));
         holder.addCertificate(certificate("CN=d", "EC", 384, "SHA-384", "SHA384withECDSA",
                 now.minus(Duration.ofDays(30)), now.plus(Duration.ofDays(60)), CertificateStatus.VALID));
+        // Two of them are good for more than they should be, one of them doubly so.
+        holder.getCertificates().get(0).describeNames(2, List.of(CertificateRisk.WILDCARD));
+        holder.getCertificates().get(1).describeNames(
+                40, List.of(CertificateRisk.WILDCARD, CertificateRisk.BROAD_WILDCARD, CertificateRisk.MANY_NAMES));
         holder.markSynced(now);
         holder.refreshCertificateSummary();
         userRepository.save(holder);
@@ -150,6 +156,18 @@ class MetricsTest {
                 .andExpect(jsonPath("$.entries.users").value(2))
                 .andExpect(jsonPath("$.entries.usersWithoutCertificate").value(1))
                 .andExpect(jsonPath("$.entries.servers").value(0));
+    }
+
+    /** How many certificates are good for more than they should be. */
+    @Test
+    void countsWhatIsWorryingAboutTheNames() throws Exception {
+        mockMvc.perform(get("/api/v1/metrics"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.risks.any").value(2))
+                .andExpect(jsonPath("$.risks.WILDCARD").value(2))
+                .andExpect(jsonPath("$.risks.BROAD_WILDCARD").value(1))
+                .andExpect(jsonPath("$.risks.MANY_NAMES").value(1))
+                .andExpect(jsonPath("$.risks.BARE_HOSTNAME").value(0));
     }
 
     @Test
