@@ -4,6 +4,7 @@
 
     $(function () {
         var certState = document.getElementById('cert-state');
+        var showExpired = document.getElementById('show-expired');
         var withinDays = document.getElementById('within-days');
         var latestFrom = document.getElementById('latest-from');
         var latestTo = document.getElementById('latest-to');
@@ -50,6 +51,12 @@
                 default:
                     break;
             }
+            // Asking for expired entries outright overrides hiding them.
+            var askedForExpired = certState.value === 'expired';
+            showExpired.disabled = askedForExpired;
+            if (!showExpired.checked && !askedForExpired) {
+                filters.hideExpired = 'true';
+            }
             var days = withinDays.value.trim();
             if (days) {
                 filters.expiringWithinDays = days;
@@ -85,7 +92,7 @@
             endpoint: '/api/v1/datatables/servers',
             statsUrl: '/api/v1/stats/servers',
             readFilters: readFilters,
-            filterInputs: [certState, withinDays, latestFrom, latestTo, pocInput, pocColumn, projectFilter],
+            filterInputs: [certState, showExpired, withinDays, latestFrom, latestTo, pocInput, pocColumn, projectFilter],
             order: [[1, 'asc']],
             detailUrl: function (row) {
                 return '/api/v1/servers/' + row.id + '/certificates';
@@ -98,6 +105,8 @@
             },
             entryFields: [
                 ['DN', 'dn'],
+                ['URL', 'serverUrl'],
+                ['IP address', 'icServerAddress'],
                 ['ATO status', 'atoStatus'],
                 ['Duty organization', 'dutyOrganization'],
                 ['Description', 'description'],
@@ -119,8 +128,9 @@
                             + CertAlert.escapeHtml(value) + '</a>'
                         : CertAlert.text(null);
                 }},
-                {data: 'serverUrl', className: 'mono', render: renderText},
-                {data: 'icServerAddress', className: 'mono', render: renderText},
+                // Hidden, not dropped: still searchable, and shown in the expanded row.
+                {data: 'serverUrl', visible: false},
+                {data: 'icServerAddress', visible: false},
                 // What the directory publishes, plus a count of what was added here. The
                 // editable list is in the expanded row; this is only the signal that it
                 // has something in it.

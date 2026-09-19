@@ -65,6 +65,7 @@ public class DirectoryDataTablesController {
             @Valid @RequestBody DataTablesInput input,
             @RequestParam(required = false) List<CertificateStatus> certificateStatus,
             @RequestParam(required = false) Boolean expired,
+            @RequestParam(required = false) boolean hideExpired,
             @RequestParam(required = false) Integer expiringWithinDays,
             @RequestParam(required = false) Boolean hasCertificates,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate latestExpiryFrom,
@@ -73,7 +74,7 @@ public class DirectoryDataTablesController {
             @RequestParam(required = false) Long projectId) {
 
         Specification<DirectoryUser> filter =
-                certificateFilter(certificateStatus, expired, expiringWithinDays, hasCertificates);
+                certificateFilter(certificateStatus, expired, hideExpired, expiringWithinDays, hasCertificates);
         filter = filter.and(latestExpiryFilter(latestExpiryFrom, latestExpiryTo));
         // On this table a point of contact is what somebody is, not what they have: the
         // search is over the values a serverPOC could name them by.
@@ -87,6 +88,7 @@ public class DirectoryDataTablesController {
             @Valid @RequestBody DataTablesInput input,
             @RequestParam(required = false) List<CertificateStatus> certificateStatus,
             @RequestParam(required = false) Boolean expired,
+            @RequestParam(required = false) boolean hideExpired,
             @RequestParam(required = false) Integer expiringWithinDays,
             @RequestParam(required = false) Boolean hasCertificates,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate latestExpiryFrom,
@@ -97,7 +99,7 @@ public class DirectoryDataTablesController {
             @RequestParam(required = false) Long projectId) {
 
         Specification<DirectoryServer> filter =
-                certificateFilter(certificateStatus, expired, expiringWithinDays, hasCertificates);
+                certificateFilter(certificateStatus, expired, hideExpired, expiringWithinDays, hasCertificates);
         filter = filter.and(latestExpiryFilter(latestExpiryFrom, latestExpiryTo));
         filter = filter.and(pointOfContactFilter(poc != null ? poc : pocEmail, pocUserId));
         filter = filter.and(DirectorySpecifications.inProject(projectId, "servers"));
@@ -163,7 +165,11 @@ public class DirectoryDataTablesController {
     }
 
     private <T extends DirectoryEntry> Specification<T> certificateFilter(
-            List<CertificateStatus> statuses, Boolean expired, Integer expiringWithinDays, Boolean hasCertificates) {
+            List<CertificateStatus> statuses,
+            Boolean expired,
+            boolean hideExpired,
+            Integer expiringWithinDays,
+            Boolean hasCertificates) {
 
         List<Specification<T>> parts = new ArrayList<>();
         if (statuses != null && !statuses.isEmpty()) {
@@ -171,6 +177,9 @@ public class DirectoryDataTablesController {
         }
         if (expired != null) {
             parts.add(DirectorySpecifications.expired(expired));
+        }
+        if (hideExpired) {
+            parts.add(DirectorySpecifications.withoutExpired());
         }
         if (expiringWithinDays != null && expiringWithinDays > 0) {
             parts.add(DirectorySpecifications.expiringWithinDays(expiringWithinDays, Instant.now(clock)));

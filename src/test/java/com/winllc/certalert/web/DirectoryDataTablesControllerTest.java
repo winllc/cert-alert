@@ -156,6 +156,17 @@ class DirectoryDataTablesControllerTest {
     }
 
     @Test
+    void hideExpiredKeepsCertificatelessEntities() throws Exception {
+        mockMvc.perform(post(USERS + "?hideExpired=true").contentType(MediaType.APPLICATION_JSON)
+                        .content(usersRequest(0, 10, null, null))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                // alice, carol and dave; only bob holds an expired certificate.
+                .andExpect(jsonPath("$.recordsFiltered").value(3))
+                .andExpect(jsonPath("$.data[?(@.uid == 'bob')]").isEmpty());
+    }
+
+    @Test
     void statusFilterSelectsASingleState() throws Exception {
         mockMvc.perform(post(USERS + "?certificateStatus=EXPIRING_SOON").contentType(MediaType.APPLICATION_JSON)
                         .content(usersRequest(0, 10, null, null))

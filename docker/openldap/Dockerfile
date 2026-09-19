@@ -20,7 +20,11 @@ COPY docker/openldap/bootstrap/00-base.ldif /bootstrap/00-base.ldif
 COPY docker/openldap/entrypoint.sh docker/openldap/healthcheck.sh /usr/local/bin/
 COPY scripts/generate-directory-data.sh /usr/local/bin/generate-directory-data.sh
 
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/healthcheck.sh \
+# CRLF from a Windows checkout would break every one of these; see .gitattributes.
+RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh /usr/local/bin/healthcheck.sh \
+        /usr/local/bin/generate-directory-data.sh /etc/ldap/slapd.conf.template \
+        /etc/ldap/schema/ic-fsd.schema /bootstrap/00-base.ldif \
+    && chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/healthcheck.sh \
         /usr/local/bin/generate-directory-data.sh \
     && mkdir -p /var/lib/ldap /var/lib/ldap-bootstrap \
     && chown -R openldap:openldap /var/lib/ldap
