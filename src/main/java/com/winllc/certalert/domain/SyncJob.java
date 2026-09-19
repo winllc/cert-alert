@@ -13,5 +13,8 @@ public enum SyncJob {
     REFRESH,
 
     /** Removes entries the directory no longer publishes. */
-    PRUNE
+    PRUNE,
+
+    /** Asks the issuing authorities which cached certificates have been revoked. */
+    REVOCATION
 }

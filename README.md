@@ -620,6 +620,68 @@ contact, an administrator of a project it belongs to, or an administrator. Set
 `cert-alert.probe.enabled: false` to remove it entirely on a network where reaching a
 server from here is not something this application should be doing.
 
+### Revocation
+
+Everything else here reads a date off a certificate. Revocation is the one fact about a
+certificate that the certificate does not carry: it is a decision made by the issuing
+authority, published somewhere else, and nothing about the certificate changes when it
+happens. A key reported stolen in March is still valid until 2028 as far as every other
+column in the cache is concerned.
+
+So there is a job of its own, after both sweeps:
+
+```yaml
+cert-alert:
+  revocation:
+    enabled: true
+    cron: "0 30 5 * * *"
+    issuer-directory: /etc/cert-alert/issuers
+```
+
+It asks about **the certificates an entry currently holds** — the pair, for a person. An
+authority revoking one that has already been replaced is not news, and asking about every
+superseded certificate a directory has ever held would multiply the work by however long it
+has been running.
+
+**CRL is what the scheduled job uses**, because of how the two mechanisms scale. A CRL is
+one download that answers for every certificate an authority ever issued, and a directory of
+a hundred thousand entries is issued by a handful of authorities — so it is a handful of
+downloads, held for as long as each list says it is good for (`nextUpdate`, capped by
+`crl-cache-ttl`). OCSP is one request per certificate; it gives a fresher answer about one
+certificate, which is the right trade when the question is about one certificate and the
+wrong one when it is about two hundred thousand. Distribution points are tried in the order
+the certificate lists them, and `ldap://` ones work — which is how a PKI with no route to
+the internet publishes its lists.
+
+| Status | What it means |
+|---|---|
+| **Revoked** | the authority lists this serial. Whatever the dates say, it should not be in use |
+| **Not revoked** | the authority was asked and does not list it |
+| **Unknown** | asked, and no answer: nothing at the distribution point, a list that would not parse, or a certificate that names nowhere to ask |
+| **Not checked** | never asked |
+
+**Nothing here ever reports GOOD because it failed to find out.** An unanswered question is
+not a negative answer, and recording it as one is how a revoked certificate stays in
+service. That is also why *Not checked* is shown on every certificate rather than hidden: an
+absent row reads like a clean bill of health.
+
+`issuer-directory` is a directory of CA certificates, PEM or DER. Two things need them: a
+CRL is signed by its issuer, so telling the authority's own list from whatever answered the
+URL needs the issuer's certificate; and OCSP names a certificate by hashes of its issuer's
+name and key, which only the issuer's certificate carries. With none configured, CRLs are
+still used and every result says `(signature not verified)` — set `allow-unverified-crl:
+false` to have those count as *Unknown* instead.
+
+A certificate that turns out to be revoked is recorded against its entry in the audit trail
+and its contacts are told, once — not nightly for as long as it stays revoked. Where to ask
+is read out of the certificate when it is parsed and cached with it, so rows cached before
+this feature carry no endpoints until a sweep re-reads them.
+
+```
+GET  /api/v1/revocation        the counts, and whether OCSP is possible here
+POST /api/v1/revocation/check  run it now (admin)
+```
+
 ### The audit trail
 
 Every entry carries a history: what happened to it, when, and who did it. It shows up in
@@ -895,6 +957,8 @@ for.
 | `GET`  | `/api/v1/users/{id}/certificates`   | Cached certificate detail for a person   |
 | `GET`  | `/api/v1/servers/{id}/certificates` | Cached certificate detail for a server   |
 | `POST` | `/api/v1/servers/{id}/probe?port=`  | Ask the endpoint what it is serving       |
+| `GET`  | `/api/v1/revocation`                | Revocation counts, and whether OCSP works |
+| `POST` | `/api/v1/revocation/check`          | Run the revocation check now              |
 | `GET`  | `/api/v1/servers/{id}/contacts`     | Both lists of points of contact          |
 | `POST` | `/api/v1/servers/{id}/contacts`     | Add one: `{"userId":…}` or `{"email":…}` |
 | `DELETE` | `/api/v1/servers/{id}/contacts/{contactId}` | Remove one                   |
@@ -927,14 +991,16 @@ directory connection.
 
 ## The scheduled jobs
 
-Four on the directory, plus one that trims the audit trail. All are evaluated in UTC; the
-first four are configured under `cert-alert.ldap` and the last under `cert-alert.audit`.
+Four on the directory, one that asks the issuing authorities, and one that trims the audit
+trail. All are evaluated in UTC; the first four are configured under `cert-alert.ldap`,
+revocation under `cert-alert.revocation` and the trim under `cert-alert.audit`.
 
 | Job         | Default cron      | What it does                                             |
 |-------------|-------------------|----------------------------------------------------------|
 | **users**   | `0 0 2 * * *`     | Scrapes IC Persons                                        |
 | **servers** | `0 0 4 * * *`     | Scrapes IC Non-Person Entities, staggered from the above  |
 | **refresh** | `0 15 * * * *`    | Re-evaluates cached expiry; reads no LDAP                 |
+| **revocation** | `0 30 5 * * *` | Asks the authorities what they have revoked; reads no LDAP |
 | **prune**   | `0 0 6 * * SUN`   | Removes entries the directory has stopped publishing      |
 | **audit retention** | `0 30 3 * * SUN` | Trims the audit trail; off unless turned on        |
 | **expiry round-up** | `0 0 7 * * *` | Tells each point of contact what of theirs is expiring |
@@ -947,6 +1013,11 @@ because time passes — nothing in the directory changes. Without it, a status w
 corrected when its entry happened to be re-scraped, so a nightly sweep would mean expiry
 alerts up to a day late. It walks only certificates that could plausibly have moved (not
 already expired, notAfter inside the warning window), which is a small indexed slice.
+
+**Why revocation is its own job.** It is the only work here that reads neither the directory
+nor the clock: it asks the certificates' own authorities, which is a different system, on a
+different network path, with its own failure modes. It runs after both sweeps so it is
+asking about a current cache. See [Revocation](#revocation).
 
 **Why prune is off by default.** Deleting directory records is not something to start doing
 silently. It works on how long an entry has gone unseen rather than by diffing a sweep's
@@ -1127,6 +1198,19 @@ What counts as one issuance, under `cert-alert.credentials`:
 |---------------|---------|-------------------------------------------------------------|
 | `pair-window` | `7d`    | How far apart a person's signing and encryption certificates may be issued and still be one renewal |
 
+Revocation, under `cert-alert.revocation`:
+
+| Property               | Default             | Purpose                                    |
+|------------------------|---------------------|--------------------------------------------|
+| `enabled`              | `true`              | Whether revocation is checked at all        |
+| `cron`                 | `0 30 5 * * *`      | When the scheduled check runs               |
+| `issuer-directory`     | unset               | CA certificates, for verifying CRLs and for OCSP |
+| `allow-unverified-crl` | `true`              | Believe a CRL whose signature could not be checked |
+| `crl-cache-ttl`        | `6h`                | Ceiling on how long a fetched list is reused |
+| `max-crl-bytes`        | `16777216`          | A larger list is refused rather than read    |
+| `connect-timeout`      | `10s`               | Reaching a distribution point                |
+| `read-timeout`         | `30s`               | Downloading from one                         |
+
 The endpoint probe, under `cert-alert.probe`:
 
 | Property          | Default | Purpose                                              |
@@ -1204,5 +1288,7 @@ src/main/resources/
   a list of people
 - Distributed locking (ShedLock or similar) if more than one instance will run the jobs or
   the changelog connector; the overlap guard is per-process
-- Certificate chain and revocation status, not just the leaf
+- OCSP on the scheduled job as well as on a single check, once there is a deployment whose
+  responder would rather be asked a hundred thousand times than publish a list
+- Certificate chain validation, not just the leaf
 - More alert channels (Slack, PagerDuty, webhooks)

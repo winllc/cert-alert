@@ -18,6 +18,7 @@ import java.util.Map;
  * @param months issued against expiring, by month
  * @param notifications how many people were told, and how many deliveries were attempted
  * @param risks how many certificates carry each kind of risky name, and how many carry any
+ * @param revocation what the issuing authorities have said, and how much has not been asked
  * @param projects how many projects there are
  */
 public record Metrics(
@@ -30,6 +31,7 @@ public record Metrics(
         List<MonthPoint> months,
         Map<String, Long> notifications,
         Map<String, Long> risks,
+        Map<String, Long> revocation,
         long projects) {
 
     /** @param label how it reads: "RSA 2048" */

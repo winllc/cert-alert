@@ -22,6 +22,9 @@ public final class AuditActors {
     /** The job that re-evaluates cached expiry without reading the directory. */
     public static final String REFRESH = "expiry refresh";
 
+    /** The job that asks the issuing authorities what they have revoked. */
+    public static final String REVOCATION = "revocation";
+
     /** The job that deletes entries the directory has stopped publishing. */
     public static final String PRUNE = "prune";
 

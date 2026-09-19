@@ -24,6 +24,13 @@ public enum AuditAction {
     /** The directory stopped publishing a certificate it had. */
     CERTIFICATE_REMOVED("Certificate withdrawn"),
 
+    /**
+     * An authority was asked about a certificate and said it had been revoked. Recorded
+     * against the entry because it is the most consequential thing that can be learned
+     * about one, and it is learned from somewhere other than the directory.
+     */
+    CERTIFICATE_REVOKED("Certificate revoked"),
+
     /** A cached certificate moved between valid, expiring and expired. */
     CERTIFICATE_STATUS_CHANGED("Certificate status changed"),
 

@@ -2,6 +2,7 @@ package com.winllc.certalert.repository;
 
 import com.winllc.certalert.domain.CachedCertificate;
 import com.winllc.certalert.domain.CertificateStatus;
+import com.winllc.certalert.domain.RevocationStatus;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
@@ -67,4 +68,25 @@ public interface CachedCertificateRepository extends JpaRepository<CachedCertifi
 
     @Query("select distinct c.server.id from CachedCertificate c where c.id in :ids and c.server is not null")
     List<Long> findServerIdsByCertificateIds(@Param("ids") Collection<Long> ids);
+
+    // --- walking the cache one owner at a time -------------------------------------------
+    //
+    // The revocation check is a question about an entry, not about a certificate: which of
+    // a person's two are current can only be decided with both of them in view. So it walks
+    // owners rather than rows, in id order, which is a keyset scan rather than an offset
+    // that gets slower the further in it gets.
+
+    @Query("select distinct c.user.id from CachedCertificate c where c.user.id > :after order by c.user.id")
+    List<Long> findUserIdsAfter(@Param("after") long after, Pageable pageable);
+
+    @Query("select distinct c.server.id from CachedCertificate c where c.server.id > :after order by c.server.id")
+    List<Long> findServerIdsAfter(@Param("after") long after, Pageable pageable);
+
+    @Query("select c from CachedCertificate c join fetch c.user where c.user.id in :ids")
+    List<CachedCertificate> findForUsers(@Param("ids") Collection<Long> ids);
+
+    @Query("select c from CachedCertificate c join fetch c.server where c.server.id in :ids")
+    List<CachedCertificate> findForServers(@Param("ids") Collection<Long> ids);
+
+    long countByRevocationStatus(RevocationStatus status);
 }

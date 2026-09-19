@@ -110,6 +110,7 @@
                 var expiry = metrics.expiry || {};
                 var notifications = metrics.notifications || {};
                 var risks = metrics.risks || {};
+                var revocation = metrics.revocation || {};
 
                 stat('certificates', certificates.total);
                 stat('valid', certificates.VALID || 0);
@@ -135,6 +136,10 @@
                 stat('riskManyNames', risks.MANY_NAMES);
                 stat('riskManyDomains', risks.MANY_DOMAINS);
                 stat('riskBareHostname', risks.BARE_HOSTNAME);
+                stat('revoked', revocation.REVOKED);
+                stat('revocationGood', revocation.GOOD);
+                stat('revocationUnknown', revocation.UNKNOWN);
+                stat('revocationNotChecked', revocation.NOT_CHECKED);
 
                 $('#metrics-chart').html(chart(metrics.months));
                 $('#metrics-keys').html(distribution(

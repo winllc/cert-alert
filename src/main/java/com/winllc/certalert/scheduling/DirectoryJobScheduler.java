@@ -8,6 +8,7 @@ import com.winllc.certalert.service.CertificateRefreshService;
 import com.winllc.certalert.service.DirectoryPruneService;
 import com.winllc.certalert.service.DirectorySyncService;
 import com.winllc.certalert.service.NotificationService;
+import com.winllc.certalert.service.RevocationService;
 import java.util.EnumMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -21,13 +22,16 @@ import org.springframework.stereotype.Component;
 /**
  * The scheduled jobs that keep the cache in step with the directory.
  *
- * <p>Four separate schedules rather than one, because they are different kinds of work:
+ * <p>Several separate schedules rather than one, because they are different kinds of work:
  *
  * <ul>
  *   <li><b>users</b> and <b>servers</b> scrape LDAP. They are staggered so two long sweeps
  *       never run at once, and either can be re-timed without disturbing the other.
  *   <li><b>refresh</b> re-evaluates cached expiry and touches no LDAP at all, so it is
  *       cheap enough to run hourly and keeps alerts and the tables current between sweeps.
+ *   <li><b>revocation</b> asks the issuing authorities which of the cached certificates
+ *       they have revoked - the one question about a certificate that the certificate
+ *       cannot answer. It reads no LDAP and runs after both sweeps.
  *   <li><b>prune</b> removes entries the directory has stopped publishing. It is off by
  *       default: deleting records is not something to start doing on its own.
  *   <li><b>audit retention</b> trims the audit trail, and is off by default for the same
@@ -54,6 +58,7 @@ public class DirectoryJobScheduler {
     private final AuditService auditService;
     private final NotificationService notificationService;
     private final NotificationProperties notificationProperties;
+    private final RevocationService revocationService;
     private final LdapProperties properties;
 
     private final Map<SyncJob, AtomicBoolean> running = new EnumMap<>(SyncJob.class);
@@ -65,6 +70,7 @@ public class DirectoryJobScheduler {
             AuditService auditService,
             NotificationService notificationService,
             NotificationProperties notificationProperties,
+            RevocationService revocationService,
             LdapProperties properties) {
         this.syncService = syncService;
         this.refreshService = refreshService;
@@ -72,6 +78,7 @@ public class DirectoryJobScheduler {
         this.auditService = auditService;
         this.notificationService = notificationService;
         this.notificationProperties = notificationProperties;
+        this.revocationService = revocationService;
         this.properties = properties;
         for (SyncJob job : SyncJob.values()) {
             running.put(job, new AtomicBoolean(false));
@@ -122,6 +129,17 @@ public class DirectoryJobScheduler {
         } catch (RuntimeException e) {
             log.error("Trimming the audit trail failed", e);
         }
+    }
+
+    /**
+     * Asking the issuing authorities what they have revoked. After both sweeps, because it
+     * is a question about a current cache, and on its own schedule because it is work
+     * against a different system entirely - the certificates' own authorities rather than
+     * the directory.
+     */
+    @Scheduled(cron = "${cert-alert.revocation.cron}", zone = "UTC")
+    public void checkRevocation() {
+        runOnce(SyncJob.REVOCATION, revocationService::checkAll);
     }
 
     @Scheduled(cron = "${cert-alert.ldap.prune.cron}", zone = "UTC")

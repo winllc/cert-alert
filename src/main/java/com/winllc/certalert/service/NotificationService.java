@@ -137,6 +137,48 @@ public class NotificationService {
         return created.size();
     }
 
+    /**
+     * One notification per contact for a certificate an authority has revoked.
+     *
+     * <p>Told about separately from everything else, and not held for the daily round-up.
+     * Expiry is a date on the certificate that anybody can read and that arrives on a known
+     * day; a revocation is a decision made elsewhere, that the certificate does not mention,
+     * and that is already in force by the time this finds out.
+     *
+     * @return how many people were told
+     */
+    @Transactional
+    public int notifyRevoked(CachedCertificate certificate, AuditEvent.SubjectRef subject, OwnerType type) {
+        if (!properties.isEnabled() || subject.id() == null) {
+            return 0;
+        }
+        Instant now = Instant.now(clock);
+        Instant since = now.minus(properties.getRepeatAfter());
+        String summary = "Certificate %s was revoked%s%s".formatted(
+                certificate.getSerialNumber(),
+                certificate.getRevokedAt() == null ? "" : " on " + certificate.getRevokedAt(),
+                certificate.getRevocationReason() == null ? "" : " (" + certificate.getRevocationReason() + ")");
+
+        List<Notification> created = new ArrayList<>();
+        for (NotificationRecipients.Recipient recipient : resolve(type, subject.id())) {
+            if (alreadyTold(recipient, certificate.getSha256Fingerprint(), Severity.CRITICAL,
+                    NotificationKind.CERTIFICATE_REVOKED, since)) {
+                continue;
+            }
+            created.add(new Notification(
+                    recipient.userId(),
+                    recipient.address(),
+                    NotificationKind.CERTIFICATE_REVOKED,
+                    subject,
+                    certificate.getSha256Fingerprint(),
+                    Severity.CRITICAL,
+                    summary,
+                    now));
+        }
+        notifications.saveAll(created);
+        return created.size();
+    }
+
     // -------------------------------------------------------------------------------------
     // The daily round-up
     // -------------------------------------------------------------------------------------

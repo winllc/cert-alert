@@ -99,6 +99,7 @@ public class SecurityConfig {
                         HttpMethod.POST,
                         "/api/v1/sync/**",
                         "/api/v1/changelog/**",
+                        "/api/v1/revocation/check",
                         "/api/v1/notifications/digest")
                 .hasRole("ADMIN")
                 // How far ahead the round-up looks decides what every point of contact in

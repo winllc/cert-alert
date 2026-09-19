@@ -3,6 +3,7 @@ package com.winllc.certalert.service;
 import com.winllc.certalert.config.RiskProperties;
 import com.winllc.certalert.domain.CachedCertificate;
 import com.winllc.certalert.domain.KeyUsage;
+import com.winllc.certalert.revocation.RevocationEndpoints;
 import java.io.ByteArrayInputStream;
 import java.security.PublicKey;
 import java.security.cert.CertificateException;
@@ -74,6 +75,10 @@ public class CertificateParser {
         // Which half of a person's credentials this is - the one that signs or the one that
         // is encrypted to - which only the key usage extension can say.
         cached.describeKeyUsage(KeyUsage.of(certificate.getKeyUsage()));
+        // Where to ask whether it has been revoked, which only the certificate can say.
+        RevocationEndpoints endpoints = RevocationEndpoints.of(certificate);
+        cached.describeRevocationEndpoints(
+                endpoints.crlUrls(), endpoints.ocspUrl(), RevocationEndpoints.authorityKeyId(certificate));
         return cached;
     }
 

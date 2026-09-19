@@ -15,6 +15,7 @@ import java.util.List;
  * @param risks what is worrying about those names, with the words to print
  * @param use what the certificate is for, which is what tells a person's signing
  *     certificate from their encryption one
+ * @param revocationStatus what the issuing authority says, which the certificate cannot
  * @param keyUsages the key usage bits it was decided from, spelled out
  */
 public record CachedCertificateRow(
@@ -35,6 +36,11 @@ public record CachedCertificateRow(
         String use,
         String useDescription,
         List<String> keyUsages,
+        String revocationStatus,
+        String revocationLabel,
+        Instant revokedAt,
+        String revocationReason,
+        String revocationDetail,
         CertificateStatus status,
         Instant cachedAt) {
 
@@ -65,6 +71,11 @@ public record CachedCertificateRow(
                 certificate.getUse().label(),
                 certificate.getUse().description(),
                 certificate.getKeyUsages().stream().map(KeyUsage::label).toList(),
+                certificate.getRevocationStatus().name(),
+                certificate.getRevocationStatus().label(),
+                certificate.getRevokedAt(),
+                certificate.getRevocationReason(),
+                certificate.getRevocationDetail(),
                 certificate.getStatus(),
                 certificate.getCachedAt());
     }

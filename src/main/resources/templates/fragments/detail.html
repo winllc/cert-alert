@@ -83,6 +83,23 @@
                         </div>
                     </td>
                 </tr>
+                <!--/* What the issuing authority says, which the certificate itself cannot.
+                       "Not checked" is shown rather than hidden: it is not a clean bill of
+                       health, and leaving the row out would read like one. */-->
+                <tr th:with="tones=${ {'GOOD':'bg-green-lt','REVOKED':'bg-red-lt','UNKNOWN':'bg-yellow-lt','NOT_CHECKED':'bg-secondary-lt'} }">
+                    <th>Revocation</th>
+                    <td>
+                        <span class="badge"
+                              th:classappend="${tones.get(certificate.revocationStatus.name())}"
+                              th:text="${certificate.revocationStatus.label()}">Not checked</span>
+                        <span class="text-secondary small ms-1" th:if="${certificate.revokedAt != null}"
+                              th:text="'on ' + ${#strings.substring(certificate.revokedAt, 0, 10)}
+                                       + (${certificate.revocationReason != null}
+                                          ? ' (' + ${certificate.revocationReason} + ')' : '')">on 2026-03-01</span>
+                        <div class="text-secondary small" th:if="${certificate.revocationDetail != null}"
+                             th:text="${certificate.revocationDetail}">CRL from ...</div>
+                    </td>
+                </tr>
                 <tr>
                     <th>SHA-256</th>
                     <td class="mono" th:text="${certificate.sha256Fingerprint}">abc</td>

@@ -131,6 +131,44 @@ public class CachedCertificate {
     @Column(name = "key_usage", length = 200)
     private String keyUsage;
 
+    /**
+     * Where the certificate says to ask about its revocation: its CRL distribution points,
+     * separated by spaces, and its OCSP responder. Cached because they are carried by the
+     * certificate and by nothing else, and a check that has to re-read the directory to
+     * find out where to ask is a check that reads the directory a hundred thousand times.
+     */
+    @Column(name = "crl_urls", length = 1000)
+    private String crlUrls;
+
+    @Column(name = "ocsp_url", length = 500)
+    private String ocspUrl;
+
+    /** Which issuing key signed it, for finding the issuer among several of the same name. */
+    @Column(name = "authority_key_id", length = 128)
+    private String authorityKeyId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "revocation_status", nullable = false, length = 16)
+    private RevocationStatus revocationStatus = RevocationStatus.NOT_CHECKED;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "revocation_method", length = 8)
+    private RevocationMethod revocationMethod;
+
+    @Column(name = "revocation_checked_at")
+    private Instant revocationCheckedAt;
+
+    /** When the authority says it was revoked, which is not when this noticed. */
+    @Column(name = "revoked_at")
+    private Instant revokedAt;
+
+    @Column(name = "revocation_reason", length = 64)
+    private String revocationReason;
+
+    /** Why the answer is what it is - which responder said so, or why none could. */
+    @Column(name = "revocation_detail", length = 500)
+    private String revocationDetail;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 32)
     private CertificateStatus status = CertificateStatus.VALID;
@@ -308,6 +346,86 @@ public class CachedCertificate {
      */
     public CertificateUse getUse() {
         return CertificateUse.from(getKeyUsages());
+    }
+
+    /** Records where to ask about this certificate's revocation, read from the certificate. */
+    public void describeRevocationEndpoints(java.util.List<String> crlUrls, String ocspUrl, String authorityKeyId) {
+        // Space-separated: a URL may contain a comma, and a CRL distribution point in a
+        // directory routinely does - ldap://host/cn=CRL1,ou=pki,o=gov.
+        this.crlUrls = crlUrls == null || crlUrls.isEmpty() ? null : truncate(String.join(" ", crlUrls), 1000);
+        this.ocspUrl = truncate(ocspUrl, 500);
+        this.authorityKeyId = truncate(authorityKeyId, 128);
+    }
+
+    /** The CRL distribution points, in the order the certificate lists them. */
+    public java.util.List<String> getCrlUrls() {
+        if (crlUrls == null || crlUrls.isBlank()) {
+            return java.util.List.of();
+        }
+        return Arrays.stream(crlUrls.split(" "))
+                .map(String::trim)
+                .filter(url -> !url.isEmpty())
+                .toList();
+    }
+
+    public String getOcspUrl() {
+        return ocspUrl;
+    }
+
+    public String getAuthorityKeyId() {
+        return authorityKeyId;
+    }
+
+    /** What an authority said about this certificate, and when it was asked. */
+    public void recordRevocation(
+            RevocationStatus status,
+            RevocationMethod method,
+            Instant revokedAt,
+            String reason,
+            String detail,
+            Instant checkedAt) {
+
+        this.revocationStatus = status == null ? RevocationStatus.NOT_CHECKED : status;
+        this.revocationMethod = method;
+        this.revokedAt = revokedAt;
+        this.revocationReason = truncate(reason, 64);
+        this.revocationDetail = truncate(detail, 500);
+        this.revocationCheckedAt = checkedAt;
+    }
+
+    public RevocationStatus getRevocationStatus() {
+        return revocationStatus;
+    }
+
+    public RevocationMethod getRevocationMethod() {
+        return revocationMethod;
+    }
+
+    public Instant getRevocationCheckedAt() {
+        return revocationCheckedAt;
+    }
+
+    public Instant getRevokedAt() {
+        return revokedAt;
+    }
+
+    public String getRevocationReason() {
+        return revocationReason;
+    }
+
+    public String getRevocationDetail() {
+        return revocationDetail;
+    }
+
+    public boolean isRevoked() {
+        return revocationStatus == RevocationStatus.REVOKED;
+    }
+
+    private static String truncate(String value, int length) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.length() <= length ? value : value.substring(0, length - 3) + "...";
     }
 
     public CertificateStatus getStatus() {

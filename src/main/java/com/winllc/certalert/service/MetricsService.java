@@ -3,6 +3,7 @@ package com.winllc.certalert.service;
 import com.winllc.certalert.domain.AuditAction;
 import com.winllc.certalert.domain.CertificateRisk;
 import com.winllc.certalert.domain.CertificateStatus;
+import com.winllc.certalert.domain.RevocationStatus;
 import com.winllc.certalert.repository.AuditEventRepository;
 import com.winllc.certalert.repository.CachedCertificateRepository;
 import com.winllc.certalert.repository.DirectoryServerRepository;
@@ -80,6 +81,7 @@ public class MetricsService {
                 monthlySeries(now),
                 notificationCounts(),
                 riskCounts(),
+                revocationCounts(),
                 projects.count());
     }
 
@@ -92,6 +94,18 @@ public class MetricsService {
         counts.put("any", metrics.countByRiskFlagsIsNotNull());
         for (CertificateRisk risk : CertificateRisk.values()) {
             counts.put(risk.name(), metrics.countByRisk(risk.name()));
+        }
+        return counts;
+    }
+
+    /**
+     * What the authorities have said, and - the number worth reading first - how much has
+     * never been asked about. Not checked is not the same as not revoked.
+     */
+    private Map<String, Long> revocationCounts() {
+        Map<String, Long> counts = new LinkedHashMap<>();
+        for (RevocationStatus status : RevocationStatus.values()) {
+            counts.put(status.name(), certificates.countByRevocationStatus(status));
         }
         return counts;
     }

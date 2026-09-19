@@ -260,6 +260,24 @@ cert-alert:
   # hosts that do not exist yet; forty names means one key for forty things. Both are
   # judgements rather than rules - a load balancer fronting forty services has forty names
   # for a reason - so where "too many" starts is configuration.
+  # Asking the issuing authorities which cached certificates they have revoked - the one
+  # question about a certificate that the certificate cannot answer. Its own schedule,
+  # after both sweeps, because it is work against the certificates' own authorities rather
+  # than against the directory.
+  revocation:
+    enabled: true
+    cron: "0 30 5 * * *"
+    # A directory of CA certificates, PEM or DER. Two things need them: OCSP names a
+    # certificate by hashes of its issuer's name and key, which only the issuer's
+    # certificate carries, and a CRL is signed by the issuer. Unset means OCSP is
+    # unavailable and CRLs are used unverified - which every such result says.
+    issuer-directory:
+    allow-unverified-crl: true
+    crl-cache-ttl: 6h
+    max-crl-bytes: 16777216
+    connect-timeout: 10s
+    read-timeout: 30s
+
   # Asking a server's endpoint what it is actually serving, from its page. The one
   # outbound connection here that is not to the directory or the mail server, and the only
   # one somebody causes by pressing a button - so it can be switched off wholesale.

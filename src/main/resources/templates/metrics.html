@@ -208,6 +208,36 @@
                         </div>
                     </div>
 
+                    <!--/* What the issuing authorities say, which is the one thing about a
+                           certificate that the certificate cannot tell you. "Not checked"
+                           leads because it is the number that decides what the others are
+                           worth: an unasked question is not a negative answer. */-->
+                    <div class="col-12 col-lg-6">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3 class="card-title">Revocation</h3>
+                                <span class="card-subtitle text-secondary ms-2">what the authorities say</span>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table card-table table-vcenter">
+                                    <tbody>
+                                    <tr><td>Revoked</td>
+                                        <td class="mono text-end" data-metric="revoked">&mdash;</td></tr>
+                                    <tr><td>Not revoked</td>
+                                        <td class="mono text-end" data-metric="revocationGood">&mdash;</td></tr>
+                                    <tr><td>Asked, no answer</td>
+                                        <td class="mono text-end" data-metric="revocationUnknown">&mdash;</td></tr>
+                                    <tr><td>Not checked</td>
+                                        <td class="mono text-end" data-metric="revocationNotChecked">&mdash;</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="card-footer text-secondary small">
+                                Only the certificates an entry currently holds are asked about.
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="col-12 col-lg-6">
                         <div class="card">
                             <div class="card-header">

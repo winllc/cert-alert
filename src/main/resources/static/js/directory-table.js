@@ -218,6 +218,33 @@
             : '');
     }
 
+    var REVOCATION_TONE = {
+        GOOD: 'bg-green-lt',
+        REVOKED: 'bg-red-lt',
+        UNKNOWN: 'bg-yellow-lt',
+        NOT_CHECKED: 'bg-secondary-lt'
+    };
+
+    /**
+     * What the issuing authority says. Shown even when nothing has been asked yet, because
+     * "not checked" is not the same as "not revoked" and an absent row reads like the
+     * second one.
+     */
+    function revocationCell(certificate) {
+        var tone = REVOCATION_TONE[certificate.revocationStatus] || 'bg-secondary-lt';
+        var badge = '<span class="badge ' + tone + '">'
+            + escapeHtml(certificate.revocationLabel || certificate.revocationStatus) + '</span>';
+        var when = certificate.revokedAt
+            ? ' <span class="text-secondary small">on ' + escapeHtml(formatDate(certificate.revokedAt))
+              + (certificate.revocationReason ? ' (' + escapeHtml(certificate.revocationReason) + ')' : '')
+              + '</span>'
+            : '';
+        var detail = certificate.revocationDetail
+            ? '<div class="text-secondary small">' + escapeHtml(certificate.revocationDetail) + '</div>'
+            : '';
+        return badge + when + detail;
+    }
+
     /** Renders the cached details of one certificate as a definition-style block. */
     function certificateBlock(certificate) {
         var rows = [
@@ -230,6 +257,7 @@
             ['Key', text([certificate.keyAlgorithm, certificate.keySize ? certificate.keySize + ' bit' : null]
                 .filter(Boolean).join(' '))],
             ['Use', useCell(certificate)],
+            ['Revocation', revocationCell(certificate)],
             ['Signature', text(certificate.signatureAlgorithm)],
             ['Hash', text(certificate.hashAlgorithm)],
             ['SANs', sanCell(certificate)],
