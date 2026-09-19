@@ -1,10 +1,11 @@
 /*
- * The attributes this deployment keeps about a server, on the server's page.
+ * The directory attributes an administrator made editable, on the server's page.
  *
- * Which attributes exist is an administrator's decision, made on the administration page,
- * so this draws whatever it is handed: a box, a drop-down, a set of tick boxes, a switch.
- * Each attribute saves on its own, because that is what the endpoint takes and what the
- * audit record is about.
+ * The values are the entry's: read from the directory when this loads and written back to it
+ * on save. Which attributes appear, and what control each gets - a box, a drop-down, tick
+ * boxes, a switch - is the administration page's decision, so this draws whatever it is
+ * handed. Each attribute saves on its own, because that is one modify against the entry and
+ * one line in its history.
  */
 (function (window, $) {
     'use strict';
@@ -71,6 +72,7 @@
             + '<div class="col-12 col-md-3">'
             + '<label class="form-label mb-0" for="attribute-' + attribute.id + '">'
             + CertAlert.escapeHtml(attribute.name) + '</label>'
+            + '<div class="text-secondary small mono">' + CertAlert.escapeHtml(attribute.ldapAttribute) + '</div>'
             + (attribute.description
                 ? '<div class="text-secondary small">' + CertAlert.escapeHtml(attribute.description) + '</div>'
                 : '')
@@ -83,6 +85,19 @@
             + '</div>';
     }
 
+    /** Anything the reader needs to know before believing what the controls say. */
+    function notice(result) {
+        if (result.error) {
+            return '<div class="alert alert-warning">' + CertAlert.escapeHtml(result.error) + '</div>';
+        }
+        if (!result.writable) {
+            return '<div class="alert alert-info">'
+                + 'This application binds to the directory anonymously, so it reads these and cannot write them.'
+                + '</div>';
+        }
+        return '';
+    }
+
     function load($card) {
         var serverId = $card.data('server-id');
         $.getJSON('/api/v1/servers/' + serverId + '/attributes')
@@ -91,7 +106,9 @@
                     $card.addClass('d-none');
                     return;
                 }
+                result.editable = result.editable && !result.error;
                 $card.removeClass('d-none');
+                $card.find('.attribute-message-top').html(notice(result));
                 var $list = $card.find('.attribute-list');
                 $list.html(result.attributes.map(function (attribute) {
                     return row(attribute, result.editable);

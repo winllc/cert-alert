@@ -6,14 +6,15 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * One managed attribute as the pages read it: what it is called, what it may hold, and -
- * where the list of them is being administered - how many servers hold it, because that is
- * what makes retiring one a decision rather than a click.
+ * One managed attribute as the pages read it: which directory attribute it manages, what it
+ * is called here, and what it may hold.
  *
- * @param values what this server holds for it, on a page about one server
+ * @param ldapAttribute the attribute on the entry, which is where the values actually live
+ * @param values what this server's entry holds for it, on a page about one server
  */
 public record ServerAttributeRow(
         Long id,
+        String ldapAttribute,
         String name,
         String description,
         ServerAttributeType type,
@@ -22,19 +23,17 @@ public record ServerAttributeRow(
         List<String> options,
         int displayOrder,
         List<String> values,
-        Long serversHolding,
         String updatedBy,
         Instant updatedAt) {
 
     public static ServerAttributeRow of(ServerAttributeDefinition definition) {
-        return from(definition, null, null);
+        return from(definition, null);
     }
 
-    public static ServerAttributeRow from(
-            ServerAttributeDefinition definition, List<String> values, Long serversHolding) {
-
+    public static ServerAttributeRow from(ServerAttributeDefinition definition, List<String> values) {
         return new ServerAttributeRow(
                 definition.getId(),
+                definition.getLdapAttribute(),
                 definition.getName(),
                 definition.getDescription(),
                 definition.getType(),
@@ -43,7 +42,6 @@ public record ServerAttributeRow(
                 List.copyOf(definition.getOptions()),
                 definition.getDisplayOrder(),
                 values == null ? List.of() : List.copyOf(values),
-                serversHolding,
                 definition.getUpdatedBy(),
                 definition.getUpdatedAt());
     }

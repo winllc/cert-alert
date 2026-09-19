@@ -654,32 +654,55 @@ The text templates carry their own template resolver (`EmailTemplateConfig`), be
 resolver carries one template mode; it answers only for `email/*.txt` and leaves every page
 to the resolver Spring Boot configures.
 
-### Managed attributes
+### Editing the directory
 
-The FSD schema is the directory's and fixed. What a team actually wants recorded against a
-server — which environment it is, whether it is in scope for an audit, which budget pays for
-it — is not in that schema and will not be added to it, so an administrator defines it here
-instead and it is filled in per server.
+The directory is the source of truth and this application is the index over it — with one
+exception, made on purpose. An administrator can name **attributes of a server entry that
+may be edited from here**, and what somebody types into them is written to the entry with an
+LDAP modify. There is no local copy: the value is read from the entry when a page asks for it
+and written back when it changes, because an attribute that can be edited in two places is an
+attribute that will disagree with itself.
+
+What is defined here is not the value but its shape — which the directory's schema does not
+say and the people using it know:
 
 | Kind | Holds | One or several |
 |---|---|---|
 | Free text | anything typed | either |
 | Drop-down | one of the values the definition lists | either |
-| Yes or no | set or unset | one, always |
+| Yes or no | `TRUE` on the entry, or the attribute absent | one, always |
 
 A boolean cannot be multi-valued — a second value would have to contradict the first — and
-"no" is stored as the absence of the attribute, so an unset switch and an off one are the
-same thing everywhere.
+"no" is the attribute's absence, because a directory has no such thing as an attribute that
+is present and empty. Clearing any attribute removes it from the entry for the same reason.
 
-Defining them is administration: one added becomes a field on every server at once, and
-retiring one takes every value with it. Setting a value on a server is an administrator's
-too; anyone signed in sees what a server holds, as part of the server.
+```
+GET  /api/v1/admin/server-attributes          which attributes are editable   (administrators)
+POST /api/v1/admin/server-attributes          make one editable               (administrators)
+GET  /api/v1/servers/{id}/attributes          what this entry holds           (anyone signed in)
+PUT  /api/v1/servers/{id}/attributes/{defId}  write it to the entry           (administrators)
+```
 
-Once servers hold values, what a definition may become is bounded by them, and every refusal
-names what is in the way: an option still in use cannot be taken off the list, "several"
-cannot become "one" while a server holds two, and the kind cannot change underneath values
-recorded as something else. Each change is recorded against the server, so its history says
-who set what and when.
+Taking an attribute off the list stops it being offered; the directory goes on holding
+whatever it held, because those values were never this application's to remove. Every write
+is recorded against the server, so its history says who changed which attribute to what.
+
+A write goes out as a single replace, and the entry is read back afterwards so the cached
+row — `ATOStatus` is a column here as well as an attribute there — matches without waiting
+for the next sweep. What the directory refuses comes back as it was refused: its schema and
+its access control have the last word, and where this application binds anonymously the page
+says so rather than pretending.
+
+**The service account needs write access to exactly those attributes and no more.** The
+stand-in directory shows the shape of it:
+
+```
+access to dn.subtree="ou=servers,dc=example,dc=test"
+        attrs=ATOStatus,lifeCycleStatus,icNetworks,description
+        by dn.exact="cn=cert-alert,ou=services,dc=example,dc=test" write
+        by users read
+        by anonymous none
+```
 
 #### The administration page
 

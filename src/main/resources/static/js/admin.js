@@ -179,6 +179,7 @@
             : '<span class="text-secondary">—</span>';
 
         return '<tr data-attribute-id="' + attribute.id + '">'
+            + '<td class="mono">' + CertAlert.escapeHtml(attribute.ldapAttribute) + '</td>'
             + '<td><div class="fw-medium">' + CertAlert.escapeHtml(attribute.name) + '</div>'
             + (attribute.description
                 ? '<div class="text-secondary small">' + CertAlert.escapeHtml(attribute.description) + '</div>'
@@ -187,10 +188,9 @@
             + '<td>' + CertAlert.escapeHtml(TYPE_LABEL[attribute.type] || attribute.type) + '</td>'
             + '<td>' + (attribute.multiValued ? 'Several' : 'One') + '</td>'
             + '<td>' + choices + '</td>'
-            + '<td class="mono">' + (attribute.serversHolding || 0) + '</td>'
             + '<td class="text-end">'
             + '<button type="button" class="btn btn-sm attribute-edit me-1">Edit</button>'
-            + '<button type="button" class="btn btn-sm btn-ghost-danger attribute-delete">Retire</button>'
+            + '<button type="button" class="btn btn-sm btn-ghost-danger attribute-delete">Stop editing</button>'
             + '</td></tr>';
     }
 
@@ -217,12 +217,13 @@
 
     function reset() {
         $('#attribute-id').val('');
+        $('#attribute-ldap').val('');
         $('#attribute-name').val('');
         $('#attribute-description').val('');
         $('#attribute-type').val('TEXT');
         $('#attribute-multi').val('false');
         $('#attribute-options').val('');
-        $('#attribute-submit').text('Add attribute');
+        $('#attribute-submit').text('Make editable');
         $('#attribute-cancel').addClass('d-none');
         showFields();
     }
@@ -239,6 +240,7 @@
 
     function edit(attribute) {
         $('#attribute-id').val(attribute.id);
+        $('#attribute-ldap').val(attribute.ldapAttribute);
         $('#attribute-name').val(attribute.name);
         $('#attribute-description').val(attribute.description || '');
         $('#attribute-type').val(attribute.type);
@@ -248,7 +250,7 @@
         $('#attribute-cancel').removeClass('d-none');
         showFields();
         message('');
-        $('#attribute-name').trigger('focus');
+        $('#attribute-ldap').trigger('focus');
     }
 
     $(function () {
@@ -268,6 +270,7 @@
             event.preventDefault();
             var id = $('#attribute-id').val();
             var body = {
+                ldapAttribute: $('#attribute-ldap').val(),
                 name: $('#attribute-name').val(),
                 description: $('#attribute-description').val(),
                 type: $('#attribute-type').val(),
@@ -283,7 +286,7 @@
                 data: JSON.stringify(body)
             })
                 .done(function (saved) {
-                    message((id ? 'Saved ' : 'Added ') + saved.name);
+                    message((id ? 'Saved ' : 'Now editable: ') + saved.ldapAttribute);
                     reset();
                     load();
                 })
@@ -307,19 +310,18 @@
             var $row = $(this).closest('tr');
             var id = $row.data('attribute-id');
             var attribute = definitions.find(function (candidate) { return candidate.id === id; });
-            var held = attribute ? (attribute.serversHolding || 0) : 0;
-            var warning = 'Retire ' + (attribute ? attribute.name : 'this attribute') + '?'
-                + (held ? ' ' + held + ' server(s) hold a value for it, which goes too.' : '');
+            var warning = 'Stop offering ' + (attribute ? attribute.ldapAttribute : 'this attribute')
+                + ' for editing? What servers hold for it stays in the directory.';
             if (!window.confirm(warning)) {
                 return;
             }
             $.ajax({url: '/api/v1/admin/server-attributes/' + id, type: 'DELETE'})
                 .done(function () {
-                    message('Retired ' + (attribute ? attribute.name : 'the attribute'));
+                    message('No longer editable: ' + (attribute ? attribute.ldapAttribute : 'the attribute'));
                     load();
                 })
                 .fail(function (xhr) {
-                    var detail = problem(xhr, 'Could not retire that attribute.');
+                    var detail = problem(xhr, 'Could not stop editing that attribute.');
                     if (detail) {
                         message(detail, true);
                     }

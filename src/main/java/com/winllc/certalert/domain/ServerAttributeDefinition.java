@@ -23,16 +23,19 @@ import java.util.List;
 /**
  * An attribute an administrator decided this deployment keeps about its servers.
  *
- * <p>The directory's schema is somebody else's and fixed. What a team wants recorded
- * against a server - the environment it belongs to, whether it is in scope for an audit,
- * which budget pays for it - is not in that schema and will not be added to it, so it is
- * defined here instead and filled in per server.
+ * <p>The attribute itself is the directory's - {@code ATOStatus}, {@code lifeCycleStatus},
+ * whatever the schema carries that a team keeps up to date by hand. What is defined here is
+ * that it may be edited from this application, what it is called on the page, what kind of
+ * control to draw for it and what it is allowed to hold. The values live in the directory
+ * and nowhere else.
  */
 @Entity
 @Table(
         name = "server_attribute_definition",
-        uniqueConstraints =
-                @UniqueConstraint(name = "uk_server_attribute_definition_name", columnNames = "name"))
+        uniqueConstraints = {
+            @UniqueConstraint(name = "uk_server_attribute_definition_name", columnNames = "name"),
+            @UniqueConstraint(name = "uk_server_attribute_definition_ldap", columnNames = "ldap_attribute")
+        })
 public class ServerAttributeDefinition {
 
     @Id
@@ -43,7 +46,11 @@ public class ServerAttributeDefinition {
             allocationSize = 50)
     private Long id;
 
-    /** What it is called, which is also its label on the page. */
+    /** The attribute in the directory, which is the thing being managed. */
+    @Column(name = "ldap_attribute", nullable = false, length = 120)
+    private String ldapAttribute;
+
+    /** What to call it on the page, where the attribute's own name reads badly. */
     @Column(nullable = false, length = 120)
     private String name;
 
@@ -91,6 +98,7 @@ public class ServerAttributeDefinition {
     }
 
     public ServerAttributeDefinition(
+            String ldapAttribute,
             String name,
             String description,
             ServerAttributeType type,
@@ -100,6 +108,7 @@ public class ServerAttributeDefinition {
             String actor,
             Instant now) {
 
+        this.ldapAttribute = ldapAttribute;
         this.name = name;
         this.description = description;
         this.type = type;
@@ -113,6 +122,7 @@ public class ServerAttributeDefinition {
     }
 
     public void update(
+            String ldapAttribute,
             String name,
             String description,
             ServerAttributeType type,
@@ -122,6 +132,7 @@ public class ServerAttributeDefinition {
             String actor,
             Instant now) {
 
+        this.ldapAttribute = ldapAttribute;
         this.name = name;
         this.description = description;
         this.type = type;
@@ -146,6 +157,10 @@ public class ServerAttributeDefinition {
 
     public Long getId() {
         return id;
+    }
+
+    public String getLdapAttribute() {
+        return ldapAttribute;
     }
 
     public String getName() {

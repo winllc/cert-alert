@@ -22,7 +22,7 @@ import org.slf4j.LoggerFactory;
  * when the provider knows the syntax is binary, but as a {@code String} otherwise, in
  * which case it may be base64.
  */
-final class LdapAttributes {
+public final class LdapAttributes {
 
     private static final Logger log = LoggerFactory.getLogger(LdapAttributes.class);
 
@@ -31,7 +31,7 @@ final class LdapAttributes {
     private LdapAttributes() {}
 
     /** First value of the named attribute as a string, or null when absent or empty. */
-    static String string(Attributes attributes, String name) throws NamingException {
+    public static String string(Attributes attributes, String name) throws NamingException {
         Attribute attribute = find(attributes, name);
         if (attribute == null || attribute.size() == 0) {
             return null;
@@ -45,7 +45,7 @@ final class LdapAttributes {
     }
 
     /** All values of the named attribute as strings, preserving directory order. */
-    static Set<String> strings(Attributes attributes, String name) throws NamingException {
+    public static Set<String> strings(Attributes attributes, String name) throws NamingException {
         Attribute attribute = find(attributes, name);
         Set<String> values = new LinkedHashSet<>();
         if (attribute == null) {

@@ -38,6 +38,16 @@ access to attrs=userPassword
         by anonymous auth
         by * none
 
+# The attributes cert-alert is allowed to edit on an IC Non-Person Entity. A deployment
+# grants write on exactly the attributes it makes editable in the application and no more:
+# this application is an index over the directory, and the one thing it changes is the
+# handful of fields somebody decided it should.
+access to dn.subtree="ou=servers,dc=example,dc=test"
+        attrs=ATOStatus,lifeCycleStatus,icNetworks,description
+        by dn.exact="cn=cert-alert,ou=services,dc=example,dc=test" write
+        by users read
+        by anonymous none
+
 access to *
         by dn.exact="cn=cert-alert,ou=services,dc=example,dc=test" read
         by self read

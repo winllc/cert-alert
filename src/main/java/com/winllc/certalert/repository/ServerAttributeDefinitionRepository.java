@@ -11,4 +11,7 @@ public interface ServerAttributeDefinitionRepository extends JpaRepository<Serve
     List<ServerAttributeDefinition> findAllByOrderByDisplayOrderAscNameAsc();
 
     Optional<ServerAttributeDefinition> findByNameIgnoreCase(String name);
+
+    /** An attribute is managed once: two definitions of it would disagree about its shape. */
+    Optional<ServerAttributeDefinition> findByLdapAttributeIgnoreCase(String ldapAttribute);
 }

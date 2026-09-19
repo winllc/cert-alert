@@ -1,5 +1,6 @@
 package com.winllc.certalert.web;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.anonymous;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -10,14 +11,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.winllc.certalert.domain.DirectoryServer;
 import com.winllc.certalert.domain.ServerAttributeType;
 import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.ServerAttributeDefinitionRepository;
-import com.winllc.certalert.repository.ServerAttributeValueRepository;
+import com.winllc.certalert.service.DirectorySyncService;
 import com.winllc.certalert.service.ServerAttributeService;
-import java.time.Instant;
+import com.winllc.certalert.support.EmbeddedDirectory;
 import java.util.List;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,6 +28,8 @@ import org.springframework.http.MediaType;
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -34,9 +38,9 @@ import org.springframework.web.context.WebApplicationContext;
 /**
  * Defining managed attributes, and filling them in on a server.
  *
- * <p>Defining one adds a field to every server at once and retiring one takes every value
- * with it, so both are an administrator's. What a server holds is shown to anybody looking
- * at that server, and the read says whether they may change it.
+ * <p>Naming one adds a field to every server at once, so that is an administrator's; so is
+ * writing to the directory. What a server's entry holds is shown to anybody looking at that
+ * server, and the read says whether they may change it.
  */
 @SpringBootTest
 @ActiveProfiles("test")
@@ -54,42 +58,69 @@ class ServerAttributeApiTest {
     private ServerAttributeDefinitionRepository definitions;
 
     @Autowired
-    private ServerAttributeValueRepository values;
+    private DirectorySyncService syncService;
 
     @Autowired
     private DirectoryServerRepository servers;
 
+    private static EmbeddedDirectory directory;
+
+    /** The directory outlives each test, so the entry is added once and reset per test. */
+    private static String serverDn;
+
     private MockMvc mockMvc;
     private Long serverId;
+
+    @BeforeAll
+    static void startDirectory() {
+        directory = new EmbeddedDirectory();
+        serverDn = directory.addServer(
+                "api-web01", "https://api-web01.example.gov", new String[] {"ops@example.gov"});
+    }
+
+    @AfterAll
+    static void stopDirectory() {
+        if (directory != null) {
+            directory.close();
+        }
+    }
+
+    @DynamicPropertySource
+    static void properties(DynamicPropertyRegistry registry) {
+        registry.add("spring.ldap.urls", () -> directory.url());
+        registry.add("spring.ldap.base", () -> EmbeddedDirectory.BASE_DN);
+        registry.add("cert-alert.ldap.user.search-base", () -> "ou=people");
+        registry.add("cert-alert.ldap.server.search-base", () -> "ou=servers");
+    }
 
     @BeforeEach
     void seed() {
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
                 .apply(SecurityMockMvcConfigurers.springSecurity())
                 .build();
-        values.deleteAll();
         definitions.deleteAll();
         servers.deleteAll();
 
-        DirectoryServer web01 = new DirectoryServer("cn=web01,ou=servers");
-        web01.setCommonName("web01");
-        web01.markSynced(Instant.now());
-        serverId = servers.save(web01).getId();
+        directory.modify(serverDn, "ATOStatus");
+        directory.modify(serverDn, "icNetworks");
+        syncService.syncServers();
+        serverId = servers.findByDn(serverDn).orElseThrow().getId();
     }
 
     @Test
-    void anAdministratorDefinesAnAttributeAndItAppearsOnEveryServer() throws Exception {
+    void anAdministratorMakesAnAttributeEditableAndItAppearsOnEveryServer() throws Exception {
         mockMvc.perform(post(ADMIN)
                         .with(admin())
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"name":"Environment","description":"Where it runs","type":"CHOICE",
-                                 "multiValued":false,"options":["Production","Staging"]}"""))
+                                {"ldapAttribute":"ATOStatus","name":"ATO status","description":"Where it stands",
+                                 "type":"CHOICE","multiValued":false,"options":["Authorized","Denied"]}"""))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.name").value("Environment"))
+                .andExpect(jsonPath("$.ldapAttribute").value("ATOStatus"))
+                .andExpect(jsonPath("$.name").value("ATO status"))
                 .andExpect(jsonPath("$.typeLabel").value("Drop-down"))
-                .andExpect(jsonPath("$.options[1]").value("Staging"));
+                .andExpect(jsonPath("$.options[1]").value("Denied"));
 
         mockMvc.perform(get("/api/v1/servers/{id}/attributes", serverId).with(admin()))
                 .andExpect(status().isOk())
@@ -100,9 +131,9 @@ class ServerAttributeApiTest {
 
     @Test
     void theThreeKindsAreAllDefinable() throws Exception {
-        define("Environment", "CHOICE", false, "[\"Production\",\"Staging\"]");
-        define("Tags", "TEXT", true, "[]");
-        define("In scope for audit", "BOOLEAN", false, "[]");
+        define("ATOStatus", "ATO status", "CHOICE", false, "[\"Authorized\",\"Denied\"]");
+        define("icNetworks", "Networks", "TEXT", true, "[]");
+        define("icAudited", "In scope for audit", "BOOLEAN", false, "[]");
 
         mockMvc.perform(get(ADMIN).with(admin()))
                 .andExpect(status().isOk())
@@ -115,7 +146,7 @@ class ServerAttributeApiTest {
     @Test
     void aReaderNeitherDefinesNorSets() throws Exception {
         Long id = attributes
-                .create("Environment", null, ServerAttributeType.TEXT, false, null, null, "alice")
+                .create("ATOStatus", "ATO status", null, ServerAttributeType.TEXT, false, null, null, "alice")
                 .getId();
 
         mockMvc.perform(get(ADMIN).with(reader())).andExpect(status().isForbidden());
@@ -123,7 +154,7 @@ class ServerAttributeApiTest {
                         .with(reader())
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Sneaky\",\"type\":\"TEXT\"}"))
+                        .content("{\"ldapAttribute\":\"sneaky\",\"type\":\"TEXT\"}"))
                 .andExpect(status().isForbidden());
         mockMvc.perform(delete(ADMIN + "/" + id).with(reader()).with(csrf()))
                 .andExpect(status().isForbidden());
@@ -131,14 +162,15 @@ class ServerAttributeApiTest {
                         .with(reader())
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"values\":[\"Production\"]}"))
+                        .content("{\"values\":[\"Authorized\"]}"))
                 .andExpect(status().isForbidden());
 
         // But they see what a server holds, and are told they may not change it.
         mockMvc.perform(get("/api/v1/servers/{id}/attributes", serverId).with(reader()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.editable").value(false))
-                .andExpect(jsonPath("$.attributes[0].name").value("Environment"));
+                .andExpect(jsonPath("$.attributes[0].name").value("ATO status"))
+                .andExpect(jsonPath("$.attributes[0].ldapAttribute").value("ATOStatus"));
     }
 
     @Test
@@ -149,19 +181,20 @@ class ServerAttributeApiTest {
     }
 
     @Test
-    void settingAValueAndClearingItAgain() throws Exception {
+    void settingAValueWritesItToTheDirectoryAndClearingItTakesItOff() throws Exception {
         Long id = attributes
-                .create("Tags", null, ServerAttributeType.TEXT, true, null, null, "alice")
+                .create("icNetworks", "Networks", null, ServerAttributeType.TEXT, true, null, null, "alice")
                 .getId();
 
         mockMvc.perform(put("/api/v1/servers/{id}/attributes/{definitionId}", serverId, id)
                         .with(admin())
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"values\":[\"payroll\",\"tier-1\"]}"))
+                        .content("{\"values\":[\"JWICS\",\"SIPRNET\"]}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.values[0]").value("payroll"))
-                .andExpect(jsonPath("$.values[1]").value("tier-1"));
+                .andExpect(jsonPath("$.values[0]").value("JWICS"))
+                .andExpect(jsonPath("$.values[1]").value("SIPRNET"));
+        assertThat(directory.valuesOf(serverDn, "icNetworks")).containsExactlyInAnyOrder("JWICS", "SIPRNET");
 
         mockMvc.perform(put("/api/v1/servers/{id}/attributes/{definitionId}", serverId, id)
                         .with(admin())
@@ -170,13 +203,15 @@ class ServerAttributeApiTest {
                         .content("{\"values\":[]}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.values.length()").value(0));
+        assertThat(directory.valuesOf(serverDn, "icNetworks")).isEmpty();
     }
 
     /** The refusal says what the rule is, because the page prints it as it stands. */
     @Test
     void aValueThatBreaksTheDefinitionIsRefusedInWords() throws Exception {
         Long id = attributes
-                .create("Environment", null, ServerAttributeType.CHOICE, false, List.of("Production"), null, "alice")
+                .create("ATOStatus", "ATO status", null, ServerAttributeType.CHOICE, false, List.of("Authorized"),
+                        null, "alice")
                 .getId();
 
         mockMvc.perform(put("/api/v1/servers/{id}/attributes/{definitionId}", serverId, id)
@@ -192,27 +227,26 @@ class ServerAttributeApiTest {
                         .with(admin())
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Nowhere\",\"type\":\"CHOICE\",\"options\":[]}"))
+                        .content("{\"ldapAttribute\":\"icNowhere\",\"type\":\"CHOICE\",\"options\":[]}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.detail")
                         .value(org.hamcrest.Matchers.containsString("at least one value")));
     }
 
+    /** Taking it off the list stops it being offered; the directory keeps what it holds. */
     @Test
-    void retiringAnAttributeTakesItOffEveryServer() throws Exception {
+    void takingAnAttributeOffTheListLeavesTheDirectoryAlone() throws Exception {
         Long id = attributes
-                .create("Tags", null, ServerAttributeType.TEXT, true, null, null, "alice")
+                .create("icNetworks", "Networks", null, ServerAttributeType.TEXT, true, null, null, "alice")
                 .getId();
-        attributes.setValues(serverId, id, List.of("payroll"), "alice");
-
-        mockMvc.perform(get(ADMIN).with(admin()))
-                .andExpect(jsonPath("$[0].serversHolding").value(1));
+        attributes.setValues(serverId, id, List.of("JWICS"), "alice");
 
         mockMvc.perform(delete(ADMIN + "/" + id).with(admin()).with(csrf()))
                 .andExpect(status().isNoContent());
 
         mockMvc.perform(get("/api/v1/servers/{id}/attributes", serverId).with(admin()))
                 .andExpect(jsonPath("$.attributes.length()").value(0));
+        assertThat(directory.valuesOf(serverDn, "icNetworks")).containsExactly("JWICS");
     }
 
     /** The page renders the card, which fills itself in from the endpoint. */
@@ -221,25 +255,26 @@ class ServerAttributeApiTest {
         mockMvc.perform(get("/servers/{id}", serverId).with(admin()))
                 .andExpect(status().isOk())
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("id=\"server-attributes\"")))
-                .andExpect(content().string(org.hamcrest.Matchers.containsString("Managed attributes")));
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("Directory attributes")));
     }
 
     @Test
     void theAdministrationPageCarriesTheEditor() throws Exception {
         mockMvc.perform(get("/admin").with(admin()))
                 .andExpect(status().isOk())
-                .andExpect(content().string(org.hamcrest.Matchers.containsString("Server attributes")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("Editable directory attributes")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("id=\"attribute-form\"")));
     }
 
-    private void define(String name, String type, boolean multiValued, String options) throws Exception {
+    private void define(String attribute, String name, String type, boolean multiValued, String options)
+            throws Exception {
         mockMvc.perform(post(ADMIN)
                         .with(admin())
                         .with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"name":"%s","type":"%s","multiValued":%s,"options":%s}"""
-                                .formatted(name, type, multiValued, options)))
+                                {"ldapAttribute":"%s","name":"%s","type":"%s","multiValued":%s,"options":%s}"""
+                                .formatted(attribute, name, type, multiValued, options)))
                 .andExpect(status().isCreated());
     }
 

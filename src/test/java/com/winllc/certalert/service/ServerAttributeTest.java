@@ -5,32 +5,37 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.winllc.certalert.domain.AuditAction;
 import com.winllc.certalert.domain.AuditEvent;
-import com.winllc.certalert.domain.DirectoryServer;
 import com.winllc.certalert.domain.OwnerType;
 import com.winllc.certalert.domain.ServerAttributeDefinition;
 import com.winllc.certalert.domain.ServerAttributeType;
 import com.winllc.certalert.repository.AuditEventRepository;
 import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.ServerAttributeDefinitionRepository;
-import com.winllc.certalert.repository.ServerAttributeValueRepository;
-import java.time.Instant;
+import com.winllc.certalert.support.EmbeddedDirectory;
 import java.util.List;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 
 /**
- * The attributes a deployment keeps about its servers on top of the directory's schema.
+ * Editing the directory's own attributes from here.
  *
- * <p>The interesting part is what a definition may become once servers hold values for it:
- * the values are what bound it, and every refusal has to say what is in the way.
+ * <p>Driven against a real directory, and asserted against the entry rather than against
+ * anything this application stored: the whole point is that the value ends up in the
+ * directory, so reading it back out of our own tables would prove nothing.
  */
 @SpringBootTest
 @ActiveProfiles("test")
 class ServerAttributeTest {
+
+    private static EmbeddedDirectory directory;
 
     @Autowired
     private ServerAttributeService attributes;
@@ -39,7 +44,7 @@ class ServerAttributeTest {
     private ServerAttributeDefinitionRepository definitions;
 
     @Autowired
-    private ServerAttributeValueRepository values;
+    private DirectorySyncService syncService;
 
     @Autowired
     private DirectoryServerRepository servers;
@@ -47,252 +52,246 @@ class ServerAttributeTest {
     @Autowired
     private AuditEventRepository auditRepository;
 
+    /** The directory outlives each test, so the entry is added once and reset per test. */
+    private static String webDn;
+
     private Long webId;
-    private Long dbId;
+
+    @BeforeAll
+    static void startDirectory() {
+        directory = new EmbeddedDirectory();
+        webDn = directory.addServer(
+                "attr-web01", "https://attr-web01.example.gov", new String[] {"ops@example.gov"});
+    }
+
+    @AfterAll
+    static void stopDirectory() {
+        if (directory != null) {
+            directory.close();
+        }
+    }
+
+    @DynamicPropertySource
+    static void properties(DynamicPropertyRegistry registry) {
+        registry.add("spring.ldap.urls", () -> directory.url());
+        registry.add("spring.ldap.base", () -> EmbeddedDirectory.BASE_DN);
+        registry.add("cert-alert.ldap.user.search-base", () -> "ou=people");
+        registry.add("cert-alert.ldap.server.search-base", () -> "ou=servers");
+    }
 
     @BeforeEach
     void seed() {
-        values.deleteAll();
         definitions.deleteAll();
         auditRepository.deleteAll();
         servers.deleteAll();
 
-        webId = servers.save(server("cn=web01,ou=servers", "web01")).getId();
-        dbId = servers.save(server("cn=db01,ou=servers", "db01")).getId();
+        // Left as the directory would have it between tests.
+        directory.modify(webDn, "ATOStatus");
+        directory.modify(webDn, "lifeCycleStatus");
+        directory.modify(webDn, "icNetworks");
+        syncService.syncServers();
+        webId = servers.findByDn(webDn).orElseThrow().getId();
     }
 
     @Test
-    void anAttributeIsDefinedOnceAndAppliesToEveryServer() {
-        ServerAttributeDefinition environment = attributes.create(
-                "Environment", "Where it runs", ServerAttributeType.CHOICE, false,
-                List.of("Production", "Staging"), null, "alice");
+    void whatIsTypedHereEndsUpInTheDirectory() {
+        ServerAttributeDefinition ato = attributes.create(
+                "ATOStatus", "ATO status", "Authorization to operate", ServerAttributeType.CHOICE, false,
+                List.of("Authorized", "Denied", "Expired"), null, "alice");
 
-        assertThat(environment.getId()).isNotNull();
-        assertThat(environment.getOptions()).containsExactly("Production", "Staging");
-        assertThat(attributes.list()).extracting(ServerAttributeDefinition::getName).containsExactly("Environment");
+        attributes.setValues(webId, ato.getId(), List.of("Authorized"), "alice");
 
-        attributes.setValues(webId, environment.getId(), List.of("Production"), "alice");
+        assertThat(directory.valuesOf(webDn, "ATOStatus")).containsExactly("Authorized");
+        assertThat(attributes.valuesFor(webId)).containsEntry(ato.getId(), List.of("Authorized"));
+    }
 
-        assertThat(attributes.valuesFor(webId)).containsEntry(environment.getId(), List.of("Production"));
-        assertThat(attributes.valuesFor(dbId)).as("the other server holds nothing yet").isEmpty();
+    /** And what is in the directory is what the page shows, however it got there. */
+    @Test
+    void whatTheDirectorySaysIsWhatIsRead() {
+        ServerAttributeDefinition ato = attributes.create(
+                "ATOStatus", "ATO status", null, ServerAttributeType.TEXT, false, null, null, "alice");
+
+        directory.modify(webDn, "ATOStatus", "Authorized");
+
+        assertThat(attributes.valuesFor(webId)).containsEntry(ato.getId(), List.of("Authorized"));
     }
 
     @Test
-    void refusesTwoAttributesOfTheSameNameAndOneWithNone() {
-        attributes.create("Environment", null, ServerAttributeType.TEXT, false, null, null, "alice");
+    void severalValuesAreWrittenAsSeveralAttributeValues() {
+        ServerAttributeDefinition networks = attributes.create(
+                "icNetworks", "Networks", null, ServerAttributeType.TEXT, true, null, null, "alice");
 
-        assertThatThrownBy(() -> attributes.create(
-                        "environment", null, ServerAttributeType.TEXT, false, null, null, "alice"))
-                .isInstanceOf(ContactAlreadyExistsException.class);
-        assertThatThrownBy(() -> attributes.create(
-                        "  ", null, ServerAttributeType.TEXT, false, null, null, "alice"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("needs a name");
+        attributes.setValues(webId, networks.getId(), List.of("JWICS", "SIPRNET", "JWICS"), "alice");
+
+        assertThat(directory.valuesOf(webDn, "icNetworks")).containsExactlyInAnyOrder("JWICS", "SIPRNET");
+        assertThat(attributes.valuesFor(webId).get(networks.getId())).hasSize(2);
     }
 
+    /** Clearing takes the attribute off the entry: a directory has no empty attribute. */
     @Test
-    void aDropDownNeedsSomethingToChooseFrom() {
-        assertThatThrownBy(() -> attributes.create(
-                        "Environment", null, ServerAttributeType.CHOICE, false, List.of(), null, "alice"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("at least one value");
+    void clearingTakesTheAttributeOffTheEntry() {
+        ServerAttributeDefinition ato = attributes.create(
+                "ATOStatus", "ATO status", null, ServerAttributeType.TEXT, false, null, null, "alice");
+        attributes.setValues(webId, ato.getId(), List.of("Authorized"), "alice");
+
+        attributes.setValues(webId, ato.getId(), List.of(), "alice");
+
+        assertThat(directory.valuesOf(webDn, "ATOStatus")).isEmpty();
+        assertThat(attributes.valuesFor(webId).get(ato.getId())).isEmpty();
     }
 
-    /** A second value would have to contradict the first. */
+    /** A boolean is TRUE in a directory, and absent rather than FALSE when it is not set. */
     @Test
-    void aBooleanIsAlwaysOneValue() {
+    void aBooleanIsWrittenTheWayADirectoryHoldsOne() {
         ServerAttributeDefinition audited = attributes.create(
-                "In scope for audit", null, ServerAttributeType.BOOLEAN, true, null, null, "alice");
-
-        assertThat(audited.isMultiValued()).isFalse();
-        assertThatThrownBy(() -> attributes.setValues(webId, audited.getId(), List.of("true", "false"), "alice"))
-                .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    /** "No" is the absence of the attribute, so it is not stored and reads as unset. */
-    @Test
-    void aBooleanTurnedOffHoldsNothing() {
-        ServerAttributeDefinition audited = attributes.create(
-                "In scope for audit", null, ServerAttributeType.BOOLEAN, false, null, null, "alice");
+                "icAudited", "In scope for audit", null, ServerAttributeType.BOOLEAN, false, null, null, "alice");
 
         attributes.setValues(webId, audited.getId(), List.of("true"), "alice");
+        assertThat(directory.valuesOf(webDn, "icAudited")).containsExactly("TRUE");
         assertThat(attributes.valuesFor(webId)).containsEntry(audited.getId(), List.of("true"));
 
         attributes.setValues(webId, audited.getId(), List.of("false"), "alice");
-        assertThat(attributes.valuesFor(webId)).isEmpty();
+        assertThat(directory.valuesOf(webDn, "icAudited")).isEmpty();
+        assertThat(attributes.valuesFor(webId).get(audited.getId())).isEmpty();
+    }
+
+    /** However the directory cased it, the switch reads the same. */
+    @Test
+    void aBooleanIsReadWhateverCaseTheDirectoryUsed() {
+        ServerAttributeDefinition audited = attributes.create(
+                "icAudited", "In scope for audit", null, ServerAttributeType.BOOLEAN, false, null, null, "alice");
+
+        directory.modify(webDn, "icAudited", "true");
+        assertThat(attributes.valuesFor(webId)).containsEntry(audited.getId(), List.of("true"));
+
+        directory.modify(webDn, "icAudited", "FALSE");
+        assertThat(attributes.valuesFor(webId).get(audited.getId())).isEmpty();
+    }
+
+    /**
+     * An attribute the sweep also caches is a column on the row as well as an attribute on
+     * the entry, so the row is brought back in step rather than waiting for the next sweep.
+     */
+    @Test
+    void theCachedCopyOfTheEntryCatchesUpImmediately() {
+        ServerAttributeDefinition ato = attributes.create(
+                "ATOStatus", "ATO status", null, ServerAttributeType.TEXT, false, null, null, "alice");
+
+        attributes.setValues(webId, ato.getId(), List.of("Authorized"), "alice");
+
+        assertThat(servers.findById(webId).orElseThrow().getAtoStatus()).isEqualTo("Authorized");
     }
 
     @Test
-    void severalValuesAreKeptInOrderAndWithoutRepeats() {
-        ServerAttributeDefinition tags = attributes.create(
-                "Tags", null, ServerAttributeType.TEXT, true, null, null, "alice");
+    void whatWasWrittenIsRecordedAgainstTheServer() {
+        ServerAttributeDefinition ato = attributes.create(
+                "ATOStatus", "ATO status", null, ServerAttributeType.TEXT, false, null, null, "bob");
 
-        List<String> saved = attributes.setValues(
-                webId, tags.getId(), List.of("payroll", "tier-1", "payroll", "  "), "alice");
+        attributes.setValues(webId, ato.getId(), List.of("Authorized"), "bob");
+        attributes.setValues(webId, ato.getId(), List.of(), "bob");
 
-        assertThat(saved).containsExactly("payroll", "tier-1");
-        assertThat(attributes.valuesFor(webId)).containsEntry(tags.getId(), List.of("payroll", "tier-1"));
+        List<AuditEvent> history = auditFor(webId);
+        assertThat(history).extracting(AuditEvent::getAction)
+                .startsWith(AuditAction.ATTRIBUTE_CLEARED, AuditAction.ATTRIBUTE_SET);
+        assertThat(history.get(1).getSummary()).contains("Set ATO status (ATOStatus) in the directory to Authorized");
+        assertThat(history.get(1).getActor()).isEqualTo("bob");
+        assertThat(history.get(1).getTarget()).isEqualTo("ATOStatus");
     }
 
     @Test
-    void aSingleValuedAttributeRefusesASecondValue() {
-        ServerAttributeDefinition owner = attributes.create(
-                "Budget code", null, ServerAttributeType.TEXT, false, null, null, "alice");
+    void settingWhatItAlreadyHoldsWritesNothingAndRecordsNothing() {
+        ServerAttributeDefinition ato = attributes.create(
+                "ATOStatus", "ATO status", null, ServerAttributeType.TEXT, false, null, null, "alice");
+        attributes.setValues(webId, ato.getId(), List.of("Authorized"), "alice");
+        long recorded = auditFor(webId).size();
 
-        assertThatThrownBy(() -> attributes.setValues(webId, owner.getId(), List.of("AB-1", "AB-2"), "alice"))
+        attributes.setValues(webId, ato.getId(), List.of("Authorized"), "alice");
+
+        assertThat(auditFor(webId)).hasSize((int) recorded);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // What may be defined, and what may be written
+    // ---------------------------------------------------------------------------------
+
+    @Test
+    void anAttributeIsManagedOnceAndUnderOneName() {
+        attributes.create("ATOStatus", "ATO status", null, ServerAttributeType.TEXT, false, null, null, "alice");
+
+        assertThatThrownBy(() -> attributes.create(
+                        "atostatus", "Something else", null, ServerAttributeType.TEXT, false, null, null, "alice"))
+                .isInstanceOf(ContactAlreadyExistsException.class)
+                .hasMessageContaining("already managed");
+        assertThatThrownBy(() -> attributes.create(
+                        "lifeCycleStatus", "ATO status", null, ServerAttributeType.TEXT, false, null, null, "alice"))
+                .isInstanceOf(ContactAlreadyExistsException.class)
+                .hasMessageContaining("already an attribute called");
+    }
+
+    @Test
+    void somethingThatIsNotAnAttributeNameIsRefused() {
+        assertThatThrownBy(() -> attributes.create(
+                        "", "Nothing", null, ServerAttributeType.TEXT, false, null, null, "alice"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Name the directory attribute");
+        assertThatThrownBy(() -> attributes.create(
+                        "not an attribute", "Nothing", null, ServerAttributeType.TEXT, false, null, null, "alice"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("not an attribute name");
+    }
+
+    /** Named after the attribute unless somebody says otherwise. */
+    @Test
+    void theLabelDefaultsToTheAttribute() {
+        ServerAttributeDefinition definition = attributes.create(
+                "lifeCycleStatus", " ", null, ServerAttributeType.TEXT, false, null, null, "alice");
+
+        assertThat(definition.getName()).isEqualTo("lifeCycleStatus");
+    }
+
+    @Test
+    void aDropDownNeedsSomethingToChooseFromAndRefusesAnythingElse() {
+        assertThatThrownBy(() -> attributes.create(
+                        "ATOStatus", "ATO status", null, ServerAttributeType.CHOICE, false, List.of(), null, "alice"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("at least one value");
+
+        ServerAttributeDefinition ato = attributes.create(
+                "ATOStatus", "ATO status", null, ServerAttributeType.CHOICE, false, List.of("Authorized"), null,
+                "alice");
+        assertThatThrownBy(() -> attributes.setValues(webId, ato.getId(), List.of("Whatever"), "alice"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("not one of the values");
+        assertThat(directory.valuesOf(webDn, "ATOStatus")).as("nothing was written").isEmpty();
+    }
+
+    @Test
+    void aBooleanIsAlwaysOneValueAndASingleValuedAttributeRefusesASecond() {
+        ServerAttributeDefinition audited = attributes.create(
+                "icAudited", "In scope for audit", null, ServerAttributeType.BOOLEAN, true, null, null, "alice");
+        assertThat(audited.isMultiValued()).isFalse();
+
+        ServerAttributeDefinition ato = attributes.create(
+                "ATOStatus", "ATO status", null, ServerAttributeType.TEXT, false, null, null, "alice");
+        assertThatThrownBy(() -> attributes.setValues(webId, ato.getId(), List.of("One", "Two"), "alice"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("holds one value");
     }
 
+    /**
+     * Retiring a definition stops it being offered here. The directory goes on holding what
+     * it held: those values were never this application's to remove.
+     */
     @Test
-    void aDropDownRefusesSomethingNotOnTheList() {
-        ServerAttributeDefinition environment = attributes.create(
-                "Environment", null, ServerAttributeType.CHOICE, false, List.of("Production", "Staging"), null,
-                "alice");
+    void takingAnAttributeOffTheListLeavesTheDirectoryAlone() {
+        ServerAttributeDefinition ato = attributes.create(
+                "ATOStatus", "ATO status", null, ServerAttributeType.TEXT, false, null, null, "alice");
+        attributes.setValues(webId, ato.getId(), List.of("Authorized"), "alice");
 
-        assertThatThrownBy(() -> attributes.setValues(webId, environment.getId(), List.of("Sandbox"), "alice"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("not one of the values");
-    }
+        attributes.delete(ato.getId(), "alice");
 
-    /** Setting it again replaces what was there rather than adding to it. */
-    @Test
-    void settingAnAttributeReplacesWhatItHeld() {
-        ServerAttributeDefinition tags = attributes.create(
-                "Tags", null, ServerAttributeType.TEXT, true, null, null, "alice");
-        attributes.setValues(webId, tags.getId(), List.of("payroll", "tier-1"), "alice");
-
-        attributes.setValues(webId, tags.getId(), List.of("tier-2"), "alice");
-
-        assertThat(attributes.valuesFor(webId)).containsEntry(tags.getId(), List.of("tier-2"));
-        assertThat(values.findByServerIdOrderByPositionAscIdAsc(webId)).hasSize(1);
-    }
-
-    @Test
-    void clearingAnAttributeLeavesNothingBehind() {
-        ServerAttributeDefinition tags = attributes.create(
-                "Tags", null, ServerAttributeType.TEXT, true, null, null, "alice");
-        attributes.setValues(webId, tags.getId(), List.of("payroll"), "alice");
-
-        attributes.setValues(webId, tags.getId(), List.of(), "alice");
-
-        assertThat(attributes.valuesFor(webId)).isEmpty();
-        assertThat(auditFor(webId)).extracting(AuditEvent::getAction)
-                .containsExactly(AuditAction.ATTRIBUTE_CLEARED, AuditAction.ATTRIBUTE_SET);
-        assertThat(auditFor(webId).getFirst().getSummary()).contains("Cleared Tags").contains("payroll");
-    }
-
-    @Test
-    void whatWasSetIsRecordedAgainstTheServer() {
-        ServerAttributeDefinition environment = attributes.create(
-                "Environment", null, ServerAttributeType.CHOICE, false, List.of("Production"), null, "alice");
-
-        attributes.setValues(webId, environment.getId(), List.of("Production"), "bob");
-
-        List<AuditEvent> history = auditFor(webId);
-        assertThat(history).hasSize(1);
-        assertThat(history.getFirst().getAction()).isEqualTo(AuditAction.ATTRIBUTE_SET);
-        assertThat(history.getFirst().getSummary()).isEqualTo("Set Environment to Production");
-        assertThat(history.getFirst().getActor()).isEqualTo("bob");
-        assertThat(history.getFirst().getTarget()).isEqualTo("Environment");
-    }
-
-    /** Setting it to what it already says is not a change, and nothing is recorded. */
-    @Test
-    void settingTheSameValueAgainRecordsNothing() {
-        ServerAttributeDefinition tags = attributes.create(
-                "Tags", null, ServerAttributeType.TEXT, true, null, null, "alice");
-        attributes.setValues(webId, tags.getId(), List.of("payroll"), "alice");
-
-        attributes.setValues(webId, tags.getId(), List.of("payroll"), "alice");
-
-        assertThat(auditFor(webId)).hasSize(1);
-    }
-
-    // ---------------------------------------------------------------------------------
-    // What a definition may become, once servers hold values for it
-    // ---------------------------------------------------------------------------------
-
-    @Test
-    void anOptionStillInUseCannotBeTakenAway() {
-        ServerAttributeDefinition environment = attributes.create(
-                "Environment", null, ServerAttributeType.CHOICE, false, List.of("Production", "Staging"), null,
-                "alice");
-        attributes.setValues(webId, environment.getId(), List.of("Staging"), "alice");
-
-        assertThatThrownBy(() -> attributes.update(
-                        environment.getId(), "Environment", null, ServerAttributeType.CHOICE, false,
-                        List.of("Production"), null, "alice"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Staging");
-
-        // Adding one is never a problem.
-        attributes.update(environment.getId(), "Environment", null, ServerAttributeType.CHOICE, false,
-                List.of("Production", "Staging", "Development"), null, "alice");
-        assertThat(attributes.get(environment.getId()).getOptions()).hasSize(3);
-    }
-
-    @Test
-    void severalCannotBecomeOneWhileAServerHoldsTwo() {
-        ServerAttributeDefinition tags = attributes.create(
-                "Tags", null, ServerAttributeType.TEXT, true, null, null, "alice");
-        attributes.setValues(webId, tags.getId(), List.of("payroll", "tier-1"), "alice");
-
-        assertThatThrownBy(() -> attributes.update(
-                        tags.getId(), "Tags", null, ServerAttributeType.TEXT, false, null, null, "alice"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("more than one value");
-
-        attributes.setValues(webId, tags.getId(), List.of("payroll"), "alice");
-        attributes.update(tags.getId(), "Tags", null, ServerAttributeType.TEXT, false, null, null, "alice");
-        assertThat(attributes.get(tags.getId()).isMultiValued()).isFalse();
-    }
-
-    @Test
-    void theKindCannotChangeUnderneathValuesRecordedAsSomethingElse() {
-        ServerAttributeDefinition environment = attributes.create(
-                "Environment", null, ServerAttributeType.TEXT, false, null, null, "alice");
-        attributes.setValues(webId, environment.getId(), List.of("Production"), "alice");
-
-        assertThatThrownBy(() -> attributes.update(
-                        environment.getId(), "Environment", null, ServerAttributeType.CHOICE, false,
-                        List.of("Production"), null, "alice"))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("cannot change kind");
-
-        attributes.setValues(webId, environment.getId(), List.of(), "alice");
-        attributes.update(environment.getId(), "Environment", null, ServerAttributeType.CHOICE, false,
-                List.of("Production"), null, "alice");
-        assertThat(attributes.get(environment.getId()).getType()).isEqualTo(ServerAttributeType.CHOICE);
-    }
-
-    /** Retiring an attribute takes its values, which mean nothing without it. */
-    @Test
-    void retiringAnAttributeTakesWhatWasHeldForIt() {
-        ServerAttributeDefinition tags = attributes.create(
-                "Tags", null, ServerAttributeType.TEXT, true, null, null, "alice");
-        attributes.setValues(webId, tags.getId(), List.of("payroll"), "alice");
-        attributes.setValues(dbId, tags.getId(), List.of("payroll"), "alice");
-
-        attributes.delete(tags.getId(), "alice");
-
-        assertThat(definitions.findById(tags.getId())).isEmpty();
-        assertThat(values.count()).isZero();
-        assertThat(servers.findById(webId)).as("the server is the directory's").isPresent();
-    }
-
-    /** A pruned server takes its own values with it, like everything else hanging off it. */
-    @Test
-    void aServerLeavingTakesItsValuesWithIt() {
-        ServerAttributeDefinition tags = attributes.create(
-                "Tags", null, ServerAttributeType.TEXT, true, null, null, "alice");
-        attributes.setValues(webId, tags.getId(), List.of("payroll"), "alice");
-        attributes.setValues(dbId, tags.getId(), List.of("ledger"), "alice");
-
-        servers.deleteById(webId);
-
-        assertThat(values.findByServerIdOrderByPositionAscIdAsc(webId)).isEmpty();
-        assertThat(attributes.valuesFor(dbId)).containsEntry(tags.getId(), List.of("ledger"));
+        assertThat(definitions.findById(ato.getId())).isEmpty();
+        assertThat(directory.valuesOf(webDn, "ATOStatus")).containsExactly("Authorized");
     }
 
     private List<AuditEvent> auditFor(Long serverId) {
@@ -300,12 +299,5 @@ class ServerAttributeTest {
                 .findBySubjectTypeAndSubjectIdOrderByOccurredAtDescIdDesc(
                         OwnerType.SERVER, serverId, PageRequest.of(0, 20))
                 .getContent();
-    }
-
-    private DirectoryServer server(String dn, String commonName) {
-        DirectoryServer server = new DirectoryServer(dn);
-        server.setCommonName(commonName);
-        server.markSynced(Instant.now());
-        return server;
     }
 }

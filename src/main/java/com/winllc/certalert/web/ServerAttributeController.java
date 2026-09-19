@@ -2,7 +2,7 @@ package com.winllc.certalert.web;
 
 import com.winllc.certalert.domain.ServerAttributeDefinition;
 import com.winllc.certalert.repository.DirectoryServerRepository;
-import com.winllc.certalert.repository.ServerAttributeValueRepository;
+import com.winllc.certalert.security.DirectoryPrincipal;
 import com.winllc.certalert.security.SignedInDirectoryUser;
 import com.winllc.certalert.service.ResourceNotFoundException;
 import com.winllc.certalert.service.ServerAttributeService;
@@ -12,8 +12,8 @@ import com.winllc.certalert.web.dto.ServerAttributeValuesRequest;
 import com.winllc.certalert.web.dto.ServerAttributes;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
-import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,26 +31,27 @@ import org.springframework.web.bind.annotation.RestController;
  * The attributes this deployment keeps about its servers: what they are, and what each
  * server holds for them.
  *
- * <p>Defining them is administration - one added here becomes a field on every server at
- * once - so those endpoints sit under {@code /admin} and the filter chain keeps them there.
- * Reading what a server holds is open to anyone signed in, like the rest of a server's
- * details; setting it is an administrator's, which the read says so the page does not offer
- * a control it will refuse.
+ * <p>The values are the directory's: read from the entry when this is asked and written
+ * back to it when somebody changes one. Nothing about them is kept here.
+ *
+ * <p>Saying which attributes may be edited is administration - naming one adds a field to
+ * every server at once - so those endpoints sit under {@code /admin} and the filter chain
+ * keeps them there. Reading what a server holds is open to anyone signed in, like the rest
+ * of a server's details; writing is an administrator's, which the read says so the page does
+ * not offer a control it will refuse.
  */
 @RestController
 @RequestMapping("/api/v1")
 public class ServerAttributeController {
 
+    private static final Logger log = LoggerFactory.getLogger(ServerAttributeController.class);
+
     private final ServerAttributeService attributeService;
-    private final ServerAttributeValueRepository valueRepository;
     private final DirectoryServerRepository serverRepository;
 
     public ServerAttributeController(
-            ServerAttributeService attributeService,
-            ServerAttributeValueRepository valueRepository,
-            DirectoryServerRepository serverRepository) {
+            ServerAttributeService attributeService, DirectoryServerRepository serverRepository) {
         this.attributeService = attributeService;
-        this.valueRepository = valueRepository;
         this.serverRepository = serverRepository;
     }
 
@@ -61,20 +62,14 @@ public class ServerAttributeController {
     @GetMapping("/admin/server-attributes")
     @Transactional(readOnly = true)
     public List<ServerAttributeRow> definitions() {
-        Map<Long, Long> holding = valueRepository.countServersByDefinition().stream()
-                .collect(Collectors.toMap(
-                        ServerAttributeValueRepository.DefinitionUsage::getDefinitionId,
-                        ServerAttributeValueRepository.DefinitionUsage::getTotal));
-        return attributeService.list().stream()
-                .map(definition ->
-                        ServerAttributeRow.from(definition, null, holding.getOrDefault(definition.getId(), 0L)))
-                .toList();
+        return attributeService.list().stream().map(ServerAttributeRow::of).toList();
     }
 
     @PostMapping("/admin/server-attributes")
     @ResponseStatus(HttpStatus.CREATED)
     public ServerAttributeRow define(@RequestBody ServerAttributeRequest request, Authentication authentication) {
         return ServerAttributeRow.of(attributeService.create(
+                request.ldapAttribute(),
                 request.name(),
                 request.description(),
                 request.type(),
@@ -90,6 +85,7 @@ public class ServerAttributeController {
 
         return ServerAttributeRow.of(attributeService.update(
                 id,
+                request.ldapAttribute(),
                 request.name(),
                 request.description(),
                 request.type(),
@@ -99,7 +95,10 @@ public class ServerAttributeController {
                 nameOf(authentication)));
     }
 
-    /** Retires an attribute, and with it everything held for it. */
+    /**
+     * Stops offering an attribute for editing. The values stay in the directory: they were
+     * never this application's to remove.
+     */
     @DeleteMapping("/admin/server-attributes/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void retire(@PathVariable Long id, Authentication authentication) {
@@ -116,12 +115,31 @@ public class ServerAttributeController {
         if (!serverRepository.existsById(id)) {
             throw ResourceNotFoundException.server(id);
         }
-        Map<Long, List<String>> held = attributeService.valuesFor(id);
-        List<ServerAttributeRow> rows = attributeService.list().stream()
-                .map(definition -> ServerAttributeRow.from(
-                        definition, held.getOrDefault(definition.getId(), List.of()), null))
+        List<ServerAttributeDefinition> managed = attributeService.list();
+        // Not gated on whether this application binds as anybody: an anonymous connection
+        // to a directory that permits anonymous writes is unusual but not impossible, and
+        // the directory has the last word either way. The page warns instead.
+        boolean editable = SignedInDirectoryUser.isAdmin(authentication);
+
+        Map<Long, List<String>> held;
+        try {
+            held = attributeService.valuesFor(id);
+        } catch (RuntimeException e) {
+            // The directory holds these; showing none of them as though the entry were
+            // empty would be a lie about somebody else's data.
+            log.warn("Could not read the managed attributes of server {}", id, e);
+            return new ServerAttributes(
+                    managed.stream().map(ServerAttributeRow::of).toList(),
+                    false,
+                    attributeService.canWrite(),
+                    "The directory could not be read, so these are not what the entry holds.");
+        }
+
+        List<ServerAttributeRow> rows = managed.stream()
+                .map(definition ->
+                        ServerAttributeRow.from(definition, held.getOrDefault(definition.getId(), List.of())))
                 .toList();
-        return new ServerAttributes(rows, SignedInDirectoryUser.isAdmin(authentication));
+        return new ServerAttributes(rows, editable, attributeService.canWrite(), null);
     }
 
     @PutMapping("/servers/{id}/attributes/{definitionId}")
@@ -132,23 +150,17 @@ public class ServerAttributeController {
             Authentication authentication) {
 
         List<String> saved = attributeService.setValues(id, definitionId, request.values(), nameOf(authentication));
-        ServerAttributeDefinition definition = attributeService.get(definitionId);
-        return ServerAttributeRow.from(definition, saved, null);
+        return ServerAttributeRow.from(attributeService.get(definitionId), saved);
     }
 
     private String nameOf(Authentication authentication) {
         if (authentication == null) {
             return null;
         }
-        if (authentication.getPrincipal()
-                instanceof com.winllc.certalert.security.DirectoryPrincipal principal) {
+        if (authentication.getPrincipal() instanceof DirectoryPrincipal principal) {
             return principal.getUsername();
         }
         return authentication.getName();
     }
 
-    /** Definitions by id, where a caller needs to look one up. */
-    static Map<Long, ServerAttributeRow> byId(List<ServerAttributeRow> rows) {
-        return rows.stream().collect(Collectors.toMap(ServerAttributeRow::id, Function.identity()));
-    }
 }

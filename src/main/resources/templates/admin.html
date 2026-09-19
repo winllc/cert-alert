@@ -54,20 +54,20 @@
                        schema. Defined here; filled in on each server's page. */-->
                 <div class="card mb-3" id="server-attribute-admin">
                     <div class="card-header">
-                        <h3 class="card-title">Server attributes</h3>
+                        <h3 class="card-title">Editable directory attributes</h3>
                         <div class="card-actions text-secondary small">
-                            Added here, filled in on a server's page
+                            Attributes of the server entry, edited on a server's page and written to the directory
                         </div>
                     </div>
                     <div class="table-responsive">
                         <table class="table card-table table-vcenter">
                             <thead>
                             <tr>
-                                <th>Name</th>
+                                <th>Attribute</th>
+                                <th>Shown as</th>
                                 <th>Kind</th>
                                 <th>Values</th>
                                 <th>Choices</th>
-                                <th>Servers holding it</th>
                                 <th></th>
                             </tr>
                             </thead>
@@ -80,9 +80,14 @@
                         <form id="attribute-form" class="row g-2 align-items-end">
                             <input type="hidden" id="attribute-id">
                             <div class="col-12 col-md-2">
-                                <label class="form-label" for="attribute-name">Name</label>
+                                <label class="form-label" for="attribute-ldap">Directory attribute</label>
+                                <input type="text" id="attribute-ldap" class="form-control mono" maxlength="120"
+                                       placeholder="ATOStatus" required>
+                            </div>
+                            <div class="col-12 col-md-2">
+                                <label class="form-label" for="attribute-name">Shown as</label>
                                 <input type="text" id="attribute-name" class="form-control" maxlength="120"
-                                       placeholder="Environment" required>
+                                       placeholder="ATO status">
                             </div>
                             <div class="col-12 col-md-3">
                                 <label class="form-label" for="attribute-description">What it is for</label>
@@ -110,7 +115,7 @@
                                           placeholder="Production&#10;Staging&#10;Development"></textarea>
                             </div>
                             <div class="col-12 d-flex align-items-center gap-2">
-                                <button type="submit" class="btn btn-primary" id="attribute-submit">Add attribute</button>
+                                <button type="submit" class="btn btn-primary" id="attribute-submit">Make editable</button>
                                 <button type="button" class="btn d-none" id="attribute-cancel">Cancel</button>
                                 <span id="attribute-message" class="text-secondary small"></span>
                             </div>

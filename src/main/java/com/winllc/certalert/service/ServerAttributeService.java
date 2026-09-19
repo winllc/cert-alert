@@ -5,37 +5,39 @@ import com.winllc.certalert.domain.AuditEvent;
 import com.winllc.certalert.domain.DirectoryServer;
 import com.winllc.certalert.domain.ServerAttributeDefinition;
 import com.winllc.certalert.domain.ServerAttributeType;
-import com.winllc.certalert.domain.ServerAttributeValue;
+import com.winllc.certalert.ldap.LdapServerAttributes;
+import com.winllc.certalert.ldap.LdapServerEntry;
 import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.ServerAttributeDefinitionRepository;
-import com.winllc.certalert.repository.ServerAttributeValueRepository;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * The attributes this deployment keeps about its servers, and what each server holds for
- * them.
+ * The directory attributes this deployment lets people edit from here, and the editing
+ * itself.
  *
- * <p>Two halves, deliberately apart. The definitions are the deployment's shape and are an
- * administrator's: adding one adds a field to every server at once, and retiring one takes
- * every value with it. Filling them in is ordinary editing of one server.
+ * <p>Two halves, deliberately apart. Which attributes are editable is the deployment's
+ * shape and an administrator's: naming one adds a field to every server at once. Filling
+ * one in is ordinary editing of one server - except that the server is the directory's, so
+ * the value is read from the entry when a page asks and written back to it when somebody
+ * changes it. Nothing is kept here in between: a copy of an attribute that can be edited in
+ * two places is a copy that will disagree with itself.
  *
- * <p>What a definition may become once servers hold values for it is bounded by those
- * values rather than by nothing: an option still in use cannot be taken out of the list,
- * "several" cannot become "one" while a server holds two, and the kind of thing an
- * attribute is cannot change underneath values recorded as something else. Every one of
- * those refusals names what is in the way, because "cannot" without "because" means
- * somebody goes looking in the database.
+ * <p>What this application knows that the directory does not is the shape a value should
+ * take: that {@code ATOStatus} is one of four words rather than free text, that a flag is a
+ * flag. That is what a definition records, and what is checked before anything is written.
+ * The directory's own schema still has the last word, and what it refuses comes back as it
+ * was refused.
  */
 @Service
 public class ServerAttributeService {
@@ -44,27 +46,33 @@ public class ServerAttributeService {
 
     private static final int MAX_VALUE_LENGTH = 1000;
 
+    /** What a directory holds for a boolean: RFC 4517 says these, in upper case. */
+    private static final String TRUE = "TRUE";
+
     private final ServerAttributeDefinitionRepository definitions;
-    private final ServerAttributeValueRepository values;
     private final DirectoryServerRepository servers;
+    private final LdapServerAttributes directory;
+    private final DirectoryPersistenceService persistence;
     private final AuditService auditService;
     private final Clock clock;
 
     public ServerAttributeService(
             ServerAttributeDefinitionRepository definitions,
-            ServerAttributeValueRepository values,
             DirectoryServerRepository servers,
+            LdapServerAttributes directory,
+            DirectoryPersistenceService persistence,
             AuditService auditService,
             Clock clock) {
         this.definitions = definitions;
-        this.values = values;
         this.servers = servers;
+        this.directory = directory;
+        this.persistence = persistence;
         this.auditService = auditService;
         this.clock = clock;
     }
 
     // -------------------------------------------------------------------------------------
-    // What the deployment keeps: an administrator's
+    // Which attributes are editable: an administrator's
     // -------------------------------------------------------------------------------------
 
     @Transactional(readOnly = true)
@@ -74,12 +82,13 @@ public class ServerAttributeService {
 
     @Transactional(readOnly = true)
     public ServerAttributeDefinition get(Long id) {
-        return definitions.findById(id).orElseThrow(() -> new ResourceNotFoundException(
-                "No managed attribute with id " + id));
+        return definitions.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("No managed attribute with id " + id));
     }
 
     @Transactional
     public ServerAttributeDefinition create(
+            String ldapAttribute,
             String name,
             String description,
             ServerAttributeType type,
@@ -88,17 +97,17 @@ public class ServerAttributeService {
             Integer displayOrder,
             String actor) {
 
-        String trimmed = requireName(name);
-        definitions.findByNameIgnoreCase(trimmed).ifPresent(existing -> {
-            throw new ContactAlreadyExistsException("There is already an attribute called " + existing.getName());
-        });
+        String attribute = requireAttribute(ldapAttribute);
+        String label = name == null || name.isBlank() ? attribute : name.trim();
+        requireUnused(attribute, label, null);
 
         List<String> cleaned = cleanOptions(type, options);
         boolean several = multiValued && type.allowsMultipleValues();
-        Instant now = Instant.now(clock);
 
+        Instant now = Instant.now(clock);
         ServerAttributeDefinition definition = definitions.save(new ServerAttributeDefinition(
-                trimmed,
+                attribute,
+                label,
                 blankToNull(description),
                 type,
                 several,
@@ -106,14 +115,15 @@ public class ServerAttributeService {
                 displayOrder == null ? nextOrder() : displayOrder,
                 actor,
                 now));
-        log.info("Added the managed server attribute '{}' ({}, {}), by {}",
-                trimmed, type, several ? "several values" : "one value", actor);
+        log.info("The directory attribute {} is now editable here as '{}' ({}, {}), by {}",
+                attribute, label, type, several ? "several values" : "one value", actor);
         return definition;
     }
 
     @Transactional
     public ServerAttributeDefinition update(
             Long id,
+            String ldapAttribute,
             String name,
             String description,
             ServerAttributeType type,
@@ -123,136 +133,162 @@ public class ServerAttributeService {
             String actor) {
 
         ServerAttributeDefinition definition = get(id);
-        String trimmed = requireName(name);
-        definitions.findByNameIgnoreCase(trimmed).ifPresent(existing -> {
-            if (!existing.getId().equals(id)) {
-                throw new ContactAlreadyExistsException("There is already an attribute called " + existing.getName());
-            }
-        });
-
-        List<String> cleaned = cleanOptions(type, options);
-        boolean several = multiValued && type.allowsMultipleValues();
-
-        if (type != definition.getType() && values.countByDefinitionId(id) > 0) {
-            throw new IllegalArgumentException(
-                    "This attribute cannot change kind while servers hold values for it; clear them first");
-        }
-        if (!several && definition.isMultiValued() && values.widestServer(id) > 1) {
-            throw new IllegalArgumentException(
-                    "A server holds more than one value for this attribute; it cannot be narrowed to one");
-        }
-        if (type == ServerAttributeType.CHOICE) {
-            List<String> stillUsed = values.countByValue(id).stream()
-                    .map(ServerAttributeValueRepository.ValueUsage::getValue)
-                    .filter(value -> !cleaned.contains(value))
-                    .sorted()
-                    .toList();
-            if (!stillUsed.isEmpty()) {
-                throw new IllegalArgumentException(
-                        "Servers still hold %s, so %s cannot be removed from the list"
-                                .formatted(String.join(", ", stillUsed), stillUsed.size() == 1 ? "it" : "they"));
-            }
-        }
+        String attribute = requireAttribute(ldapAttribute);
+        String label = name == null || name.isBlank() ? attribute : name.trim();
+        requireUnused(attribute, label, id);
 
         definition.update(
-                trimmed,
+                attribute,
+                label,
                 blankToNull(description),
                 type,
-                several,
-                cleaned,
+                multiValued && type.allowsMultipleValues(),
+                cleanOptions(type, options),
                 displayOrder == null ? definition.getDisplayOrder() : displayOrder,
                 actor,
                 Instant.now(clock));
-        log.info("Changed the managed server attribute '{}', by {}", trimmed, actor);
+        log.info("Changed the managed attribute '{}' ({}), by {}", label, attribute, actor);
         return definition;
     }
 
-    /** Retires an attribute. The values go with it: they mean nothing without it. */
+    /**
+     * Stops offering an attribute for editing. Nothing is deleted from the directory: the
+     * values were never this application's to remove, and a server goes on holding whatever
+     * it held.
+     */
     @Transactional
     public void delete(Long id, String actor) {
         ServerAttributeDefinition definition = get(id);
-        long held = values.countByDefinitionId(id);
         definitions.delete(definition);
-        log.info("Removed the managed server attribute '{}' and {} value(s) held for it, by {}",
-                definition.getName(), held, actor);
+        log.info("{} is no longer editable here; what servers hold for it is untouched, by {}",
+                definition.getLdapAttribute(), actor);
     }
 
     // -------------------------------------------------------------------------------------
-    // What one server holds
+    // What one server holds: the directory's
     // -------------------------------------------------------------------------------------
 
+    /**
+     * What this server's entry holds for each managed attribute, read from the directory
+     * rather than from here.
+     *
+     * @return values by definition id, in the order the directory returned them
+     */
     @Transactional(readOnly = true)
     public Map<Long, List<String>> valuesFor(Long serverId) {
-        return values.findByServerIdOrderByPositionAscIdAsc(serverId).stream()
-                .collect(Collectors.groupingBy(
-                        value -> value.getDefinition().getId(),
-                        Collectors.mapping(ServerAttributeValue::getValue, Collectors.toList())));
+        DirectoryServer server = requireServer(serverId);
+        List<ServerAttributeDefinition> managed = list();
+        if (managed.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, List<String>> held = directory.read(
+                server.getDn(),
+                LdapServerAttributes.namesOf(managed.stream()
+                        .map(ServerAttributeDefinition::getLdapAttribute)
+                        .toList()));
+
+        Map<Long, List<String>> byDefinition = new LinkedHashMap<>();
+        for (ServerAttributeDefinition definition : managed) {
+            List<String> values = held.entrySet().stream()
+                    .filter(entry -> entry.getKey().equalsIgnoreCase(definition.getLdapAttribute()))
+                    .map(Map.Entry::getValue)
+                    .findFirst()
+                    .orElse(List.of());
+            byDefinition.put(definition.getId(), fromDirectory(definition, values));
+        }
+        return byDefinition;
     }
 
     /**
-     * Sets everything this server holds for one attribute, replacing whatever was there.
+     * Writes what this server should hold for one attribute, and brings the cached copy of
+     * the entry back in step with what the directory now says.
      *
-     * <p>Replacing rather than adding and removing one at a time: the page edits an
-     * attribute as a whole - a box, a drop-down, a switch - so that is what it sends, and
-     * the audit record is one line about what the attribute now says rather than a scatter.
+     * <p>The whole attribute at once, because that is what the page edits and because a
+     * replace is one operation where a sequence of adds and removes is several - and a
+     * half-applied change to who is responsible for a server is worse than a refused one.
      */
     @Transactional
     public List<String> setValues(Long serverId, Long definitionId, List<String> wanted, String actor) {
-        DirectoryServer server = servers.findById(serverId)
-                .orElseThrow(() -> ResourceNotFoundException.server(serverId));
+        DirectoryServer server = requireServer(serverId);
         ServerAttributeDefinition definition = get(definitionId);
 
         List<String> cleaned = clean(definition, wanted);
-        List<String> before = values.findByServerIdAndDefinitionIdOrderByPositionAscIdAsc(serverId, definitionId)
-                .stream()
-                .map(ServerAttributeValue::getValue)
-                .toList();
+        List<String> before = valuesFor(serverId).getOrDefault(definitionId, List.of());
         if (cleaned.equals(before)) {
             return before;
         }
 
-        Instant now = Instant.now(clock);
-        values.deleteByServerIdAndDefinitionId(serverId, definitionId);
-        // Flushed before the inserts, or the unique key sees the old rows and the new ones
-        // at once when a value is only being reordered.
-        values.flush();
-
-        List<ServerAttributeValue> saved = new ArrayList<>();
-        for (int position = 0; position < cleaned.size(); position++) {
-            saved.add(new ServerAttributeValue(
-                    definition, server, cleaned.get(position), position, actor, now));
-        }
-        values.saveAll(saved);
-
-        record(server, definition, before, cleaned, actor, now);
-        log.info("Set '{}' on {} to {}, by {}", definition.getName(), server.getDn(), cleaned, actor);
+        directory.replace(server.getDn(), definition.getLdapAttribute(), toDirectory(definition, cleaned));
+        refreshCachedEntry(server, actor);
+        record(server, definition, before, cleaned, actor);
         return cleaned;
     }
 
+    /** Whether this application binds as anybody, and so could write at all. */
+    public boolean canWrite() {
+        return directory.canWrite();
+    }
+
     // -------------------------------------------------------------------------------------
+
+    /**
+     * A managed attribute may be one the sweep also caches - {@code ATOStatus} is a column
+     * on the row as well as an attribute on the entry - so the entry is read back and put
+     * through the same path a sweep uses. A failure here is logged and no more: the write
+     * landed, and the next sweep will catch the copy up regardless.
+     */
+    private void refreshCachedEntry(DirectoryServer server, String actor) {
+        try {
+            LdapServerEntry entry = directory.reread(server.getDn());
+            if (entry != null) {
+                persistence.upsertServers(List.of(entry), Instant.now(clock), actor);
+            }
+        } catch (RuntimeException e) {
+            log.warn("Wrote to {} but could not refresh the cached copy; the next sweep will",
+                    server.getDn(), e);
+        }
+    }
 
     private void record(
             DirectoryServer server,
             ServerAttributeDefinition definition,
             List<String> before,
             List<String> after,
-            String actor,
-            Instant now) {
+            String actor) {
 
         boolean cleared = after.isEmpty();
         String summary = cleared
-                ? "Cleared %s (was %s)".formatted(definition.getName(), String.join(", ", before))
-                : "Set %s to %s".formatted(definition.getName(), String.join(", ", after));
+                ? "Cleared %s (%s) in the directory, was %s"
+                        .formatted(definition.getName(), definition.getLdapAttribute(), String.join(", ", before))
+                : "Set %s (%s) in the directory to %s"
+                        .formatted(definition.getName(), definition.getLdapAttribute(), String.join(", ", after));
         auditService.record(AuditEvent.about(
                         AuditEvent.SubjectRef.of(server),
                         cleared ? AuditAction.ATTRIBUTE_CLEARED : AuditAction.ATTRIBUTE_SET,
                         summary,
-                        now)
+                        Instant.now(clock))
                 .by(actor != null ? actor : AuditActors.current(AuditActors.SYSTEM))
-                .to(definition.getName()));
+                .to(definition.getLdapAttribute()));
     }
 
-    /** What the deployment will actually store for this attribute, in order and without repeats. */
+    /** What the page should show for what the directory holds. */
+    private List<String> fromDirectory(ServerAttributeDefinition definition, List<String> values) {
+        if (definition.getType() != ServerAttributeType.BOOLEAN) {
+            return values;
+        }
+        // A directory writes TRUE and FALSE; the page has a switch, which is on or absent.
+        return values.stream().anyMatch(value -> TRUE.equalsIgnoreCase(value)) ? List.of("true") : List.of();
+    }
+
+    /** And what the directory should hold for what the page says. */
+    private List<String> toDirectory(ServerAttributeDefinition definition, List<String> values) {
+        if (definition.getType() != ServerAttributeType.BOOLEAN) {
+            return values;
+        }
+        return values.contains("true") ? List.of(TRUE) : List.of();
+    }
+
+    /** What will actually be written: in order, without repeats, and within the definition. */
     private List<String> clean(ServerAttributeDefinition definition, List<String> wanted) {
         List<String> cleaned = new ArrayList<>(new LinkedHashSet<>(wanted == null
                 ? List.of()
@@ -278,8 +314,8 @@ public class ServerAttributeService {
                 });
             }
         }
-        // "No" is the absence of the attribute rather than a value to store, so a boolean
-        // that is off holds nothing at all and reads as unset everywhere.
+        // "No" is the absence of the attribute: a directory has no such thing as an
+        // attribute that is present and empty.
         if (definition.getType() == ServerAttributeType.BOOLEAN && cleaned.equals(List.of("false"))) {
             return List.of();
         }
@@ -302,12 +338,39 @@ public class ServerAttributeService {
         return cleaned;
     }
 
-    private String requireName(String name) {
-        String trimmed = name == null ? "" : name.trim();
+    private void requireUnused(String attribute, String label, Long self) {
+        definitions.findByLdapAttributeIgnoreCase(attribute).ifPresent(existing -> {
+            if (!existing.getId().equals(self)) {
+                throw new ContactAlreadyExistsException(
+                        "%s is already managed here, as '%s'".formatted(existing.getLdapAttribute(), existing.getName()));
+            }
+        });
+        definitions.findByNameIgnoreCase(label).ifPresent(existing -> {
+            if (!existing.getId().equals(self)) {
+                throw new ContactAlreadyExistsException("There is already an attribute called " + existing.getName());
+            }
+        });
+    }
+
+    /**
+     * An LDAP attribute type name, near enough: letters, digits and hyphens, starting with a
+     * letter. What the directory will actually accept is the directory's to say.
+     */
+    private String requireAttribute(String ldapAttribute) {
+        String trimmed = ldapAttribute == null ? "" : ldapAttribute.trim();
         if (trimmed.isEmpty()) {
-            throw new IllegalArgumentException("An attribute needs a name");
+            throw new IllegalArgumentException("Name the directory attribute this manages");
+        }
+        if (!trimmed.matches("^[a-zA-Z][a-zA-Z0-9-]*$")) {
+            throw new IllegalArgumentException(
+                    "'%s' is not an attribute name; letters, digits and hyphens, starting with a letter"
+                            .formatted(trimmed));
         }
         return trimmed;
+    }
+
+    private DirectoryServer requireServer(Long serverId) {
+        return servers.findById(serverId).orElseThrow(() -> ResourceNotFoundException.server(serverId));
     }
 
     private String blankToNull(String value) {
@@ -322,9 +385,8 @@ public class ServerAttributeService {
                 .orElse(0);
     }
 
-    /** Definitions by id, for a page that renders values against them. */
-    public static Map<Long, ServerAttributeDefinition> byId(List<ServerAttributeDefinition> definitions) {
-        return definitions.stream()
-                .collect(Collectors.toMap(ServerAttributeDefinition::getId, Function.identity()));
+    /** Lowercased attribute names, for matching what a directory returned. */
+    static String key(String attribute) {
+        return attribute == null ? "" : attribute.toLowerCase(Locale.ROOT);
     }
 }

@@ -97,12 +97,19 @@
                 </div>
 
 
-                <!--/* What this deployment keeps about a server on top of the directory's
-                       schema. Empty until an administrator defines something, so the card
-                       hides itself rather than sitting there saying nothing. */-->
+                <!--/* Attributes of the directory entry that an administrator made editable
+                       here. The values are read from the entry and written back to it.
+                       Nothing is defined until somebody defines it, so the card hides
+                       itself rather than sitting there saying nothing. */-->
                 <div class="card mt-3 d-none" id="server-attributes" th:attr="data-server-id=${server.id}">
-                    <div class="card-header"><h3 class="card-title">Managed attributes</h3></div>
+                    <div class="card-header">
+                        <h3 class="card-title">Directory attributes</h3>
+                        <div class="card-actions text-secondary small">
+                            Read from this entry; changes are written to the directory
+                        </div>
+                    </div>
                     <div class="card-body">
+                        <div class="attribute-message-top"></div>
                         <div class="attribute-list"></div>
                     </div>
                 </div>

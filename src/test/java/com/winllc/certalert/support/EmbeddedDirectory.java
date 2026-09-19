@@ -106,6 +106,19 @@ public final class EmbeddedDirectory implements AutoCloseable {
         }
     }
 
+    /** What the entry actually holds, for asserting on what a write put there. */
+    public List<String> valuesOf(String dn, String attribute) {
+        try {
+            Entry entry = server.getEntry(dn, attribute);
+            if (entry == null || entry.getAttribute(attribute) == null) {
+                return List.of();
+            }
+            return List.of(entry.getAttribute(attribute).getValues());
+        } catch (LDAPException e) {
+            throw new IllegalStateException("Could not read " + dn, e);
+        }
+    }
+
     /** Renames an entry, as a modrdn would. */
     public void rename(String dn, String newRdn) {
         try {
