@@ -146,6 +146,7 @@
                         </a>
                     </div>
                 </div>
+                <div th:replace="~{fragments/detail :: credentials(${credentials})}"></div>
                 <div th:replace="~{fragments/detail :: certificates(${certificates})}"></div>
                 <div th:replace="~{fragments/detail :: audit('USER', ${user.id})}"></div>
             </div>

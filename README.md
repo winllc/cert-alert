@@ -511,6 +511,40 @@ per-server question.
 Reading the list is open to anyone signed in, and says whether this person may edit *this*
 server, so the UI shows the controls only where they will work.
 
+### A person holds two certificates
+
+PKI for people issues a pair, not a certificate. A signing key must never be copied and an
+encryption key usually must be escrowed — somebody has to be able to read what was encrypted
+to a person who has left — so they cannot be the same key, and a CA issues both in one run
+minutes apart. The key usage extension is what says which is which:
+
+| Use | Key usage bits | Who holds it |
+|---|---|---|
+| **Signing** | `digitalSignature`, `nonRepudiation` | a person's signing certificate |
+| **Encryption** | `keyEncipherment`, `dataEncipherment`, `keyAgreement` | a person's encryption certificate |
+| **Signing and encryption** | both | a server, ordinarily — a TLS key does both |
+| **Other** | `keyCertSign`, `cRLSign` | a CA certificate, which is nobody's credential |
+
+So "the most recently issued certificate" is the wrong question to ask about a person, and
+asking it is how half a renewal goes unnoticed. What an entry currently holds is the newest
+unexpired certificate **of each use**, which is one certificate for a server and two for a
+person. The details page shows the pair together, because the failures worth seeing are only
+visible together:
+
+| Flag | What it means |
+|---|---|
+| **No signing certificate** | nothing current signs |
+| **No encryption certificate** | nothing current can be encrypted to |
+| **Pair issued apart** | the two are more than `cert-alert.credentials.pair-window` (7d) apart — one was renewed and the other was not |
+| **Use not known** | cached before key usage was read; the next sweep fills it in |
+
+That last one matters during an upgrade: the extension is read when a certificate is parsed,
+so rows cached by an earlier version carry no use until a sweep re-reads them. They say so
+rather than reporting both halves missing.
+
+Anything asking "is this entry on its current certificate" — the revocation check, the
+endpoint probe — means the pair when it asks it of a person.
+
 ### Risky names
 
 A certificate's subject alternative names say what it may be used for, and that is where the
@@ -1040,6 +1074,12 @@ Scraping, under `cert-alert.ldap`:
 | `changelog.full-sync-on-first-run` | `true` | Import the directory on the first start, before following |
 | `changelog.full-sync-on-gap` | `true` | Sweep when the changelog has been trimmed past the cursor |
 | `user.*`, `server.*` | FSD names | Search base, filter, and attribute names      |
+
+What counts as one issuance, under `cert-alert.credentials`:
+
+| Property      | Default | Purpose                                                     |
+|---------------|---------|-------------------------------------------------------------|
+| `pair-window` | `7d`    | How far apart a person's signing and encryption certificates may be issued and still be one renewal |
 
 Access, under `cert-alert.security`:
 

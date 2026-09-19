@@ -1,5 +1,6 @@
 package com.winllc.certalert.web;
 
+import com.winllc.certalert.config.CredentialProperties;
 import com.winllc.certalert.domain.AuditAction;
 import com.winllc.certalert.domain.CachedCertificate;
 import com.winllc.certalert.domain.DirectoryServer;
@@ -7,8 +8,11 @@ import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.domain.Project;
 import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.DirectoryUserRepository;
+import com.winllc.certalert.service.CertificateIssuance;
 import com.winllc.certalert.service.ProjectService;
 import com.winllc.certalert.service.ResourceNotFoundException;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import org.springframework.http.HttpStatus;
@@ -35,14 +39,20 @@ public class ViewController {
     private final DirectoryUserRepository userRepository;
     private final DirectoryServerRepository serverRepository;
     private final ProjectService projectService;
+    private final CredentialProperties credentials;
+    private final Clock clock;
 
     public ViewController(
             DirectoryUserRepository userRepository,
             DirectoryServerRepository serverRepository,
-            ProjectService projectService) {
+            ProjectService projectService,
+            CredentialProperties credentials,
+            Clock clock) {
         this.userRepository = userRepository;
         this.serverRepository = serverRepository;
         this.projectService = projectService;
+        this.credentials = credentials;
+        this.clock = clock;
     }
 
     @GetMapping("/")
@@ -67,6 +77,12 @@ public class ViewController {
                 userRepository.findWithCertificatesById(id).orElseThrow(() -> ResourceNotFoundException.user(id));
         model.addAttribute("user", user);
         model.addAttribute("certificates", byExpiry(user.getCertificates()));
+        // The pair rather than the newest one: a person holds a signing certificate and an
+        // encryption certificate, and half a renewal is only visible with both in view.
+        model.addAttribute(
+                "credentials",
+                CertificateIssuance.current(
+                        user.getCertificates(), credentials.getPairWindow(), Instant.now(clock)));
         // Every value a server's serverPOC could name them by, which is what the join uses.
         model.addAttribute("identifiers", userRepository.findIdentifiersById(id));
         model.addAttribute("projects", projectService.forUser(id));

@@ -149,7 +149,9 @@ class GeneratedDirectoryTest {
         assertThat(alice.getCountryOfAffiliation()).isEqualTo("USA");
         assertThat(alice.getDutyOrganization()).isEqualTo("Example Agency");
         assertThat(alice.getEmployeeType()).isEqualTo("Civilian");
-        assertThat(alice.getCertificateCount()).isEqualTo(1);
+        // Two, not one: the generator issues every person the pair a real CA does - one
+        // certificate to sign with and one to be encrypted to.
+        assertThat(alice.getCertificateCount()).isEqualTo(2);
 
         DirectoryServer server = serverRepository
                 .findByDn("cn=web01," + EmbeddedDirectory.SERVERS_DN)

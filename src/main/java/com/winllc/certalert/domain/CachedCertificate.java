@@ -122,6 +122,15 @@ public class CachedCertificate {
     @Column(name = "risk_flags", length = 200)
     private String riskFlags;
 
+    /**
+     * The key usage extension, as {@link KeyUsage} names separated by commas, or null where
+     * the certificate carries no such extension. Stored the same way as the risk flags and
+     * for the same reason: read with the row, written once, and the question asked of it -
+     * is this the signing one or the encryption one - is answered from the string.
+     */
+    @Column(name = "key_usage", length = 200)
+    private String keyUsage;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 32)
     private CertificateStatus status = CertificateStatus.VALID;
@@ -249,26 +258,56 @@ public class CachedCertificate {
 
     /** What is worrying about the names, or empty where nothing is. */
     public Set<CertificateRisk> getRisks() {
-        if (riskFlags == null || riskFlags.isBlank()) {
+        return flags(riskFlags, CertificateRisk.class);
+    }
+
+    /**
+     * Reads one of the comma-separated flag columns.
+     *
+     * <p>A name this version does not know is dropped rather than thrown on: a row written
+     * by a later version of the application, read by an older one during a rolling deploy,
+     * is a thing that happens and is not worth a failed page for.
+     */
+    private static <E extends Enum<E>> Set<E> flags(String stored, Class<E> type) {
+        if (stored == null || stored.isBlank()) {
             return Set.of();
         }
-        return Arrays.stream(riskFlags.split(","))
+        return Arrays.stream(stored.split(","))
                 .map(String::trim)
                 .filter(flag -> !flag.isEmpty())
                 .map(flag -> {
                     try {
-                        return CertificateRisk.valueOf(flag);
+                        return Enum.valueOf(type, flag);
                     } catch (IllegalArgumentException e) {
-                        // A flag written by a later version of this application.
                         return null;
                     }
                 })
                 .filter(java.util.Objects::nonNull)
-                .collect(Collectors.toCollection(() -> EnumSet.noneOf(CertificateRisk.class)));
+                .collect(Collectors.toCollection(() -> EnumSet.noneOf(type)));
     }
 
     public boolean isRisky() {
         return riskFlags != null && !riskFlags.isBlank();
+    }
+
+    /** Records what the key is allowed to do. Called with the certificate in hand. */
+    public void describeKeyUsage(Collection<KeyUsage> usages) {
+        this.keyUsage = usages == null || usages.isEmpty()
+                ? null
+                : usages.stream().map(Enum::name).sorted().collect(Collectors.joining(","));
+    }
+
+    /** What the key is allowed to do, or empty where the certificate does not say. */
+    public Set<KeyUsage> getKeyUsages() {
+        return flags(keyUsage, KeyUsage.class);
+    }
+
+    /**
+     * What the certificate is for: the signing half of a person's credentials, the
+     * encryption half, or - as a server's usually is - both.
+     */
+    public CertificateUse getUse() {
+        return CertificateUse.from(getKeyUsages());
     }
 
     public CertificateStatus getStatus() {

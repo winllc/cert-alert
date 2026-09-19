@@ -138,11 +138,17 @@ digest_for() {
     printf '%s' "${KEY_DIGESTS[$(( $1 % ${#KEY_DIGESTS[@]} ))]}"
 }
 
-# certificate <common-name> <san> <not-before-days> <not-after-days> <key> <digest>
+# certificate <common-name> <san> <not-before-days> <not-after-days> <key> <digest> <key-usage>
 #   -> base64 DER
+#
+# The key usage is what separates a person's signing certificate from the key encipherment
+# one they are issued alongside it, so the generated directory has to carry it or every
+# person in it looks like they hold two of the same thing. `copy_extensions = copy` in the
+# CA configuration is what carries it from the request into the certificate.
 certificate() {
-    local cn="$1" san="$2" from="$3" to="$4" key="$5" digest="$6"
+    local cn="$1" san="$2" from="$3" to="$4" key="$5" digest="$6" usage="$7"
     openssl req -new -key "$CA_DIR/$key.key" -subj "/CN=$cn" -addext "subjectAltName=$san" \
+        -addext "keyUsage=critical,$usage" \
         -out "$CA_DIR/leaf.csr" 2>/dev/null
     openssl ca -batch -config "$CA_DIR/openssl.cnf" -in "$CA_DIR/leaf.csr" \
         -out "$CA_DIR/leaf.crt" -notext -md "$digest" \
@@ -186,14 +192,45 @@ san_for() {
 NOT_BEFORE=(-30    -335   -360   -400   -60    -14)
 NOT_AFTER=(+1825   +20    +5     -10    +3650  +900)
 
-# certificate_for <index> <common-name> <san> -> base64 DER, or nothing
+# certificate_for <index> <common-name> <san> [key-usage] -> base64 DER, or nothing
+#
+# A server holds one certificate, and a TLS key both signs the handshake and, under an RSA
+# key exchange, is encrypted to - so it carries both bits. That is the default here.
 certificate_for() {
-    local index="$1" cn="$2" san="$3" slot
+    local index="$1" cn="$2" san="$3" usage="${4:-digitalSignature,keyEncipherment}" slot
     [ "$CERTIFICATES" = true ] || return 0
     slot=$((index % 7))
     [ "$slot" -eq 6 ] && return 0
     certificate "$cn" "$san" "${NOT_BEFORE[$slot]}" "${NOT_AFTER[$slot]}" \
-        "$(key_for "$index")" "$(digest_for "$index")"
+        "$(key_for "$index")" "$(digest_for "$index")" "$usage"
+}
+
+# What a person's signing certificate is allowed to do, and pointedly not encipherment:
+# that key is escrowed and this one must never be, which is the whole reason there are two.
+PERSON_SIGNING_USAGE="digitalSignature,nonRepudiation"
+
+# The encryption half of a person's credentials, to go with the signing half that
+# certificate_for produced.
+#
+# Normally issued minutes after its partner, which is what a real pair looks like: a CA
+# signs both in one run. Every eleventh person gets one that is a year older instead - the
+# signing certificate was renewed and this one was not, which leaves them able to sign and
+# impossible to write to, and is exactly the state worth being able to see.
+#
+# encryption_certificate_for <index> <common-name> <san> -> base64 DER, or nothing
+encryption_certificate_for() {
+    local index="$1" cn="$2" san="$3" slot from to
+    [ "$CERTIFICATES" = true ] || return 0
+    slot=$((index % 7))
+    [ "$slot" -eq 6 ] && return 0
+    from="${NOT_BEFORE[$slot]}"
+    to="${NOT_AFTER[$slot]}"
+    if [ $((index % 11)) -eq 5 ]; then
+        from=$((from - 300))
+        to=$((to - 300))
+    fi
+    certificate "$cn" "$san" "$from" "$to" \
+        "$(key_for "$index")" "$(digest_for "$index")" "keyEncipherment"
 }
 
 # ---------------------------------------------------------------------------------------
@@ -238,6 +275,7 @@ POC_NAMES=()
 person() {
     local index="$1" uid="$2" given="$3" surname="$4" ic_email="$5" title="$6"
     local employee_type="$7" rank="$8" organization="$9" certificate="${10}"
+    local encryption_certificate="${11:-}"
     local phone=$((index % 10000))
     while [ "${#phone}" -lt 4 ]; do phone="0$phone"; done
     printf '%s\n' "\
@@ -267,7 +305,10 @@ resourceSecurityMark: UNCLASSIFIED
 o: $organization
 ou: people"
     [ -n "$rank" ] && echo "rank: $rank"
+    # Two of them, because a person is issued two: one to sign with and one to be
+    # encrypted to. The attribute is multi-valued and the pair is what is really there.
     [ -n "$certificate" ] && echo "userCertificate;binary:: $certificate"
+    [ -n "$encryption_certificate" ] && echo "userCertificate;binary:: $encryption_certificate"
     echo
 }
 
@@ -328,17 +369,20 @@ ENTRY
 # sample, so a walk-through reads the same whichever directory is behind it.
 if [ "$USERS" -ge 1 ]; then
     person 0 alice Alice Archer alice@intelink.ic.gov "Systems Engineer" Civilian "" "Example Agency" \
-        "$(certificate_for 0 alice@intelink.ic.gov email:alice@intelink.ic.gov)"
+        "$(certificate_for 0 alice@intelink.ic.gov email:alice@intelink.ic.gov "$PERSON_SIGNING_USAGE")" \
+        "$(encryption_certificate_for 0 alice@intelink.ic.gov email:alice@intelink.ic.gov)"
     POC_ADDRESSES+=(alice@intelink.ic.gov); POC_NAMES+=("Alice Archer")
 fi
 if [ "$USERS" -ge 2 ]; then
     person 1 bwilson Bob Wilson bob.wilson@intelink.ic.gov "Database Administrator" Civilian "" "Example Agency" \
-        "$(certificate_for 3 bob.wilson@intelink.ic.gov email:bob.wilson@intelink.ic.gov)"
+        "$(certificate_for 3 bob.wilson@intelink.ic.gov email:bob.wilson@intelink.ic.gov "$PERSON_SIGNING_USAGE")" \
+        "$(encryption_certificate_for 3 bob.wilson@intelink.ic.gov email:bob.wilson@intelink.ic.gov)"
     POC_ADDRESSES+=(bob.wilson@intelink.ic.gov); POC_NAMES+=("Bob Wilson")
 fi
 if [ "$USERS" -ge 3 ]; then
     person 2 cchase Carol Chase carol.chase@intelink.ic.gov "Security Officer" Military Major "Example Agency" \
-        "$(certificate_for 1 carol.chase@intelink.ic.gov email:carol.chase@intelink.ic.gov)"
+        "$(certificate_for 1 carol.chase@intelink.ic.gov email:carol.chase@intelink.ic.gov "$PERSON_SIGNING_USAGE")" \
+        "$(encryption_certificate_for 1 carol.chase@intelink.ic.gov email:carol.chase@intelink.ic.gov)"
     POC_ADDRESSES+=(carol.chase@intelink.ic.gov); POC_NAMES+=("Carol Chase")
 fi
 if [ "$USERS" -ge 4 ]; then
@@ -361,7 +405,8 @@ while [ "$index" -lt "$USERS" ]; do
     person "$index" "$uid" "$given" "$surname" "$ic_email" \
         "${TITLES[$((index % ${#TITLES[@]}))]}" "$employee_type" \
         "${RANKS[$((index % 3))]}" "${ORGANIZATIONS[$((index % ${#ORGANIZATIONS[@]}))]}" \
-        "$(certificate_for "$index" "$ic_email" "email:$ic_email")"
+        "$(certificate_for "$index" "$ic_email" "email:$ic_email" "$PERSON_SIGNING_USAGE")" \
+        "$(encryption_certificate_for "$index" "$ic_email" "email:$ic_email")"
     POC_ADDRESSES+=("$ic_email"); POC_NAMES+=("$given $surname")
     index=$((index + 1))
     [ $((index % 500)) -eq 0 ] && log "  ...$index people"

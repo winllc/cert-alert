@@ -3,6 +3,7 @@ package com.winllc.certalert.web.dto;
 import com.winllc.certalert.domain.CachedCertificate;
 import com.winllc.certalert.domain.CertificateRisk;
 import com.winllc.certalert.domain.CertificateStatus;
+import com.winllc.certalert.domain.KeyUsage;
 import java.time.Instant;
 import java.util.List;
 
@@ -12,6 +13,9 @@ import java.util.List;
  * @param subjectAltNameCount how many names it is good for, which is more than the stored
  *     list says when that list was truncated
  * @param risks what is worrying about those names, with the words to print
+ * @param use what the certificate is for, which is what tells a person's signing
+ *     certificate from their encryption one
+ * @param keyUsages the key usage bits it was decided from, spelled out
  */
 public record CachedCertificateRow(
         Long id,
@@ -28,6 +32,9 @@ public record CachedCertificateRow(
         String subjectAlternativeNames,
         Integer subjectAltNameCount,
         List<Risk> risks,
+        String use,
+        String useDescription,
+        List<String> keyUsages,
         CertificateStatus status,
         Instant cachedAt) {
 
@@ -55,6 +62,9 @@ public record CachedCertificateRow(
                 certificate.getSubjectAlternativeNames(),
                 certificate.getSubjectAltNameCount(),
                 certificate.getRisks().stream().map(Risk::of).toList(),
+                certificate.getUse().label(),
+                certificate.getUse().description(),
+                certificate.getKeyUsages().stream().map(KeyUsage::label).toList(),
                 certificate.getStatus(),
                 certificate.getCachedAt());
     }

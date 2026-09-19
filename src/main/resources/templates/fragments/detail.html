@@ -54,6 +54,17 @@
                     <th>Key</th>
                     <td th:text="${certificate.keyAlgorithm} + (${certificate.keySize != null} ? ' ' + ${certificate.keySize} + ' bit' : '')">RSA 2048 bit</td>
                 </tr>
+                <!--/* What the key is allowed to do, which is what separates a person's
+                       signing certificate from their encryption one. */-->
+                <tr>
+                    <th>Use</th>
+                    <td>
+                        <span class="badge bg-blue-lt" th:title="${certificate.use.description()}"
+                              th:text="${certificate.use.label()}">Signing</span>
+                        <div class="text-secondary small mt-1" th:if="${!certificate.keyUsages.isEmpty()}"
+                             th:text="${#strings.listJoin(certificate.keyUsages.![label()], ', ')}">Digital signature</div>
+                    </td>
+                </tr>
                 <tr th:replace="~{fragments/detail :: attribute('Signature', ${certificate.signatureAlgorithm})}"></tr>
                 <tr th:replace="~{fragments/detail :: attribute('Hash', ${certificate.hashAlgorithm})}"></tr>
                 <!--/* The names, how many there are, and what is worrying about them. */-->
@@ -80,6 +91,51 @@
         </div>
     </div>
 </div>
+
+<!--/* The pair a person currently holds. Two certificates, not one: signing keys are
+       never escrowed and encryption keys usually must be, so they cannot be the same key,
+       and a CA issues both at once. Shown together because the interesting failures are
+       only visible together - half a renewal leaves somebody able to sign and impossible
+       to write to, and neither certificate on its own looks wrong. */-->
+<div th:fragment="credentials(credentials)" class="card mt-3" th:unless="${credentials.isEmpty()}">
+    <div class="card-header">
+        <h3 class="card-title">Current credentials</h3>
+        <span class="card-subtitle text-secondary ms-2"
+              th:text="${#lists.size(credentials.current())} == 1
+                       ? 'the certificate in use' : 'the pair issued together'">the pair issued together</span>
+    </div>
+    <div class="card-body cert-detail p-3">
+        <table>
+            <tr th:replace="~{fragments/detail :: credential-half('Signing', ${credentials.signing()})}"></tr>
+            <tr th:replace="~{fragments/detail :: credential-half('Encryption', ${credentials.encryption()})}"></tr>
+            <!--/* Only where there is a pair to compare; one certificate doing both jobs,
+                   or half a pair, has no gap to report. */-->
+            <tr th:if="${credentials.issuedApart() != null}">
+                <th>Issued apart</th>
+                <td th:with="days=${credentials.issuedApart().toDays()}">
+                    <span th:if="${days > 0}" th:text="${days} + (${days} == 1 ? ' day' : ' days')">2 days</span>
+                    <span th:if="${days == 0}" class="text-secondary">the same day</span>
+                </td>
+            </tr>
+        </table>
+        <div class="mt-2" th:if="${credentials.hasIssues()}">
+            <span class="badge bg-yellow-lt me-1" th:each="issue : ${credentials.issues()}"
+                  th:title="${issue.why()}" th:text="${issue.label()}">No encryption certificate</span>
+        </div>
+    </div>
+</div>
+
+<!--/* One half of the pair, or the absence of it. */-->
+<tr th:fragment="credential-half(label, certificate)">
+    <th th:text="${label}">Signing</th>
+    <td th:if="${certificate == null}" class="text-secondary">None current</td>
+    <td th:unless="${certificate == null}">
+        <span class="mono" th:text="${certificate.serialNumber}">01</span>
+        <div class="text-secondary small"
+             th:text="'issued ' + ${#strings.substring(certificate.notBefore, 0, 10)}
+                      + ', expires ' + ${#strings.substring(certificate.notAfter, 0, 10)}">issued, expires</div>
+    </td>
+</tr>
 
 <!--/* Everything that has happened to this entry. Its own search table rather than a list:
        an entry watched for a year has more history than a page can show at once, and the

@@ -204,6 +204,20 @@
         return names + summary + (badges ? '<div class="mt-1">' + badges + '</div>' : '');
     }
 
+    /**
+     * What the key is allowed to do. It is what separates the two certificates a person
+     * holds - one to sign with, one to be encrypted to - so it is worth a line of its own
+     * rather than being left to whoever can read a key usage bit string.
+     */
+    function useCell(certificate) {
+        var badge = '<span class="badge bg-blue-lt" title="' + escapeHtml(certificate.useDescription || '')
+            + '">' + escapeHtml(certificate.use || '') + '</span>';
+        var usages = certificate.keyUsages || [];
+        return badge + (usages.length
+            ? '<div class="text-secondary small mt-1">' + escapeHtml(usages.join(', ')) + '</div>'
+            : '');
+    }
+
     /** Renders the cached details of one certificate as a definition-style block. */
     function certificateBlock(certificate) {
         var rows = [
@@ -215,6 +229,7 @@
             ['Valid to', expiryCell(certificate.notAfter)],
             ['Key', text([certificate.keyAlgorithm, certificate.keySize ? certificate.keySize + ' bit' : null]
                 .filter(Boolean).join(' '))],
+            ['Use', useCell(certificate)],
             ['Signature', text(certificate.signatureAlgorithm)],
             ['Hash', text(certificate.hashAlgorithm)],
             ['SANs', sanCell(certificate)],

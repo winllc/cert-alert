@@ -112,7 +112,11 @@ class AuthenticationTest {
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
                 .apply(SecurityMockMvcConfigurers.springSecurity())
                 .build();
-        if (userRepository.count() == 0) {
+        // Asks for this class's own fixture rather than for any row at all. The in-memory
+        // database is one database for the whole test JVM, so "somebody has synced
+        // something" is not the same question as "alice is cached", and answering the
+        // first one leaves these cases depending on which class ran before them.
+        if (userRepository.findByDn("uid=alice," + EmbeddedDirectory.PEOPLE_DN).isEmpty()) {
             syncService.syncUsers();
             syncService.syncServers();
         }

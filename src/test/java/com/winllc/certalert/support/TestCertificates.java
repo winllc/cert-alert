@@ -16,6 +16,7 @@ import org.bouncycastle.asn1.x500.X500Name;
 import org.bouncycastle.asn1.x509.Extension;
 import org.bouncycastle.asn1.x509.GeneralName;
 import org.bouncycastle.asn1.x509.GeneralNames;
+import org.bouncycastle.asn1.x509.KeyUsage;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
@@ -48,6 +49,42 @@ public final class TestCertificates {
     public static byte[] expiringIn(String commonName, Duration remaining) {
         Instant now = Instant.now();
         return der(commonName, now.minus(Duration.ofDays(30)), now.plus(remaining));
+    }
+
+    /**
+     * The signing half of a person's credentials: digital signature and non-repudiation,
+     * and nothing that would let it be encrypted to.
+     */
+    public static byte[] signing(String commonName, Instant notBefore, Instant notAfter) {
+        return der(commonName, notBefore, notAfter,
+                new KeyUsage(KeyUsage.digitalSignature | KeyUsage.nonRepudiation));
+    }
+
+    /** The other half: key encipherment, which is what a CA escrows the private key of. */
+    public static byte[] encryption(String commonName, Instant notBefore, Instant notAfter) {
+        return der(commonName, notBefore, notAfter, new KeyUsage(KeyUsage.keyEncipherment));
+    }
+
+    /** What a server usually holds: one certificate that does both. */
+    public static byte[] dual(String commonName, Instant notBefore, Instant notAfter) {
+        return der(commonName, notBefore, notAfter,
+                new KeyUsage(KeyUsage.digitalSignature | KeyUsage.keyEncipherment));
+    }
+
+    private static byte[] der(String commonName, Instant notBefore, Instant notAfter, KeyUsage keyUsage) {
+        try {
+            return certificate(
+                            commonName,
+                            notBefore,
+                            notAfter,
+                            "SHA256withRSA",
+                            KEY_PAIR,
+                            new String[] {commonName},
+                            keyUsage)
+                    .getEncoded();
+        } catch (CertificateEncodingException e) {
+            throw new IllegalStateException("Could not encode test certificate", e);
+        }
     }
 
     public static byte[] der(String commonName, Instant notBefore, Instant notAfter) {
@@ -125,6 +162,17 @@ public final class TestCertificates {
             String signatureAlgorithm,
             KeyPair keyPair,
             String[] dnsNames) {
+        return certificate(commonName, notBefore, notAfter, signatureAlgorithm, keyPair, dnsNames, null);
+    }
+
+    private static X509Certificate certificate(
+            String commonName,
+            Instant notBefore,
+            Instant notAfter,
+            String signatureAlgorithm,
+            KeyPair keyPair,
+            String[] dnsNames,
+            KeyUsage keyUsage) {
         try {
             X500Name name = new X500Name("CN=" + commonName);
             JcaX509v3CertificateBuilder builder = new JcaX509v3CertificateBuilder(
@@ -139,6 +187,9 @@ public final class TestCertificates {
                 names[i] = new GeneralName(GeneralName.dNSName, dnsNames[i]);
             }
             builder.addExtension(Extension.subjectAlternativeName, false, new GeneralNames(names));
+            if (keyUsage != null) {
+                builder.addExtension(Extension.keyUsage, true, keyUsage);
+            }
             ContentSigner signer = new JcaContentSignerBuilder(signatureAlgorithm)
                     .setProvider(BouncyCastleProvider.PROVIDER_NAME)
                     .build(keyPair.getPrivate());

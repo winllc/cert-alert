@@ -260,6 +260,12 @@ cert-alert:
   # hosts that do not exist yet; forty names means one key for forty things. Both are
   # judgements rather than rules - a load balancer fronting forty services has forty names
   # for a reason - so where "too many" starts is configuration.
+  # A person is issued two certificates at once - one to sign with, one to be encrypted to -
+  # and a CA signs them minutes apart. This is how close together they have to be to count
+  # as one renewal; wider apart means one was renewed and the other was not.
+  credentials:
+    pair-window: 7d
+
   risk:
     max-subject-alt-names: 20
     max-domains: 3

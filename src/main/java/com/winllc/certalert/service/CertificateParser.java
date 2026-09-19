@@ -2,6 +2,7 @@ package com.winllc.certalert.service;
 
 import com.winllc.certalert.config.RiskProperties;
 import com.winllc.certalert.domain.CachedCertificate;
+import com.winllc.certalert.domain.KeyUsage;
 import java.io.ByteArrayInputStream;
 import java.security.PublicKey;
 import java.security.cert.CertificateException;
@@ -70,6 +71,9 @@ public class CertificateParser {
         SubjectAltNames.Assessment assessment =
                 SubjectAltNames.assess(dnsNames, risk.getMaxSubjectAltNames(), risk.getMaxDomains());
         cached.describeNames(assessment.count(), assessment.risks());
+        // Which half of a person's credentials this is - the one that signs or the one that
+        // is encrypted to - which only the key usage extension can say.
+        cached.describeKeyUsage(KeyUsage.of(certificate.getKeyUsage()));
         return cached;
     }
 

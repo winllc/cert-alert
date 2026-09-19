@@ -28,12 +28,16 @@ class DevLdifGenerator {
         Instant now = Instant.now();
         StringBuilder ldif = new StringBuilder(header());
 
+        // Two certificates each, because a person is issued two: one to sign with, one to
+        // be encrypted to. Carol's encryption half is a year older than her signing one -
+        // half a renewal, which is the state the pairing is there to make visible.
         ldif.append(person("alice", "Alice Archer", "alice@intelink.ic.gov", "Systems Engineer", "Civilian",
-                cert("alice@intelink.ic.gov", now.minusSeconds(30 * DAY), now.plusSeconds(3650 * DAY))));
+                pair("alice@intelink.ic.gov", now.minusSeconds(30 * DAY), now.plusSeconds(3650 * DAY))));
         ldif.append(person("bwilson", "Bob Wilson", "bob.wilson@intelink.ic.gov", "Database Administrator", "Civilian",
-                cert("bob.wilson@intelink.ic.gov", now.minusSeconds(400 * DAY), now.minusSeconds(5 * DAY))));
+                pair("bob.wilson@intelink.ic.gov", now.minusSeconds(400 * DAY), now.minusSeconds(5 * DAY))));
         ldif.append(person("cchase", "Carol Chase", "carol.chase@intelink.ic.gov", "Security Officer", "Military",
-                cert("carol.chase@intelink.ic.gov", now.minusSeconds(340 * DAY), now.plusSeconds(20 * DAY))));
+                signing("carol.chase@intelink.ic.gov", now.minusSeconds(20 * DAY), now.plusSeconds(345 * DAY)),
+                encryption("carol.chase@intelink.ic.gov", now.minusSeconds(340 * DAY), now.plusSeconds(20 * DAY))));
         ldif.append(person("dday", "Dana Day", "dana.day@intelink.ic.gov", "Analyst", "Contractor"));
 
         // serverPOC by address for two of these, and by name for the third, because real
@@ -147,7 +151,22 @@ class DevLdifGenerator {
 
     /** LDIF carries binary values as base64 on a {@code ::} line. */
     private String cert(String commonName, Instant notBefore, Instant notAfter) {
-        return Base64.getEncoder().encodeToString(TestCertificates.der(commonName, notBefore, notAfter));
+        return Base64.getEncoder().encodeToString(TestCertificates.dual(commonName, notBefore, notAfter));
+    }
+
+    /** A person's two, issued together: the one that signs and the one that is written to. */
+    private String[] pair(String commonName, Instant notBefore, Instant notAfter) {
+        return new String[] {
+            signing(commonName, notBefore, notAfter), encryption(commonName, notBefore, notAfter)
+        };
+    }
+
+    private String signing(String commonName, Instant notBefore, Instant notAfter) {
+        return Base64.getEncoder().encodeToString(TestCertificates.signing(commonName, notBefore, notAfter));
+    }
+
+    private String encryption(String commonName, Instant notBefore, Instant notAfter) {
+        return Base64.getEncoder().encodeToString(TestCertificates.encryption(commonName, notBefore, notAfter));
     }
 
     @SuppressWarnings("unused")
