@@ -19,15 +19,12 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
-import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Controller;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.ui.Model;
-import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.ResponseStatus;
 
 /**
  * The pages.
@@ -173,18 +170,6 @@ public class ViewController {
     @GetMapping("/login")
     public String login() {
         return "login";
-    }
-
-    /**
-     * A details page for something that is not there is a page, not a problem detail. The
-     * REST advice would answer a browser with JSON, which is the right answer for the API
-     * and the wrong one here.
-     */
-    @ExceptionHandler(ResourceNotFoundException.class)
-    @ResponseStatus(HttpStatus.NOT_FOUND)
-    public String notFound(ResourceNotFoundException e, Model model) {
-        model.addAttribute("message", e.getMessage());
-        return "not-found";
     }
 
     /** Soonest to expire first: on a page about one entry, that is the one being looked for. */

@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<!--/*
+  The page for anything that went wrong and has no page of its own.
+
+  Two things render this. Spring Boot's own error dispatch reaches it for whatever never
+  arrives at a controller - an address that matches no route, a denial from the filter
+  chain - and ViewExceptionHandler returns it for an exception raised while building a
+  page. Both supply the same four attributes, so one template serves both.
+
+  The copy is chosen by status rather than printed from the exception: `server.error
+  .include-message: never` keeps a stack trace's message away from a browser, and what a
+  reader needs is what to do next rather than what threw.
+*/-->
+<head th:replace="~{fragments/layout :: head('Something went wrong')}"></head>
+<body>
+<svg th:replace="~{fragments/icons :: sprite}"></svg>
+
+<div class="page">
+    <header th:replace="~{fragments/layout :: navbar('')}"></header>
+    <div class="page-wrapper">
+        <div class="page-body">
+            <div class="container-xl">
+                <div class="empty">
+                    <!--/* 999 is what the error dispatch reports when it has no status of
+                           its own - reached directly, say. A number that is not one is
+                           worse than no number. */-->
+                    <div class="empty-header" th:if="${status != null and status != 999}"
+                         th:text="${status}">500</div>
+
+                    <p class="empty-title" th:switch="${status}">
+                        <span th:case="400">That request could not be read</span>
+                        <span th:case="401">You are not signed in</span>
+                        <span th:case="403">This page is not yours to see</span>
+                        <span th:case="404">There is no page here</span>
+                        <span th:case="405">That is not something this page does</span>
+                        <span th:case="503">The application is not ready yet</span>
+                        <span th:case="*">Something went wrong at our end</span>
+                    </p>
+
+                    <p class="empty-subtitle text-secondary" th:switch="${status}">
+                        <span th:case="400">Something about the request was malformed. Going back and
+                            trying again usually settles it.</span>
+                        <span th:case="401">Sign in and you will be brought back here.</span>
+                        <span th:case="403">You are signed in, but this page needs a permission your
+                            account does not have. An administrator can grant it.</span>
+                        <span th:case="404">The address may be mistyped, or whatever was here may have
+                            been removed since you last looked.</span>
+                        <span th:case="405">The page was reached in a way it does not answer to. If you
+                            arrived from a link here, that link is wrong.</span>
+                        <span th:case="503">It is still starting, or a service it needs is not
+                            answering. Give it a moment and try again.</span>
+                        <span th:case="*">The fault has been logged with everything needed to find it.
+                            Try again; if it keeps happening, tell an administrator.</span>
+                    </p>
+
+                    <!--/* Only shown when there is something safe to say - a denial's reason,
+                           or which entry was not found. Never an exception's message. */-->
+                    <p class="empty-subtitle text-secondary"
+                       th:if="${message != null and !#strings.isEmpty(message)}"
+                       th:text="${message}">Detail</p>
+
+                    <div class="empty-action">
+                        <a th:href="@{/users}" class="btn btn-primary">
+                            <svg class="icon me-1"><use href="#icon-users"></use></svg>
+                            Back to the directory
+                        </a>
+                        <a th:if="${status == 401}" th:href="@{/login}" class="btn btn-outline-primary ms-2">
+                            <svg class="icon me-1"><use href="#icon-lock"></use></svg>
+                            Sign in
+                        </a>
+                    </div>
+
+                    <!--/* For whoever is told about it: the address that failed and when.
+                           Small, because it is for a bug report rather than for reading. */-->
+                    <div class="mt-4 small text-secondary" th:if="${path != null}">
+                        <code th:text="${path}">/path</code>
+                        <span th:if="${timestamp != null}" th:text="' · ' + ${timestamp}"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+</body>
+</html>

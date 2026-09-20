@@ -1115,6 +1115,25 @@ Errors come back as RFC 7807 problem details. Actuator is at `/actuator`
 (`health`, `info`, `metrics`, `loggers`); the LDAP health indicator reports the
 directory connection.
 
+### When something goes wrong
+
+`GlobalExceptionHandler` is the one place an exception that escapes a controller
+becomes an answer, and it renders that answer in whichever of two forms the caller
+can use. The exception sets the status and the wording; the address decides the
+form. Anything under `/api` or `/actuator` is problem detail whatever the request
+said it accepts, because a browser pointed at an endpoint is still an endpoint.
+Everywhere else is a page, unless the caller named a machine format and not HTML.
+
+Pages come from two templates. `not-found.html` answers for an entry that is not
+there, which has something particular to say - the directory may have stopped
+publishing it. `error.html` answers for everything else, choosing its wording from
+the status rather than printing the exception, since `server.error.include-message`
+is `never` and a stack trace tells an attacker more than it tells the reader.
+
+`error.html` is also what Spring Boot's own error dispatch renders, so a denial
+from the security filter chain - which reaches no exception handler at all - comes
+out as the same page rather than the Whitelabel one.
+
 ## The scheduled jobs
 
 Four on the directory, one that asks the issuing authorities, and one that trims the audit
