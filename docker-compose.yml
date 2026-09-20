@@ -35,6 +35,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    networks: [cert-alert]
     restart: unless-stopped
 
   directory:
@@ -63,6 +64,7 @@ services:
       # Exposed so you can point ldapsearch at it; the application reaches it over the
       # compose network and does not need this.
       - "1389:3389"
+    networks: [cert-alert]
     restart: unless-stopped
 
   cert-alert:
@@ -97,7 +99,14 @@ services:
     # keystore variables. Commented out so a first run does not need a ./tls directory.
     # volumes:
     #   - ./tls:/etc/cert-alert/tls:ro
+    networks: [cert-alert]
     restart: unless-stopped
+
+# Named rather than left to the implicit default, so the three services are on one network
+# because this file says so - and so `docker network connect` has something to name when you
+# want an ldapsearch container or a second application alongside them.
+networks:
+  cert-alert:
 
 volumes:
   postgres-data:
