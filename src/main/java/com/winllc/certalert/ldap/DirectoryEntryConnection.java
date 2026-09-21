@@ -1,6 +1,9 @@
 package com.winllc.certalert.ldap;
 
+import java.util.HashMap;
+import java.util.Map;
 import org.springframework.boot.ldap.autoconfigure.LdapConnectionDetails;
+import org.springframework.boot.ldap.autoconfigure.LdapProperties;
 import org.springframework.ldap.core.LdapTemplate;
 import org.springframework.ldap.core.support.LdapContextSource;
 import org.springframework.stereotype.Component;
@@ -24,7 +27,7 @@ public class DirectoryEntryConnection {
     private final LdapTemplate template;
     private final boolean credentialled;
 
-    public DirectoryEntryConnection(LdapConnectionDetails connectionDetails) {
+    public DirectoryEntryConnection(LdapConnectionDetails connectionDetails, LdapProperties properties) {
         LdapContextSource contextSource = new LdapContextSource();
         contextSource.setUrls(connectionDetails.getUrls());
         // Empty on purpose: see the class javadoc.
@@ -35,8 +38,20 @@ public class DirectoryEntryConnection {
             contextSource.setUserDn(connectionDetails.getUsername());
             contextSource.setPassword(connectionDetails.getPassword());
         }
+        contextSource.setBaseEnvironmentProperties(baseEnvironment(properties));
         contextSource.afterPropertiesSet();
         this.template = new LdapTemplate(contextSource);
+    }
+
+    /**
+     * The JNDI properties configured under {@code spring.ldap.base-environment}, which
+     * Boot applies to the application's own context source and which this one would
+     * otherwise miss. {@code java.naming.ldap.attributes.binary} is the reason it matters
+     * here: it is how a certificate attribute under a name of your own is declared binary,
+     * and this connection is one of the two that read certificates.
+     */
+    private static Map<String, Object> baseEnvironment(LdapProperties properties) {
+        return new HashMap<>(properties.getBaseEnvironment());
     }
 
     /** Operations against absolute distinguished names. */

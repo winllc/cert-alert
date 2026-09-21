@@ -267,6 +267,53 @@ Flyway owns the schema and migrates on startup. Hibernate is set to `validate`, 
 mapping that drifts from the migrations fails at boot rather than silently altering
 tables.
 
+### If entries sync but no certificates do
+
+Every attribute populated, every certificate column empty, and nothing in the log that
+looks like a failure. That is not an access-control problem - it is which name the
+certificate was asked for by.
+
+RFC 4522 says a certificate is transferred in its binary form, and a client insists on
+that by asking for `userCertificate;binary` rather than `userCertificate`. The two are
+different attribute descriptions in a search, and a request carrying the option matches
+only an attribute that carries it. Directories that implement the rule return nothing for
+the plain name, which is why the option is on by default.
+
+A virtual directory is the case where that breaks down. It presents an attribute it has
+assembled from some other store, under the plain name, and has no `userCertificate;binary`
+to give - so the request matches nothing and comes back empty, for every entry, silently.
+Radiant Logic FID 7.4 behaves this way. Turn the option off:
+
+```bash
+export CERT_ALERT_LDAP_BINARY_CERTIFICATE_OPTION=false
+```
+
+Turning it off is safe against a directory that does store the binary form: a plain
+request matches an attribute whatever options it carries, so it is the qualified request
+that is narrow, not this one. If you are unsure which you have, `ldapsearch` will say -
+the first of these returns the certificate on a conforming directory, the second on
+either:
+
+```bash
+ldapsearch -H "$CERT_ALERT_LDAP_URL" -b "$CERT_ALERT_LDAP_BASE" \
+    "(uid=someone)" "userCertificate;binary"
+ldapsearch -H "$CERT_ALERT_LDAP_URL" -b "$CERT_ALERT_LDAP_BASE" \
+    "(uid=someone)" userCertificate
+```
+
+With the option off, how values arrive is left to the JNDI provider, which decides from
+the attribute's name alone. It knows the standard ones, `userCertificate` among them. If
+you have mapped the certificate to a name of your own under `cert-alert.ldap.user
+.certificate` or `cert-alert.ldap.server.certificate`, declare that name binary too or it
+arrives as text and will not parse:
+
+```yaml
+spring:
+  ldap:
+    base-environment:
+      java.naming.ldap.attributes.binary: myCertificateAttribute
+```
+
 ## The two object types
 
 ```
@@ -1331,6 +1378,7 @@ Scraping, under `cert-alert.ldap`:
 | `batch-size`         | `200`   | Entries written per transaction                 |
 | `count-limit`        | `0`     | Client-side cap on entries; 0 means none        |
 | `search-timeout`     | `10m`   | Per-search time limit                           |
+| `binary-certificate-option` | `true` | Ask for `userCertificate;binary`. Off for a directory with no such attribute to return |
 | `sync.enabled`       | `true`  | Set false to drive every job through the API    |
 | `sync.users-cron`    | `0 0 2 * * *`  | IC Person sweep                          |
 | `sync.servers-cron`  | `0 0 4 * * *`  | IC Non-Person Entity sweep               |

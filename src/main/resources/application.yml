@@ -50,6 +50,16 @@ spring:
     base: ${CERT_ALERT_LDAP_BASE:}
     username: ${CERT_ALERT_LDAP_USER:}
     password: ${CERT_ALERT_LDAP_PASSWORD:}
+    # Extra JNDI properties, applied to every connection the application opens - the two
+    # that read certificates by absolute name included, not just the sweep's.
+    #
+    # The one worth knowing about is which attributes the provider hands back as bytes
+    # rather than decoding as text. It already knows the standard names, userCertificate
+    # among them, so this is only needed for a certificate attribute renamed under
+    # cert-alert.ldap, and only with binary-certificate-option off:
+    #
+    #   base-environment:
+    #     java.naming.ldap.attributes.binary: myCertificateAttribute
 
 server:
   port: 8080
@@ -107,6 +117,19 @@ cert-alert:
     # Zero means no client-side cap; the directory's own limits still apply per page.
     count-limit: 0
     search-timeout: 10m
+
+    # Whether to ask for the certificate as `userCertificate;binary`. RFC 4522 requires
+    # that form and some directories return nothing without it, which is why it is on.
+    #
+    # Turn it off for a server that has no such attribute to hand back and answers the
+    # qualified request with an empty result - a virtual directory in front of some other
+    # store, Radiant Logic FID 7.4 among them. The symptom is entries that sync with every
+    # attribute populated and no certificates at all.
+    #
+    # With it off the provider decides how values arrive, from the attribute's name. It
+    # knows the standard ones; a certificate under a name of your own needs declaring
+    # under spring.ldap.base-environment above, or it arrives as text and will not parse.
+    binary-certificate-option: ${CERT_ALERT_LDAP_BINARY_CERTIFICATE_OPTION:true}
 
     sync:
       enabled: true

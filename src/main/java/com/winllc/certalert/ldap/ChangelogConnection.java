@@ -1,7 +1,10 @@
 package com.winllc.certalert.ldap;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import java.util.HashMap;
+import java.util.Map;
 import org.springframework.boot.ldap.autoconfigure.LdapConnectionDetails;
+import org.springframework.boot.ldap.autoconfigure.LdapProperties;
 import org.springframework.ldap.core.LdapTemplate;
 import org.springframework.ldap.core.support.LdapContextSource;
 import org.springframework.stereotype.Component;
@@ -25,7 +28,7 @@ public class ChangelogConnection {
 
     private final LdapTemplate template;
 
-    public ChangelogConnection(LdapConnectionDetails connectionDetails) {
+    public ChangelogConnection(LdapConnectionDetails connectionDetails, LdapProperties properties) {
         LdapContextSource contextSource = new LdapContextSource();
         contextSource.setUrls(connectionDetails.getUrls());
         // Empty on purpose: see the class javadoc.
@@ -36,6 +39,7 @@ public class ChangelogConnection {
         } else {
             contextSource.setAnonymousReadOnly(true);
         }
+        contextSource.setBaseEnvironmentProperties(baseEnvironment(properties));
         contextSource.afterPropertiesSet();
 
         this.template = new LdapTemplate(contextSource);
@@ -43,6 +47,17 @@ public class ChangelogConnection {
         // that is an ordinary outcome here, not an error.
         this.template.setIgnorePartialResultException(true);
         this.template.setIgnoreNameNotFoundException(true);
+    }
+
+    /**
+     * The JNDI properties configured under {@code spring.ldap.base-environment}, which
+     * Boot applies to the application's own context source and which this one would
+     * otherwise miss. {@code java.naming.ldap.attributes.binary} is the reason it matters
+     * here: it is how a certificate attribute under a name of your own is declared binary,
+     * and this connection is one of the two that read certificates.
+     */
+    private static Map<String, Object> baseEnvironment(LdapProperties properties) {
+        return new HashMap<>(properties.getBaseEnvironment());
     }
 
     /** Operations against the directory root. */

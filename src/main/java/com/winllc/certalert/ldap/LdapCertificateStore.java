@@ -33,21 +33,24 @@ public class LdapCertificateStore {
     private static final Logger log = LoggerFactory.getLogger(LdapCertificateStore.class);
 
     private final LdapTemplate template;
+    private final LdapProperties properties;
 
-    public LdapCertificateStore(DirectoryEntryConnection connection) {
+    public LdapCertificateStore(DirectoryEntryConnection connection, LdapProperties properties) {
         this.template = connection.template();
+        this.properties = properties;
     }
 
     /**
      * The certificates this entry publishes, as the directory holds them.
      *
      * @param attribute the attribute they live in, unqualified - the binary option is
-     *     added here, because without it a directory hands back a string
+     *     added here when the directory wants one, because without it a directory that
+     *     does hands back a string
      */
     public List<byte[]> read(String dn, String attribute) {
         SearchControls controls = new SearchControls();
         controls.setSearchScope(SearchControls.OBJECT_SCOPE);
-        controls.setReturningAttributes(new String[] {LdapAttributes.asBinaryRequest(attribute)});
+        controls.setReturningAttributes(new String[] {requested(attribute)});
         controls.setCountLimit(1);
 
         List<List<byte[]>> found = template.search(dn, "(objectClass=*)", controls,
@@ -77,7 +80,7 @@ public class LdapCertificateStore {
         if (values.isEmpty()) {
             return;
         }
-        BasicAttribute removing = new BasicAttribute(LdapAttributes.asBinaryRequest(attribute));
+        BasicAttribute removing = new BasicAttribute(requested(attribute));
         for (byte[] value : values) {
             removing.add(value);
         }
@@ -86,5 +89,15 @@ public class LdapCertificateStore {
         };
         log.debug("Removing {} certificate value(s) from '{}'", values.size(), dn);
         template.modifyAttributes(dn, modifications);
+    }
+
+    /**
+     * How to name the attribute to this directory - qualified with the binary option, or
+     * plain for a server that has nothing to return under the qualified name. The same
+     * name is used to read and to remove: a modification has to name the attribute the
+     * way the values were read, or the server will not match them.
+     */
+    private String requested(String attribute) {
+        return LdapAttributes.requestName(attribute, properties.isBinaryCertificateOption());
     }
 }

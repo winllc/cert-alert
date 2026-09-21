@@ -129,9 +129,18 @@ public final class LdapAttributes {
         return option < 0 ? name : name.substring(0, option);
     }
 
-    /** The name to request from the server, asking for binary transfer explicitly. */
-    static String asBinaryRequest(String name) {
-        if (name == null || name.isBlank()) {
+    /**
+     * The name to ask the server for.
+     *
+     * <p>With the binary option a certificate is requested as {@code userCertificate
+     * ;binary}, which RFC 4522 requires and which is the only way some directories will
+     * part with one. Without it the plain name is sent, for the servers that have no such
+     * attribute to return and answer a qualified request with nothing at all.
+     *
+     * <p>Either way {@link #find} matches what comes back, since it compares base names.
+     */
+    static String requestName(String name, boolean binaryOption) {
+        if (name == null || name.isBlank() || !binaryOption) {
             return name;
         }
         return name.toLowerCase(java.util.Locale.ROOT).endsWith(BINARY_OPTION) ? name : name + BINARY_OPTION;

@@ -134,6 +134,26 @@ public final class EmbeddedDirectory implements AutoCloseable {
         return "uid=" + uid + "," + PEOPLE_DN;
     }
 
+    /**
+     * Adds an IC Person whose certificate is stored under the plain attribute name, with
+     * no binary option.
+     *
+     * <p>Which is how a virtual directory presents an attribute it has assembled from some
+     * other store - Radiant Logic FID 7.4 among them. It matters because the two are not
+     * interchangeable in a search: a request naming the binary option matches only an
+     * attribute that carries it, so against an entry like this one the certificate comes
+     * back empty and the entry caches with no certificates at all.
+     */
+    public String addUserWithUnqualifiedCertificate(
+            String uid, String displayName, String icEmail, byte[]... certificates) {
+        Entry entry = userEntry(uid, displayName, icEmail);
+        if (certificates.length > 0) {
+            entry.addAttribute(new Attribute("userCertificate", certificates));
+        }
+        add(entry);
+        return "uid=" + uid + "," + PEOPLE_DN;
+    }
+
     /** Adds an IC Non-Person Entity. {@code serverPOC} names the responsible person. */
     public String addServer(String cn, String serverUrl, String[] pocs, byte[]... certificates) {
         add(serverEntry(cn, serverUrl, pocs, certificates));

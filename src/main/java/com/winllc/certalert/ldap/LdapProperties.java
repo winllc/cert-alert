@@ -48,6 +48,27 @@ public class LdapProperties {
     /** Per-search time limit. */
     private Duration searchTimeout = Duration.ofMinutes(10);
 
+    /**
+     * Whether the certificate attribute is requested with the {@code ;binary} option.
+     *
+     * <p>RFC 4522 says a certificate must be transferred in its binary form, and asking
+     * for {@code userCertificate;binary} is how a client insists on it. Directories that
+     * implement the rule return nothing for the unqualified name, so this is on.
+     *
+     * <p>Not every server does implement it. A virtual directory in particular - Radiant
+     * Logic FID 7.4 among them - presents attributes it has assembled from somewhere else
+     * and has no {@code userCertificate;binary} to return, so a request for one comes back
+     * empty and no certificate is ever cached. Turning this off asks for the attribute by
+     * its plain name.
+     *
+     * <p>Doing so puts the decision about how values arrive back on the provider, which
+     * decides from the attribute's name alone. JNDI knows the standard names; if the
+     * certificate lives under one of your own, declare it in
+     * {@code spring.ldap.base-environment} under
+     * {@code java.naming.ldap.attributes.binary} or it will arrive as text.
+     */
+    private boolean binaryCertificateOption = true;
+
     public Sync getSync() {
         return sync;
     }
@@ -106,6 +127,14 @@ public class LdapProperties {
 
     public void setSearchTimeout(Duration searchTimeout) {
         this.searchTimeout = searchTimeout;
+    }
+
+    public boolean isBinaryCertificateOption() {
+        return binaryCertificateOption;
+    }
+
+    public void setBinaryCertificateOption(boolean binaryCertificateOption) {
+        this.binaryCertificateOption = binaryCertificateOption;
     }
 
     /** Schedules for the scraping jobs. */

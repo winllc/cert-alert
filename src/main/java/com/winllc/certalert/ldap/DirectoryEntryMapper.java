@@ -26,14 +26,14 @@ public class DirectoryEntryMapper {
         this.properties = properties;
     }
 
-    /** Attributes to request for a person, including the certificate in binary form. */
+    /** Attributes to request for a person, the certificate among them. */
     public String[] userAttributes() {
         LdapProperties.User mapping = properties.getUser();
         List<String> attributes = new ArrayList<>();
         for (UserField field : UserField.values()) {
             addIfPresent(attributes, field.attributeName(mapping));
         }
-        addIfPresent(attributes, LdapAttributes.asBinaryRequest(mapping.getCertificate()));
+        addIfPresent(attributes, requestedCertificate(mapping.getCertificate()));
         return attributes.toArray(String[]::new);
     }
 
@@ -45,8 +45,13 @@ public class DirectoryEntryMapper {
             addIfPresent(attributes, field.attributeName(mapping));
         }
         addIfPresent(attributes, mapping.getServerPoc());
-        addIfPresent(attributes, LdapAttributes.asBinaryRequest(mapping.getCertificate()));
+        addIfPresent(attributes, requestedCertificate(mapping.getCertificate()));
         return attributes.toArray(String[]::new);
+    }
+
+    /** How this directory wants the certificate attribute named - see the toggle's javadoc. */
+    private String requestedCertificate(String attribute) {
+        return LdapAttributes.requestName(attribute, properties.isBinaryCertificateOption());
     }
 
     public LdapUserEntry toUser(DirContextOperations ctx) throws NamingException {
