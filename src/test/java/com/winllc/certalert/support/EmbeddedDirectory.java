@@ -128,6 +128,30 @@ public final class EmbeddedDirectory implements AutoCloseable {
         }
     }
 
+    /** An organizational unit of your own, to put entries somewhere the sweeps do not read. */
+    public String addOrganizationalUnit(String ou) {
+        String dn = "ou=" + ou + "," + BASE_DN;
+        add(new Entry(
+                dn, new Attribute("objectClass", "top", "organizationalUnit"), new Attribute("ou", ou)));
+        return dn;
+    }
+
+    /**
+     * Adds an IC Person somewhere other than {@code ou=people} - the same objectClass and
+     * the same attributes, at a distinguished name no sweep of {@code ou=people} reaches.
+     *
+     * <p>A directory records every change it is configured to record, not only the ones
+     * under a base this application happens to read, so the changelog names entries like
+     * this one and the connector has to decide what to do with them.
+     */
+    public String addUserUnder(
+            String parentDn, String uid, String displayName, String icEmail, byte[]... certificates) {
+        Entry entry = userEntry(uid, displayName, icEmail, certificates);
+        Entry elsewhere = new Entry("uid=" + uid + "," + parentDn, entry.getAttributes());
+        add(elsewhere);
+        return elsewhere.getDN();
+    }
+
     /** Adds an IC Person. Certificates are stored under the binary attribute option. */
     public String addUser(String uid, String displayName, String icEmail, byte[]... certificates) {
         add(userEntry(uid, displayName, icEmail, certificates));

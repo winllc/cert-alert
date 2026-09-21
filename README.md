@@ -1285,9 +1285,27 @@ reconciliation, the roll-ups and the alert transitions all come along for free.
 | anything else | Counted and stepped over |
 
 An entry that no longer matches the sweep's search filter — its objectClass changed, say —
-is removed rather than left behind as a stale row. Whether a changed DN is a person, a
-server or neither is decided by running those same filters at base scope against it, so
-anything a sweep would collect, the connector collects.
+is removed rather than left behind as a stale row.
+
+Whether a changed DN is a person, a server or neither takes two tests, not one. The
+sweep's **search filter** says what shape the entry has to be, and its **search base** says
+where it has to live; the connector applies both, so what it caches is exactly what a
+sweep would have collected.
+
+The base matters because a changelog is not scoped to what this application reads. A
+directory records whatever it was configured to record, usually more of the tree than
+either sweep covers, and `targetDN` is an absolute name the connector re-reads over a
+base-less connection. On the filter alone, a person under `ou=contractors` — or under a
+different suffix entirely — would be cached from a change although no sweep would ever
+see it, leaving rows the sweeps can neither refresh nor account for. Such an entry is now
+ignored, and one already cached from before is dropped the next time the changelog names
+it, so a cache that collected them settles itself.
+
+The base each type is held to is its own `search-base` resolved under `spring.ldap.base` —
+`ou=people,dc=example,dc=gov` for the defaults. Leave both empty and there is no
+constraint, which is correct: a sweep with no base reads the whole tree, so the connector
+does too. Names are compared as distinguished names rather than as text, so case and
+spacing around the commas do not matter.
 
 ### Durability
 

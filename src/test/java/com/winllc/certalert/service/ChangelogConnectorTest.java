@@ -104,6 +104,61 @@ class ChangelogConnectorTest {
 
     // --- the cases ---------------------------------------------------------------------
 
+    /**
+     * A person of exactly the right shape, in the wrong part of the tree.
+     *
+     * <p>The changelog covers whatever the directory was told to record, which is more of
+     * the tree than either sweep reads. Matching the objectClass filter is therefore not
+     * enough on its own: this entry would be picked up by no sweep, and caching it from a
+     * change leaves a row the sweeps can neither refresh nor account for.
+     */
+    @Test
+    void aPersonOutsideTheSweptSubtreeIsNotCached() {
+        String contractors = directory.addOrganizationalUnit("contractors");
+        String outside = directory.addUserUnder(contractors, "outsider", "Out Sider", "out.sider@example.gov",
+                TestCertificates.expiringIn("outsider", Duration.ofDays(200)));
+
+        // A person the sweep would collect, added in the same batch, so what is being shown
+        // is where the entry lives and not that the poll did nothing.
+        String inside = directory.addUser("insider", "In Sider", "in.sider@example.gov",
+                TestCertificates.expiringIn("insider", Duration.ofDays(200)));
+
+        connector.pollOnce();
+
+        assertThat(userRepository.findByDn(inside)).isPresent();
+        assertThat(userRepository.findByDn(outside))
+                .as("a person under ou=contractors, which no sweep reads")
+                .isEmpty();
+    }
+
+    /**
+     * And one already cached is dropped when the changelog next names it, so a cache that
+     * collected such entries before this was checked settles itself rather than needing to
+     * be emptied by hand.
+     */
+    @Test
+    void andOneAlreadyCachedIsDroppedWhenItChanges() {
+        String contractors = directory.addOrganizationalUnit("contractors2");
+        String outside = directory.addUserUnder(contractors, "stale", "Stale Entry", "stale.entry@example.gov",
+                TestCertificates.expiringIn("stale", Duration.ofDays(200)));
+        connector.pollOnce();
+
+        // Put it in the cache the way the connector used to, bypassing the reader.
+        transactionTemplate.execute(status -> {
+            DirectoryUser stranded = new DirectoryUser(outside);
+            stranded.setUid("stale");
+            stranded.setDisplayName("Stale Entry");
+            stranded.markSynced(java.time.Instant.now());
+            return userRepository.save(stranded);
+        });
+        assertThat(userRepository.findByDn(outside)).isPresent();
+
+        directory.modify(outside, "displayName", "Stale Entry Renamed");
+        connector.pollOnce();
+
+        assertThat(userRepository.findByDn(outside)).isEmpty();
+    }
+
     @Test
     void anAddedPersonAppearsWithoutASweep() {
         String dn = directory.addUser("newjoiner", "New Joiner", "new.joiner@example.gov",
