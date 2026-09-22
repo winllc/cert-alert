@@ -371,8 +371,26 @@ Both object types carry a denormalised roll-up — `certificate_count`,
 `certificate_status`, `earliest_expiry`, `latest_expiry` — refreshed on every sync. The
 search tables sort and filter on these constantly, and keeping them on the row turns
 "everyone with an expired certificate" into an indexed predicate on one table instead of
-a correlated subquery. The roll-up takes the **worst** state of the entry's certificates,
-so one expired certificate alongside a healthy one still reads as `EXPIRED`.
+a correlated subquery.
+
+The roll-up takes the **worst** state — but of the certificates the entry still stands on,
+which is not all of them. A directory keeps what it was given: renewing publishes the new
+certificate and does not withdraw the old one, so an entry that rotated exactly as it
+should goes on publishing the one it replaced. An **expired** certificate is therefore
+passed over while the entry still holds one that has not expired, and the status and both
+expiry dates describe what is left. Otherwise every correct renewal read as `EXPIRED`
+until somebody cleared the old value out, and the entries that really had lapsed were the
+hardest to find among them.
+
+Only expired. A certificate that is still good counts however old it is, because nothing
+here can tell a superseded one still lying around from one half of a pair the entry is
+using — and of the two ways to be wrong, saying nothing about a credential that really is
+running out is the worse one. So two live certificates, one due in a week and one in a
+year, still read as `EXPIRING_SOON`.
+
+When every certificate has expired they all count again, so an entry that has genuinely
+lapsed still reads `EXPIRED`. `certificate_count` is always a count of everything
+published; the details page lists the superseded ones, which have not gone away.
 
 | Status          | Meaning                                              |
 |-----------------|------------------------------------------------------|
@@ -494,7 +512,7 @@ Both tables carry the same filters, and both take the two expiry dates an entry 
 
 | Filter | Parameter | What it asks |
 |---|---|---|
-| Certificates | `certificateStatus`, `expired`, `hasCertificates` | the state of the worst certificate an entry holds |
+| Certificates | `certificateStatus`, `expired`, `hasCertificates` | the entry's rolled-up state — the worst of the certificates it still stands on |
 | Expiring within | `expiringWithinDays` | how soon the **next** one runs out |
 | Last certificate expires | `latestExpiryFrom`, `latestExpiryTo` | the day the **last** of them runs out, as a range of whole days, either end optional |
 | Point of contact | `poc` | on servers, a contact whose name or address contains this; on people, somebody a `serverPOC` could name by it |

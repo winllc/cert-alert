@@ -19,6 +19,7 @@ import com.winllc.certalert.repository.SyncRunRepository;
 import com.winllc.certalert.support.EmbeddedDirectory;
 import com.winllc.certalert.support.TestCertificates;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -147,7 +148,7 @@ class DirectorySyncServiceTest {
     }
 
     @Test
-    void rollsUpTheWorstCertificateStateOntoTheEntity() {
+    void rollsUpTheStateOfTheCertificatesTheEntryStandsOn() {
         directory.addUser(
                 "mixed",
                 "Mixed Holder",
@@ -158,13 +159,79 @@ class DirectorySyncServiceTest {
         syncAll();
 
         DirectoryUser user = userByDn("uid=mixed," + EmbeddedDirectory.PEOPLE_DN);
+        // Both are still published, and both are still listed on the details page.
         assertThat(user.getCertificateCount()).isEqualTo(2);
-        // One expired certificate is what matters, even alongside a healthy one.
-        assertThat(user.getCertificateStatus()).isEqualTo(CertificateStatus.EXPIRED);
-        assertThat(user.getEarliestExpiry()).isBefore(user.getLatestExpiry());
         assertThat(user.getCertificates())
                 .extracting(CachedCertificate::getStatus)
                 .containsExactlyInAnyOrder(CertificateStatus.VALID, CertificateStatus.EXPIRED);
+
+        // But the entry is not expired: it holds one that works. A directory does not
+        // withdraw the old certificate when a new one is published, so reading this as
+        // EXPIRED made a false alarm out of every correct renewal.
+        assertThat(user.getCertificateStatus()).isEqualTo(CertificateStatus.VALID);
+        // And the dates the tables sort on are the surviving certificate's, not the dead
+        // one's - otherwise this entry sits at the top of "expiring soonest" for ever.
+        assertThat(user.getEarliestExpiry()).isEqualTo(user.getLatestExpiry());
+        assertThat(user.getEarliestExpiry()).isAfter(Instant.now());
+    }
+
+    /**
+     * The same for a server, which is where this was noticed: one endpoint, one certificate
+     * at a time, and a rotation leaves the old one published beside the new.
+     */
+    @Test
+    void aServerThatHasRotatedIsNotExpired() {
+        directory.addServer(
+                "web09",
+                "https://web09.example.gov",
+                new String[] {"alice@example.gov"},
+                TestCertificates.expired("web09-old", Duration.ofDays(10)),
+                TestCertificates.expiringIn("web09-new", Duration.ofDays(350)));
+
+        syncAll();
+
+        DirectoryServer server = serverByDn("cn=web09," + EmbeddedDirectory.SERVERS_DN);
+        assertThat(server.getCertificateCount()).isEqualTo(2);
+        assertThat(server.getCertificateStatus()).isEqualTo(CertificateStatus.VALID);
+    }
+
+    /** With nothing left standing the entry really has lapsed, and still says so. */
+    @Test
+    void andOneWhoseCertificatesHaveAllExpiredStillReadsExpired() {
+        directory.addUser(
+                "lapsed",
+                "Lapsed Holder",
+                "lapsed@example.gov",
+                TestCertificates.expired("lapsed-a", Duration.ofDays(3)),
+                TestCertificates.expired("lapsed-b", Duration.ofDays(40)));
+
+        syncAll();
+
+        DirectoryUser user = userByDn("uid=lapsed," + EmbeddedDirectory.PEOPLE_DN);
+        assertThat(user.getCertificateStatus()).isEqualTo(CertificateStatus.EXPIRED);
+        // Both count again here, so the dates still say when it lapsed.
+        assertThat(user.getEarliestExpiry()).isBefore(user.getLatestExpiry());
+    }
+
+    /**
+     * Two certificates at once, both still good, one running out. That is a pair rather
+     * than a rotation, and the half that is running out is exactly what this exists to
+     * report - so the sooner date is the one that counts.
+     */
+    @Test
+    void butTwoLiveCertificatesAreBothStillCountedAgainstTheWarningWindow() {
+        directory.addUser(
+                "pair",
+                "Pair Holder",
+                "pair@example.gov",
+                TestCertificates.expiringIn("pair-signing", Duration.ofDays(5)),
+                TestCertificates.expiringIn("pair-encryption", Duration.ofDays(300)));
+
+        syncAll();
+
+        DirectoryUser user = userByDn("uid=pair," + EmbeddedDirectory.PEOPLE_DN);
+        assertThat(user.getCertificateStatus()).isEqualTo(CertificateStatus.EXPIRING_SOON);
+        assertThat(user.getEarliestExpiry()).isBefore(user.getLatestExpiry());
     }
 
     @Test
@@ -356,6 +423,14 @@ class DirectorySyncServiceTest {
     }
 
     /** Loads a user with its certificates initialised, for assertions outside a transaction. */
+    private DirectoryServer serverByDn(String dn) {
+        return inTransaction(() -> {
+            DirectoryServer server = serverRepository.findByDn(dn).orElseThrow();
+            server.getCertificates().size();
+            return server;
+        });
+    }
+
     private DirectoryUser userByDn(String dn) {
         return inTransaction(() -> {
             DirectoryUser user = userRepository.findByDn(dn).orElseThrow();

@@ -10,7 +10,6 @@ import jakarta.persistence.MappedSuperclass;
 import jakarta.persistence.SequenceGenerator;
 import jakarta.persistence.Version;
 import java.time.Instant;
-import java.util.Collection;
 import java.util.List;
 
 /**
@@ -88,18 +87,50 @@ public abstract class DirectoryEntry {
         this.lastSyncedAt = syncedAt;
     }
 
-    /** Recomputes the denormalised roll-up from the entry's current certificates. */
+    /**
+     * Recomputes the denormalised roll-up.
+     *
+     * <p>From the certificates the entry still stands on, which is not the same as all of
+     * them. A directory keeps what it was given: renewing publishes the new certificate
+     * and does not withdraw the old one, so an entry that rotated exactly as it should goes
+     * on publishing the one it replaced until somebody clears it out. Rolling the worst
+     * state over everything reported that entry as EXPIRED while the certificate it is
+     * actually serving was fine - so every correct renewal produced a false alarm, and the
+     * entries that genuinely had expired were the hardest to pick out of them.
+     *
+     * <p>An expired certificate is therefore passed over, and the status and the two expiry
+     * dates the tables sort on describe what is left. Only expired: a certificate that has
+     * not expired counts however old it is, because there is no telling from here whether
+     * it is a superseded one still lying around or half of a pair the entry is using, and
+     * of the two ways to be wrong, saying nothing about a credential that really is running
+     * out is the worse one.
+     *
+     * <p>When every certificate has expired they all count again, which is what keeps a
+     * genuinely lapsed entry reading EXPIRED rather than as an entry with nothing.
+     *
+     * <p>{@code certificateCount} stays a count of everything published, because that is
+     * what it is: the details page lists the superseded ones and they have not gone away.
+     */
     public void refreshCertificateSummary() {
-        Collection<CachedCertificate> certificates = getCertificates();
+        List<CachedCertificate> certificates = getCertificates();
         this.certificateCount = certificates.size();
+
+        List<CachedCertificate> standing = certificates.stream()
+                .filter(certificate -> certificate.getStatus() != CertificateStatus.EXPIRED)
+                .toList();
+        // Nothing left standing means the entry has lapsed, not that it holds nothing.
+        List<CachedCertificate> counted = standing.isEmpty() ? certificates : standing;
+
+        // worstOf an empty list is NONE, which is the right answer for an entry that really
+        // does hold no certificates - so that case needs no branch of its own.
         this.certificateStatus =
-                CertificateStatus.worstOf(certificates.stream().map(CachedCertificate::getStatus).toList());
-        this.earliestExpiry = certificates.stream()
+                CertificateStatus.worstOf(counted.stream().map(CachedCertificate::getStatus).toList());
+        this.earliestExpiry = counted.stream()
                 .map(CachedCertificate::getNotAfter)
                 .filter(java.util.Objects::nonNull)
                 .min(Instant::compareTo)
                 .orElse(null);
-        this.latestExpiry = certificates.stream()
+        this.latestExpiry = counted.stream()
                 .map(CachedCertificate::getNotAfter)
                 .filter(java.util.Objects::nonNull)
                 .max(Instant::compareTo)

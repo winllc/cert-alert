@@ -31,8 +31,13 @@ public enum CertificateStatus {
 
     /**
      * Rolls several certificate states up into one for an entity holding them. The worst
-     * state wins, so an entity with one expired and one valid certificate reads as EXPIRED
-     * and stays visible to anyone filtering for problems.
+     * state wins.
+     *
+     * <p>Which states are handed in is the caller's decision and it is not "all of them":
+     * see {@link DirectoryEntry#refreshCertificateSummary()}, which leaves out a
+     * certificate that has expired while the entry still holds one that has not. An entity
+     * goes on publishing the certificate it renewed away from, and rolling that one in
+     * made every correct renewal read as EXPIRED.
      */
     public static CertificateStatus worstOf(Iterable<CertificateStatus> statuses) {
         CertificateStatus worst = NONE;
