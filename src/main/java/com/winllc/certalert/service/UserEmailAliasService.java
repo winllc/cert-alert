@@ -3,6 +3,7 @@ package com.winllc.certalert.service;
 import com.winllc.certalert.domain.AuditAction;
 import com.winllc.certalert.domain.AuditEvent;
 import com.winllc.certalert.domain.DirectoryUser;
+import com.winllc.certalert.domain.EmailAddresses;
 import com.winllc.certalert.domain.UserEmailAlias;
 import com.winllc.certalert.repository.DirectoryUserRepository;
 import com.winllc.certalert.repository.UserEmailAliasRepository;
@@ -10,7 +11,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
-import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -32,8 +32,6 @@ public class UserEmailAliasService {
     private static final Logger log = LoggerFactory.getLogger(UserEmailAliasService.class);
 
     /** As loose as the one on contacts, and for the same reason: real directories are messy. */
-    private static final Pattern ADDRESS = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
-
     private final DirectoryUserRepository userRepository;
     private final UserEmailAliasRepository aliasRepository;
     private final AuditService auditService;
@@ -60,7 +58,7 @@ public class UserEmailAliasService {
     public UserEmailAlias add(Long userId, String address, UserEmailAlias.Kind kind, String label, String addedBy) {
         DirectoryUser user = requireUser(userId);
         String normalised = normalise(address);
-        if (normalised == null || !ADDRESS.matcher(normalised).matches()) {
+        if (normalised == null || !EmailAddresses.isAddress(normalised)) {
             throw new IllegalArgumentException("'%s' is not an email address".formatted(address));
         }
         if (aliasRepository.existsByUserIdAndAddress(userId, normalised)) {

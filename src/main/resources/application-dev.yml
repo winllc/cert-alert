@@ -52,6 +52,10 @@ cert-alert:
       search-base: ou=people
     server:
       search-base: ou=servers
+      # The sample directory writes serverPOC both ways round - as an address and as a
+      # person's name - to show the join lands on the same person either way. Keeping the
+      # names is the point of it, so this reads it the way the specification means.
+      require-email-poc: false
 
 logging:
   level:

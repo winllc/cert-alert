@@ -86,6 +86,11 @@ services:
       CERT_ALERT_LDAP_BASE: ${CERT_ALERT_LDAP_BASE:-dc=example,dc=test}
       CERT_ALERT_LDAP_USER: ${CERT_ALERT_LDAP_USER:-cn=cert-alert,ou=services,dc=example,dc=test}
       CERT_ALERT_LDAP_PASSWORD: ${CERT_ALERT_LDAP_PASSWORD:-cert-alert}
+      # The generated directory writes serverPOC both ways round - as an address and as a
+      # person's name - to show the join lands on the same person either way. A directory
+      # that holds only addresses wants this left at its default of true, and then a value
+      # that is not an address is dropped as bad data.
+      CERT_ALERT_LDAP_REQUIRE_EMAIL_POC: "false"
       # Where the password fallback looks a person up. The stand-in keeps them in one
       # place; a real directory may want this empty, to search the whole tree.
       CERT_ALERT_SECURITY_LDAP_USER_SEARCH_BASE: ${CERT_ALERT_LDAP_USER_SEARCH_BASE:-ou=people}

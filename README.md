@@ -546,6 +546,30 @@ their address, and the server resolves it to the full identifier set — so foll
 link finds servers named either way. The free-text box next to it matches a literal
 `serverPOC` value.
 
+**Several contacts in one value.** The attribute is multi-valued, so a server with three
+contacts *can* hold three values — but a directory filled in through a form often holds
+them as one value with commas between them. Read whole, that value matches nobody: it is
+not an address and it is not anybody's name, so the server silently has no contacts and
+nobody hears when its certificate runs out. Every value is therefore split on commas,
+which leaves the ordinary single-address value untouched.
+
+**What a value has to be.** `cert-alert.ldap.server.require-email-poc` is `true` by
+default, for the directories that put addresses in this attribute: a value that is not an
+address is then bad data rather than somebody's name, so it is dropped instead of being
+cached as a contact nothing can be sent to, and logged with the entry's DN so it can be
+corrected where it lives.
+
+```
+WARN  c.w.certalert.ldap.DirectoryEntryMapper : 'cn=db01,ou=servers,dc=example,dc=test'
+      has 1 'serverPOC' value(s) that are not email addresses, ignoring them: [Bob Wilson]
+```
+
+Set it `false` for a directory that follows the specification and holds names, or one
+carrying both — a name costs nothing to keep, since it only ever resolves through the
+identifier index above. A whole directory of those warnings means it is the wrong way
+round. The sample directory and the compose demo write `serverPOC` both ways on purpose,
+to show the join landing on the same person either way, so both set it `false`.
+
 ### Addresses a person answers to
 
 The directory publishes up to five addresses per person and all five are indexed. A
@@ -1415,6 +1439,7 @@ Scraping, under `cert-alert.ldap`:
 | `count-limit`        | `0`     | Client-side cap on entries; 0 means none        |
 | `search-timeout`     | `10m`   | Per-search time limit                           |
 | `binary-certificate-option` | `true` | Ask for `userCertificate;binary`. Off for a directory with no such attribute to return |
+| `server.require-email-poc` | `true` | A `serverPOC` value must be an email address; off for a directory holding names. Comma-separated values are split either way |
 | `sync.enabled`       | `true`  | Set false to drive every job through the API    |
 | `sync.users-cron`    | `0 0 2 * * *`  | IC Person sweep                          |
 | `sync.servers-cron`  | `0 0 4 * * *`  | IC Non-Person Entity sweep               |

@@ -715,6 +715,24 @@ public class LdapProperties {
         /** IC FSD: icOrgServer serverPOC, the point of contact (mandatory). */
         private String serverPoc = "serverPOC";
 
+        /**
+         * Whether a {@code serverPOC} value has to be an email address to be kept.
+         *
+         * <p>The specification says the attribute carries a <em>name</em>, and a person is
+         * indexed under every value that could name them, so a name resolves as readily as
+         * an address. Directories that put addresses there instead can say so here, and
+         * then anything that is not one is bad data rather than somebody's name: dropped,
+         * and logged so it can be found and fixed at the source.
+         *
+         * <p>Turn it off for a directory that follows the specification, or one where both
+         * conventions are in use - a name kept is only ever matched against the identifier
+         * index, so keeping one costs nothing but the row.
+         *
+         * <p>Separate from the comma-splitting above it, which is unconditional: a single
+         * value carrying several addresses matches nobody whichever convention is in use.
+         */
+        private boolean requireEmailPoc = true;
+
         /** IC FSD: organization. */
         private String organization = "o";
 
@@ -858,6 +876,14 @@ public class LdapProperties {
 
         public void setServerPoc(String serverPoc) {
             this.serverPoc = serverPoc;
+        }
+
+        public boolean isRequireEmailPoc() {
+            return requireEmailPoc;
+        }
+
+        public void setRequireEmailPoc(boolean requireEmailPoc) {
+            this.requireEmailPoc = requireEmailPoc;
         }
 
         public String getOrganization() {

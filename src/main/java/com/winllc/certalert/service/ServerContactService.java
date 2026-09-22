@@ -4,6 +4,7 @@ import com.winllc.certalert.domain.AuditAction;
 import com.winllc.certalert.domain.AuditEvent;
 import com.winllc.certalert.domain.DirectoryServer;
 import com.winllc.certalert.domain.DirectoryUser;
+import com.winllc.certalert.domain.EmailAddresses;
 import com.winllc.certalert.domain.ServerContact;
 import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.DirectoryUserRepository;
@@ -12,7 +13,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
-import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -31,13 +31,6 @@ import org.springframework.transaction.annotation.Transactional;
 public class ServerContactService {
 
     private static final Logger log = LoggerFactory.getLogger(ServerContactService.class);
-
-    /**
-     * Deliberately loose. This is not the place to decide what a valid address is - the
-     * directory holds addresses in forms no pattern here should be rejecting - so it only
-     * rules out what is obviously not one.
-     */
-    private static final Pattern ADDRESS = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
 
     private final DirectoryServerRepository serverRepository;
     private final DirectoryUserRepository userRepository;
@@ -97,7 +90,7 @@ public class ServerContactService {
     public ServerContact addEmail(Long serverId, String email, String addedBy) {
         DirectoryServer server = requireServer(serverId);
         String address = normalise(email);
-        if (address == null || !ADDRESS.matcher(address).matches()) {
+        if (address == null || !EmailAddresses.isAddress(address)) {
             throw new IllegalArgumentException("'%s' is not an email address".formatted(email));
         }
         if (contactRepository.existsByServerIdAndEmail(serverId, address)) {

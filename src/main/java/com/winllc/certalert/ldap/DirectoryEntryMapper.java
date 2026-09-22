@@ -1,13 +1,17 @@
 package com.winllc.certalert.ldap;
 
+import com.winllc.certalert.domain.EmailAddresses;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import javax.naming.NamingException;
 import javax.naming.directory.Attributes;
 import org.springframework.ldap.core.DirContextOperations;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
@@ -19,6 +23,8 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class DirectoryEntryMapper {
+
+    private static final Logger log = LoggerFactory.getLogger(DirectoryEntryMapper.class);
 
     private final LdapProperties properties;
 
@@ -78,9 +84,45 @@ public class DirectoryEntryMapper {
                 values.put(field, value);
             }
         }
-        Set<String> pocs = LdapAttributes.strings(source, mapping.getServerPoc());
-        return new LdapServerEntry(
-                ctx.getNameInNamespace(), values, pocs, LdapAttributes.binaries(source, mapping.getCertificate()));
+        String dn = ctx.getNameInNamespace();
+        Set<String> pocs = pointsOfContact(LdapAttributes.strings(source, mapping.getServerPoc()), mapping, dn);
+        return new LdapServerEntry(dn, values, pocs, LdapAttributes.binaries(source, mapping.getCertificate()));
+    }
+
+    /**
+     * The contacts a server's {@code serverPOC} names.
+     *
+     * <p>An attribute is multi-valued, but a directory that was filled in through a form
+     * often carries one value with several addresses comma-separated inside it. Read
+     * whole, such a value matches nobody: it is not an address and it is not a name either,
+     * so the server silently has no contacts and nobody is told when its certificate runs
+     * out. Every value is therefore split, which leaves an ordinary single address alone.
+     *
+     * <p>What survives after that depends on the convention the directory follows - see
+     * {@code require-email-poc}. Where values are addresses, anything that is not one is
+     * bad data and is dropped rather than cached as a contact nothing can be sent to; it
+     * is logged with the entry's name so it can be found and fixed where it lives.
+     */
+    private Set<String> pointsOfContact(Set<String> values, LdapProperties.Server mapping, String dn) {
+        Set<String> pocs = new LinkedHashSet<>();
+        List<String> rejected = new ArrayList<>();
+        for (String value : values) {
+            for (String candidate : EmailAddresses.split(value)) {
+                if (mapping.isRequireEmailPoc() && !EmailAddresses.isAddress(candidate)) {
+                    rejected.add(candidate);
+                    continue;
+                }
+                pocs.add(candidate);
+            }
+        }
+        if (!rejected.isEmpty()) {
+            // One line per entry rather than per value, and at warn because it is the
+            // directory that needs correcting. A whole directory of them means the
+            // convention is names, and require-email-poc is the wrong way round.
+            log.warn("'{}' has {} '{}' value(s) that are not email addresses, ignoring them: {}",
+                    dn, rejected.size(), mapping.getServerPoc(), rejected);
+        }
+        return pocs;
     }
 
     private void addIfPresent(List<String> attributes, String name) {

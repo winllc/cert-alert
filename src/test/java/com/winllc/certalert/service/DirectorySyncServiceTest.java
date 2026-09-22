@@ -147,6 +147,47 @@ class DirectorySyncServiceTest {
         assertThat(server.getCertificateCount()).isEqualTo(1);
     }
 
+    /**
+     * The attribute is multi-valued, but a directory filled in through a form often carries
+     * every contact in one value with commas between them. Read whole that value matches
+     * nobody - it is not an address and it is not a name - so the server appears to have no
+     * contacts at all and nobody hears when its certificate runs out.
+     */
+    @Test
+    void severalContactsInOneServerPocValueAreSplitApart() {
+        directory.addServer(
+                "web10",
+                "https://web10.example.gov",
+                new String[] {"Ops.Desk@example.gov, duty@example.gov,night@example.gov"},
+                TestCertificates.expiringIn("web10", Duration.ofDays(100)));
+
+        syncAll();
+
+        DirectoryServer server = serverWithPocs("cn=web10," + EmbeddedDirectory.SERVERS_DN);
+        // Lowercased, because this is the join key to a person's addresses.
+        assertThat(server.getServerPocs())
+                .containsExactlyInAnyOrder("ops.desk@example.gov", "duty@example.gov", "night@example.gov");
+        assertThat(server.getServerPocDisplay()).contains("duty@example.gov");
+    }
+
+    /**
+     * And with the directory's convention declared to be addresses, a value that is not one
+     * is bad data rather than somebody's name: nothing can be sent to it, so it is not kept.
+     */
+    @Test
+    void andAValueThatIsNotAnAddressIsNotKept() {
+        directory.addServer(
+                "web11",
+                "https://web11.example.gov",
+                new String[] {"Duty Officer, ops@example.gov"},
+                TestCertificates.expiringIn("web11", Duration.ofDays(100)));
+
+        syncAll();
+
+        DirectoryServer server = serverWithPocs("cn=web11," + EmbeddedDirectory.SERVERS_DN);
+        assertThat(server.getServerPocs()).containsExactly("ops@example.gov");
+    }
+
     @Test
     void rollsUpTheStateOfTheCertificatesTheEntryStandsOn() {
         directory.addUser(
@@ -423,6 +464,14 @@ class DirectorySyncServiceTest {
     }
 
     /** Loads a user with its certificates initialised, for assertions outside a transaction. */
+    private DirectoryServer serverWithPocs(String dn) {
+        return inTransaction(() -> {
+            DirectoryServer server = serverRepository.findByDn(dn).orElseThrow();
+            server.getServerPocs().size();
+            return server;
+        });
+    }
+
     private DirectoryServer serverByDn(String dn) {
         return inTransaction(() -> {
             DirectoryServer server = serverRepository.findByDn(dn).orElseThrow();

@@ -41,7 +41,9 @@ import org.springframework.transaction.support.TransactionTemplate;
  *
  * <p>Skipped where the script cannot run - it needs bash and openssl.
  */
-@SpringBootTest
+// The generated directory writes serverPOC both ways round on purpose, so it is read the
+// way a directory following the specification would be: names kept, not discarded.
+@SpringBootTest(properties = "cert-alert.ldap.server.require-email-poc=false")
 @ActiveProfiles("test")
 class GeneratedDirectoryTest {
 

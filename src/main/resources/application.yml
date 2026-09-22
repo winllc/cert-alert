@@ -253,6 +253,18 @@ cert-alert:
       # IC Person or organization; it is matched against every value that could name a
       # person, so a directory that puts an address here works just as well.
       server-poc: serverPOC
+      # A value carrying several contacts comma-separated is split into one each, whatever
+      # the convention. The attribute is multi-valued and a directory can hold three
+      # contacts as three values, but one filled in through a form often holds them as one
+      # value - and read whole that matches nobody, so the server appears to have no
+      # contacts and nobody hears about its certificate.
+      #
+      # This then says what a value has to be. True where the directory puts addresses in
+      # this attribute: anything that is not one is bad data, so it is dropped rather than
+      # cached as a contact nothing can be sent to, and logged with the entry's name so it
+      # can be corrected at the source. Set it false for a directory that follows the
+      # specification and holds names, or one carrying both.
+      require-email-poc: ${CERT_ALERT_LDAP_REQUIRE_EMAIL_POC:true}
       organization: o
       organizational-unit: ou
       certificate: userCertificate
