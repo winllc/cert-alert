@@ -271,6 +271,41 @@ class DirectoryDataTablesControllerTest {
      * three days and her last in nearly three years, so "expiring within 30 days" finds her
      * and "everything gone before next year" does not.
      */
+    /**
+     * What both tables open on. Soonest to expire first is the only order that puts the
+     * work at the top, and the reason it was not the default is where a NULL sorts: an
+     * entry publishing no certificate has no expiry at all, and databases disagree - H2
+     * puts nulls first ascending, PostgreSQL last. Settled in configuration rather than
+     * left to whichever database is underneath, so dave is last here and would be last
+     * there.
+     */
+    @Test
+    void theDefaultOrderIsSoonestToExpireFirstWithNothingToExpireLast() throws Exception {
+        mockMvc.perform(post(USERS).contentType(MediaType.APPLICATION_JSON)
+                        .content(orderedBy(USER_COLUMNS, "earliestExpiry"))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                // bob expired 5 days ago, carol goes in 10, alice in 400, dave holds none.
+                .andExpect(jsonPath("$.data[0].uid").value("bob"))
+                .andExpect(jsonPath("$.data[1].uid").value("carol"))
+                .andExpect(jsonPath("$.data[2].uid").value("alice"))
+                .andExpect(jsonPath("$.data[3].uid").value("dave"))
+                .andExpect(jsonPath("$.data[3].earliestExpiry").doesNotExist());
+    }
+
+    /** The same for servers, which have their own seed and their own table. */
+    @Test
+    void andTheServersTableOpensTheSameWay() throws Exception {
+        mockMvc.perform(post(SERVERS).contentType(MediaType.APPLICATION_JSON)
+                        .content(orderedBy(SERVER_COLUMNS, "earliestExpiry"))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                // web02 expired 2 days ago, web01 goes in 200, db01 in 500.
+                .andExpect(jsonPath("$.data[0].commonName").value("web02"))
+                .andExpect(jsonPath("$.data[1].commonName").value("web01"))
+                .andExpect(jsonPath("$.data[2].commonName").value("db01"));
+    }
+
     @Test
     void theLastExpiryIsADifferentDateFromTheNext() throws Exception {
         Instant now = Instant.now();
@@ -586,6 +621,13 @@ class DirectoryDataTablesControllerTest {
         return Duration.between(now, notAfter).toDays() < 30
                 ? CertificateStatus.EXPIRING_SOON
                 : CertificateStatus.VALID;
+    }
+
+    /** The body DataTables posts when the table is sorted by a column, as both now are. */
+    private String orderedBy(String[] columns, String column) {
+        int index = java.util.Arrays.asList(columns).indexOf(column);
+        return request(columns, 0, 10, null, null, null)
+                .replace("\"order\":[]", "\"order\":[{\"column\":" + index + ",\"dir\":\"asc\"}]");
     }
 
     private String usersRequest(int start, int length, String globalSearch, String uidSearch) {

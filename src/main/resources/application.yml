@@ -29,6 +29,13 @@ spring:
         order_inserts: true
         order_updates: true
         batch_versioned_data: true
+        order_by:
+          # Where a NULL sorts is left undefined by the standard and databases disagree -
+          # H2 puts them first ascending, PostgreSQL last. The tables sort by expiry, and
+          # an entry that publishes no certificate has none: leaving it to the database
+          # would head the "soonest to expire" list with every entry that has nothing to
+          # expire on one, and not on the other. Said here, so both behave the same.
+          default_null_ordering: last
 
   flyway:
     enabled: true

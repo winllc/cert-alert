@@ -102,7 +102,11 @@
             statsUrl: '/api/v1/stats/servers',
             readFilters: readFilters,
             filterInputs: [certState, showExpired, withinDays, latestFrom, latestTo, pocInput, pocColumn, riskFilter, projectFilter],
-            order: [[1, 'asc']],
+            // Soonest to expire first, which is the order the work is in. Column 10 is
+            // earliestExpiry. A server with no certificate has no expiry at all, and where
+            // a NULL sorts is settled in application.yml rather than left to the database,
+            // so those come last here and not at the top.
+            order: [[10, 'asc']],
             detailUrl: function (row) {
                 return '/api/v1/servers/' + row.id + '/certificates';
             },

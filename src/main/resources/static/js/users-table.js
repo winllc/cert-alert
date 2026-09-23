@@ -80,9 +80,11 @@
             statsUrl: '/api/v1/stats/users',
             readFilters: readFilters,
             filterInputs: [certState, showExpired, withinDays, latestFrom, latestTo, pocName, riskFilter, projectFilter],
-            // Sort by name, not by expiry: entries with no certificate have a null expiry,
-            // and databases disagree about whether nulls sort first or last.
-            order: [[1, 'asc']],
+            // Soonest to expire first, which is the order the work is in. Column 10 is
+            // earliestExpiry. Somebody with no certificate has no expiry at all, and where
+            // a NULL sorts is settled in application.yml rather than left to the database,
+            // so they come last here and not at the top.
+            order: [[10, 'asc']],
             detailUrl: function (row) {
                 return '/api/v1/users/' + row.id + '/certificates';
             },

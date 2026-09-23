@@ -508,6 +508,21 @@ the table footer; all of it posts as the request body and the library turns it i
 query. The filters this application adds ride along as query parameters and become an
 additional `Specification`, so the two never have to know about each other.
 
+Both tables open **soonest to expire first**, which is the order the work is in. An entry
+publishing no certificate has no expiry to sort on, and where a NULL sorts is left
+undefined by the standard: H2 puts them first ascending, PostgreSQL last. Left to the
+database, the top of the "soonest to expire" list would be filled with entries that have
+nothing to expire — on one database and not the other. So it is said explicitly, in
+`application.yml`:
+
+```yaml
+spring.jpa.properties.hibernate.order_by.default_null_ordering: last
+```
+
+Hibernate then renders `nulls last` into the SQL and both databases agree. Lapsed entries
+are hidden unless **Show expired** is ticked — they are what has already gone wrong rather
+than what is about to — so the first row is normally the soonest one still standing.
+
 Both tables carry the same filters, and both take the two expiry dates an entry has:
 
 | Filter | Parameter | What it asks |
