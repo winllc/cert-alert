@@ -420,16 +420,28 @@ one that shows none, so the text is yours to set and nothing is shown until it i
 
 They are **fixed**, so they stay put while a long table scrolls underneath — the point of
 them is that what is on the screen is marked whatever is on the screen — and the page is
-padded by `height` at each end so nothing ends up beneath one. Every page carries them,
-the sign-in page before anyone has signed in and the error page after something has gone
-wrong included: those are still pages showing this application's data. On paper the bars
-print where they fall rather than being fixed to a viewport that does not exist.
+padded by `height` at each end so nothing ends up beneath one. On paper they print where
+they fall, rather than being fixed to a viewport that does not exist.
 
-The text is rendered as text, so a marking carrying an ampersand or angle brackets comes
-out as written. The colours and the height are a different matter — they are written into
-a stylesheet, where nothing can be escaped — so they are checked against what a colour and
-a CSS length may look like, and anything else falls back to the default rather than
-reaching the page.
+**Every page carries them**, the sign-in page before anyone has signed in and the error
+page after something has gone wrong included: those are still pages showing this
+application's data. That is why they are `body::before` and `body::after`, drawn from the
+`head` fragment, rather than elements each page includes. There is no decorator layout
+here — `fragments/layout.html` is a bag of named fragments — and `head` is the one thing
+all twelve pages share, but a `<head>` cannot hold body content. Drawing them in CSS puts
+them on every page from one place, and leaves nothing for a page added tomorrow to forget.
+
+Everything from configuration ends up in that stylesheet, where nothing can be escaped by
+the template engine — Thymeleaf will not even evaluate a bean reference inside a `<style>`
+element, which is the same instinct. So the colours and the height are checked against
+what a colour and a CSS length may look like, and anything else falls back to the default.
+The text cannot be checked that way, because a marking is whatever the deployment says it
+is, so it is escaped instead: the quote and the backslash so it cannot end the string, and
+the angle brackets as CSS code points so a `</style>` in a properties file cannot end the
+element and put what follows into the page as markup.
+
+One trade-off worth knowing: generated content is announced by screen readers but is not
+selectable text, so the marking cannot be copied out of the page.
 
 ## Signing in
 

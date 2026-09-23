@@ -17,53 +17,65 @@
     <link rel="stylesheet" th:href="@{/webjars/tabler__core/dist/css/tabler.min.css}">
     <link rel="stylesheet" th:href="@{/webjars/datatables/css/dataTables.bootstrap5.css}">
     <link rel="stylesheet" th:href="@{/css/app.css}">
-    <!--/* The banner's colours and height as custom properties, so app.css holds the
-           layout and only the three values an operator sets come from configuration.
+    <!--/*
+      The classification banners, top and bottom.
 
-           The bean is resolved out here and handed in as a variable because Thymeleaf
-           will not evaluate a bean reference inside a style element - and it is right not
-           to, since what is written there is CSS and cannot be escaped on the way in.
-           Which is also why those three values are checked against what a colour and a
-           length may look like before they ever reach this. See BannerProperties. */-->
+      Drawn here, in the one fragment every page includes, rather than as elements a page
+      has to remember to put in its body - there is no decorator layout in this project,
+      only named fragments, and a head cannot hold body content. body::before and
+      body::after reach every page from one place, and a page added tomorrow gets them
+      without knowing they exist.
+
+      The bean is resolved outside the style element because Thymeleaf will not evaluate a
+      bean reference inside one, and it is right not to: what is written here is CSS and
+      cannot be escaped on the way in. Which is why the colours and the height are checked
+      against what a colour and a length may look like, and the text arrives already
+      escaped as a CSS string. See BannerProperties.
+
+      content: uses unescaped inlining for the same reason. The value is already a quoted
+      CSS string, and escaped inlining would render its quotes as HTML entities, leaving a
+      declaration the browser discards - a banner that silently does not appear.
+
+      Kept terse below because unlike these, a CSS comment is served on every request.
+    */-->
     <th:block th:with="banner=${@bannerProperties}">
     <style th:if="${banner.visible}" th:inline="text">
-        :root {
-            --banner-height: [[${banner.height}]];
-            --banner-bg: [[${banner.background}]];
-            --banner-fg: [[${banner.textColor}]];
+        body::before,
+        body::after {
+            content: [(${banner.cssText})];
+            position: fixed;
+            left: 0;
+            right: 0;
+            z-index: 1040;
+            height: [[${banner.height}]];
+            line-height: [[${banner.height}]];
+            background: [[${banner.background}]];
+            color: [[${banner.textColor}]];
+            text-align: center;
+            font-size: .75rem;
+            font-weight: 600;
+            letter-spacing: .06em;
+            text-transform: uppercase;
+            overflow: hidden;
+            white-space: nowrap;
         }
-        /* Room at both ends so nothing ends up underneath a bar. Here rather than in
-           app.css because this block exists only when the banner does, which saves
-           app.css needing :has() to ask whether one is on the page. */
+        body::before { top: 0; }
+        body::after { bottom: 0; }
+        /* Room at both ends, so nothing sits underneath a bar. */
         body {
-            padding-top: var(--banner-height);
-            padding-bottom: var(--banner-height);
+            padding-top: [[${banner.height}]];
+            padding-bottom: [[${banner.height}]];
         }
+        /* Fixed means the first page only, on paper. */
         @media print {
+            body::before,
+            body::after { position: static; }
             body { padding-top: 0; padding-bottom: 0; }
         }
     </style>
     </th:block>
 </head>
 <body>
-
-<!--/*
-  The fixed bars across the top and the bottom.
-
-  Both are emitted together because they say the same thing, and position: fixed means
-  where they sit in the document does not decide where they appear - so one fragment near
-  the top of the body serves both ends of the page.
-
-  role="status" rather than nothing: what this says is the classification of what is on
-  the screen, and somebody using a screen reader is owed that as much as anyone looking
-  at it. aria-hidden on the second, so it is not read out twice.
-*/-->
-<div th:fragment="banners" th:if="${@bannerProperties.visible}" th:remove="tag">
-    <div class="classification-banner classification-banner-top" role="status"
-         th:text="${@bannerProperties.text}">UNCLASSIFIED</div>
-    <div class="classification-banner classification-banner-bottom" aria-hidden="true"
-         th:text="${@bannerProperties.text}">UNCLASSIFIED</div>
-</div>
 
 <!--/* The application shell: brand, navigation, and who is signed in. */-->
 <header th:fragment="navbar(active)" class="navbar navbar-expand-md d-print-none" data-bs-theme="dark">

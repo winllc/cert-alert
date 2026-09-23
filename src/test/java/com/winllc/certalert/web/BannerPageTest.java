@@ -24,6 +24,9 @@ import org.springframework.web.context.WebApplicationContext;
  * <p>What it says is the classification of what is on the screen, so a page that misses it
  * is the one that matters: the sign-in page before anyone is signed in, and the error page
  * after something has gone wrong, are both still pages showing this application's data.
+ *
+ * <p>It is drawn from the head fragment, which is the one thing every page includes, so
+ * what these look for is the rule rather than an element.
  */
 @SpringBootTest(properties = {
     "cert-alert.banner.enabled=true",
@@ -50,47 +53,52 @@ class BannerPageTest {
     void bothBarsAreOnAnOrdinaryPage() throws Exception {
         mockMvc.perform(get("/users").accept(MediaType.TEXT_HTML))
                 .andExpect(status().isOk())
-                .andExpect(content().string(Matchers.containsString("classification-banner-top")))
-                .andExpect(content().string(Matchers.containsString("classification-banner-bottom")))
-                .andExpect(content().string(Matchers.containsString("UNCLASSIFIED//FOUO")))
+                .andExpect(content().string(Matchers.containsString("body::before")))
+                .andExpect(content().string(Matchers.containsString("body::after")))
+                // The declaration has to be valid CSS, not merely contain the text. Escaped
+                // inlining would render the quotes as &quot; here, which is a declaration
+                // the browser discards - and a banner that silently does not appear.
+                .andExpect(content().string(
+                        Matchers.containsString("content: \"UNCLASSIFIED//FOUO")))
+                .andExpect(content().string(Matchers.not(Matchers.containsString("&quot;"))))
                 // The configured values reach the stylesheet, and the page is padded to clear them.
-                .andExpect(content().string(Matchers.containsString("--banner-height: 2rem")))
-                .andExpect(content().string(Matchers.containsString("--banner-bg: #006400")))
-                .andExpect(content().string(Matchers.containsString("padding-top: var(--banner-height)")));
+                .andExpect(content().string(Matchers.containsString("height: 2rem")))
+                .andExpect(content().string(Matchers.containsString("background: #006400")))
+                .andExpect(content().string(Matchers.containsString("padding-top: 2rem")));
     }
 
     @Test
     void andOnTheSignInPage() throws Exception {
         mockMvc.perform(get("/login").accept(MediaType.TEXT_HTML).with(anonymous()))
                 .andExpect(status().isOk())
-                .andExpect(content().string(Matchers.containsString("classification-banner-top")))
-                .andExpect(content().string(Matchers.containsString("classification-banner-bottom")));
+                .andExpect(content().string(Matchers.containsString("body::before")))
+                .andExpect(content().string(Matchers.containsString("body::after")));
     }
 
     @Test
     void andOnTheErrorPage() throws Exception {
         mockMvc.perform(get("/no-such-page").accept(MediaType.TEXT_HTML))
                 .andExpect(status().isNotFound())
-                .andExpect(content().string(Matchers.containsString("classification-banner-top")));
+                .andExpect(content().string(Matchers.containsString("body::before")));
     }
 
     @Test
     void andOnAMissingEntry() throws Exception {
         mockMvc.perform(get("/users/99999999").accept(MediaType.TEXT_HTML))
                 .andExpect(status().isNotFound())
-                .andExpect(content().string(Matchers.containsString("classification-banner-top")));
+                .andExpect(content().string(Matchers.containsString("body::before")));
     }
 
     /**
-     * The marking is text. Rendered as markup it would be at best mangled - a caveat in
-     * angle brackets swallowed by the browser - and at worst a way to put tags on every
-     * page in the application from a properties file.
+     * The marking goes into a stylesheet, where an angle bracket left as itself would end
+     * the style element and put whatever followed into the page as markup. It arrives
+     * already escaped as a CSS code point instead.
      */
     @Test
-    void theTextIsRenderedAsTextRatherThanAsMarkup() throws Exception {
+    void theTextCannotEndTheStyleElement() throws Exception {
         mockMvc.perform(get("/servers").accept(MediaType.TEXT_HTML))
                 .andExpect(status().isOk())
-                .andExpect(content().string(Matchers.containsString("UNCLASSIFIED//FOUO &lt;b&gt;")))
+                .andExpect(content().string(Matchers.containsString("UNCLASSIFIED//FOUO \\3c b\\3e ")))
                 .andExpect(content().string(Matchers.not(Matchers.containsString("UNCLASSIFIED//FOUO <b>"))));
     }
 }

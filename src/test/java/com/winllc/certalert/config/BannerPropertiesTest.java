@@ -59,6 +59,40 @@ class BannerPropertiesTest {
         assertThat(properties.getHeight()).isEqualTo(BannerProperties.DEFAULT_HEIGHT);
     }
 
+    /**
+     * The text is the one value that cannot be checked against a pattern - a marking is
+     * whatever the deployment says it is - so it is escaped instead. Two things have to be
+     * impossible from a properties file: ending the CSS string, and ending the style
+     * element, which would put everything after it into the page as markup.
+     */
+    @Test
+    void theTextIsEscapedForTheStylesheetItIsWrittenInto() {
+        BannerProperties properties = new BannerProperties();
+
+        properties.setText("UNCLASSIFIED//FOUO");
+        assertThat(properties.getCssText()).isEqualTo("\"UNCLASSIFIED//FOUO\"");
+
+        // Closing the string and appending rules of one's own. What matters is not that
+        // the text is absent but that it cannot end the string: every quote inside is
+        // preceded by a backslash, so only the first and last delimit anything.
+        properties.setText("X\"; } body { display: none } body::before { content: \"");
+        String quoted = properties.getCssText();
+        assertThat(quoted).startsWith("\"").endsWith("\"");
+        String inner = quoted.substring(1, quoted.length() - 1);
+        assertThat(inner.replace("\\\"", ""))
+                .as("an unescaped quote here would end the string early")
+                .doesNotContain("\"");
+
+        // Closing the style element, which is the one that reaches the page as markup.
+        properties.setText("</style><script>alert(1)</script>");
+        String css = properties.getCssText();
+        assertThat(css).doesNotContain("<").doesNotContain(">");
+        assertThat(css).isEqualTo("\"\\3c /style\\3e \\3c script\\3e alert(1)\\3c /script\\3e \"");
+
+        properties.setText("back\\slash");
+        assertThat(properties.getCssText()).isEqualTo("\"back\\\\slash\"");
+    }
+
     /** A bar with nothing to say is a coloured stripe that shortens the page for no reason. */
     @Test
     void switchedOnWithNoTextIsNotShown() {

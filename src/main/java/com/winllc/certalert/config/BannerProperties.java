@@ -16,9 +16,13 @@ import org.springframework.stereotype.Component;
  * none.
  *
  * <p>Registered as a {@code @Component} rather than left to the properties scan so that it
- * has a name a template can ask for. Every page reads it as {@code @bannerProperties}, and
- * a page added later gets the banner by including the fragment rather than by remembering
- * to put it in a model.
+ * has a name a template can ask for: every page reads it as {@code @bannerProperties}.
+ *
+ * <p>The bars are drawn by the head fragment, which is the one thing all twelve pages
+ * include - there is no decorator layout here, only a bag of named fragments, and a
+ * {@code <head>} cannot hold body content. So they are {@code body::before} and
+ * {@code body::after} rather than elements, which puts them on every page from one place
+ * and leaves nothing for a page added later to forget.
  *
  * <p>The colours and the height are written into a stylesheet, so they are checked against
  * what a colour and a length may look like rather than passed through. An operator typing
@@ -75,6 +79,31 @@ public class BannerProperties {
     public String getHeight() {
         String trimmed = height == null ? "" : height.trim();
         return LENGTH.matcher(trimmed).matches() ? trimmed.toLowerCase(Locale.ROOT) : DEFAULT_HEIGHT;
+    }
+
+    /**
+     * The text as a quoted CSS string, for {@code content:}.
+     *
+     * <p>Escaped here because this is the one value that cannot be checked against a
+     * pattern - a marking is whatever the deployment says it is. Two things have to be
+     * impossible: ending the string early, and ending the {@code <style>} element. The
+     * first is why a quote and a backslash are escaped; the second is why an angle bracket
+     * becomes a CSS code point rather than staying itself, since an HTML parser reading
+     * {@code </style>} inside a stylesheet stops reading a stylesheet.
+     */
+    public String getCssText() {
+        StringBuilder css = new StringBuilder("\"");
+        for (char c : getText().toCharArray()) {
+            if (c == '"' || c == '\\') {
+                css.append('\\').append(c);
+            } else if (c < 0x20 || c == '<' || c == '>' || c == '&') {
+                // \3c and friends. The trailing space is what ends a CSS code point escape.
+                css.append('\\').append(Integer.toHexString(c)).append(' ');
+            } else {
+                css.append(c);
+            }
+        }
+        return css.append('"').toString();
     }
 
     private static String colourOr(String value, String fallback) {
