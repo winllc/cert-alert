@@ -46,6 +46,25 @@ public class RevocationProperties {
      */
     private boolean allowUnverifiedCrl = true;
 
+    /**
+     * A responder to ask about a certificate that names none of its own.
+     *
+     * <p>The address of a responder belongs in the certificate, in its authority
+     * information access extension, and a check has nowhere to go without one. Not every
+     * issuer puts it there: an internal CA issuing inside one network often leaves it out
+     * because everything that will ever validate the certificate already knows where the
+     * responder is. This is where to tell this application.
+     *
+     * <p>Only a fallback. A certificate that names its own responder is asked at that one,
+     * because the issuer saying where to ask outranks a setting here - and on a deployment
+     * reading more than one authority, this one is right for at most some of them. Which
+     * was used is written into the result either way.
+     *
+     * <p>An issuer certificate is still needed: OCSP names a certificate by hashes of its
+     * issuer's name and key, which no responder address supplies.
+     */
+    private String defaultOcspUrl;
+
     /** How long a fetched CRL is reused before being fetched again, at the most. */
     private Duration crlCacheTtl = Duration.ofHours(6);
 
@@ -78,6 +97,14 @@ public class RevocationProperties {
 
     public void setIssuerDirectory(String issuerDirectory) {
         this.issuerDirectory = issuerDirectory;
+    }
+
+    public String getDefaultOcspUrl() {
+        return defaultOcspUrl;
+    }
+
+    public void setDefaultOcspUrl(String defaultOcspUrl) {
+        this.defaultOcspUrl = defaultOcspUrl;
     }
 
     public boolean isAllowUnverifiedCrl() {

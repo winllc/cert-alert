@@ -399,6 +399,38 @@ published; the details page lists the superseded ones, which have not gone away.
 | `EXPIRING_SOON` | Expires within `warning-threshold-days`              |
 | `EXPIRED`       | Past its notAfter date                               |
 
+### The classification banner
+
+Two fixed bars, across the top and the bottom of every page, for the deployments that are
+required to display the classification of what is on the screen — where a screenshot or a
+photograph of the monitor cannot be taken without it.
+
+```yaml
+cert-alert:
+  banner:
+    enabled: true
+    text: "UNCLASSIFIED//FOUO"
+    text-color: "#ffffff"
+    background: "#006400"
+    height: 1.75rem
+```
+
+Off by default: an application that invents its own classification marking is worse than
+one that shows none, so the text is yours to set and nothing is shown until it is.
+
+They are **fixed**, so they stay put while a long table scrolls underneath — the point of
+them is that what is on the screen is marked whatever is on the screen — and the page is
+padded by `height` at each end so nothing ends up beneath one. Every page carries them,
+the sign-in page before anyone has signed in and the error page after something has gone
+wrong included: those are still pages showing this application's data. On paper the bars
+print where they fall rather than being fixed to a viewport that does not exist.
+
+The text is rendered as text, so a marking carrying an ampersand or angle brackets comes
+out as written. The colours and the height are a different matter — they are written into
+a stylesheet, where nothing can be escaped — so they are checked against what a colour and
+a CSS length may look like, and anything else falls back to the default rather than
+reaching the page.
+
 ## Signing in
 
 Two ways in, in order of preference.
@@ -823,6 +855,24 @@ A certificate that turns out to be revoked is recorded against its entry in the 
 and its contacts are told, once — not nightly for as long as it stays revoked. Where to ask
 is read out of the certificate when it is parsed and cached with it, so rows cached before
 this feature carry no endpoints until a sweep re-reads them.
+
+**A responder for certificates that name none.** The address of an OCSP responder belongs
+in the certificate's authority information access extension, and a check has nowhere to go
+without one — but an internal CA issuing inside a single network often leaves it out,
+because everything that will ever validate the certificate already knows where the
+responder is. `default-ocsp-url` is how this application is told:
+
+```yaml
+cert-alert:
+  revocation:
+    default-ocsp-url: http://ocsp.example.gov
+```
+
+Only a fallback. A certificate that names its own responder is asked at that one — the
+issuer saying where to ask outranks a setting here, and a deployment reading more than one
+authority has at most one configured address that is right. A result that did come from the
+fallback says `(configured default)` in its detail, so it is never mistaken for the issuer's
+own answer. An issuer certificate is still needed either way, for the same reason as above.
 
 ```
 GET  /api/v1/revocation        the counts, and whether OCSP is possible here
@@ -1443,6 +1493,8 @@ Expiry thresholds, under `cert-alert`:
 |---------------------------|---------|-------------------------------------------|
 | `warning-threshold-days`  | `30`    | Window that marks a certificate expiring soon |
 | `critical-threshold-days` | `7`     | Window that escalates severity to critical    |
+| `banner.enabled` | `false` | Fixed classification bars top and bottom; nothing shows until `banner.text` is set |
+| `banner.text` / `.text-color` / `.background` / `.height` | — / `#ffffff` / `#1d273b` / `1.5rem` | What they say and how they look. A colour or length that is not one falls back to the default |
 
 Scraping, under `cert-alert.ldap`:
 
@@ -1490,6 +1542,7 @@ Revocation, under `cert-alert.revocation`:
 | `enabled`              | `true`              | Whether revocation is checked at all        |
 | `cron`                 | `0 30 5 * * *`      | When the scheduled check runs               |
 | `issuer-directory`     | unset               | CA certificates, for verifying CRLs and for OCSP |
+| `default-ocsp-url`     | unset               | Responder to ask about a certificate that names none; the certificate's own always wins |
 | `allow-unverified-crl` | `true`              | Believe a CRL whose signature could not be checked |
 | `crl-cache-ttl`        | `6h`                | Ceiling on how long a fetched list is reused |
 | `max-crl-bytes`        | `16777216`          | A larger list is refused rather than read    |

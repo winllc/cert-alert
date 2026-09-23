@@ -109,6 +109,24 @@ management:
         enabled: true
 
 cert-alert:
+  # The fixed bars across the top and bottom of every page - what an accredited network
+  # normally requires: the classification of what is on the screen, where a screenshot or
+  # a photograph of the monitor cannot be taken without it.
+  #
+  # Off by default. An application that invents its own classification marking is worse
+  # than one that shows none, so the text is yours to set.
+  banner:
+    enabled: ${CERT_ALERT_BANNER_ENABLED:false}
+    # Shown at both ends. Rendered as text, so ampersands and angle brackets are safe.
+    text: ${CERT_ALERT_BANNER_TEXT:}
+    # A hex colour or a CSS colour keyword. Anything else falls back to the default,
+    # because these are written into a stylesheet rather than into escapable text.
+    text-color: ${CERT_ALERT_BANNER_TEXT_COLOR:#ffffff}
+    background: ${CERT_ALERT_BANNER_BACKGROUND:#1d273b}
+    # A number and a unit: px, rem, em, pt or vh. The page is padded by this much at each
+    # end so nothing sits underneath a bar.
+    height: ${CERT_ALERT_BANNER_HEIGHT:1.5rem}
+
   # Certificates expiring inside this window are reported as EXPIRING_SOON.
   warning-threshold-days: 30
   # ...and escalated to CRITICAL severity inside this one.
@@ -333,6 +351,16 @@ cert-alert:
     # certificate carries, and a CRL is signed by the issuer. Unset means OCSP is
     # unavailable and CRLs are used unverified - which every such result says.
     issuer-directory:
+    # A responder to ask about a certificate that names none of its own. The address
+    # belongs in the certificate's authority information access extension, and a check has
+    # nowhere to go without one - but an internal CA issuing inside one network often
+    # leaves it out, because everything that will ever validate the certificate already
+    # knows where the responder is.
+    #
+    # Only a fallback: a certificate that names its own responder is asked at that one, and
+    # a result that came from this says "(configured default)" so it is never mistaken for
+    # the issuer's own answer. An issuer certificate is still needed either way.
+    default-ocsp-url: ${CERT_ALERT_DEFAULT_OCSP_URL:}
     allow-unverified-crl: true
     crl-cache-ttl: 6h
     max-crl-bytes: 16777216

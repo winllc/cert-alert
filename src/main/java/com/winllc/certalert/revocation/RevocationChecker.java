@@ -106,8 +106,9 @@ public class RevocationChecker {
      */
     public Outcome check(CachedCertificate certificate, X509Certificate leaf, Instant now) {
         Optional<X509Certificate> issuer = issuers.issuerOf(certificate);
-        if (certificate.getOcspUrl() != null && issuer.isPresent()) {
-            Outcome outcome = checkOverOcsp(certificate, leaf, issuer.get());
+        String responder = responderFor(certificate, properties.getDefaultOcspUrl());
+        if (responder != null && issuer.isPresent()) {
+            Outcome outcome = checkOverOcsp(certificate, leaf, issuer.get(), responder);
             // A responder that answered settles it; one that did not is not an answer, and
             // the list may still have one.
             if (outcome.status() != RevocationStatus.UNKNOWN) {
@@ -184,13 +185,14 @@ public class RevocationChecker {
      * look at the end entity only and not to fall back to a list - the caller does that
      * itself, so that the list it uses is the one it has already cached.
      */
-    private Outcome checkOverOcsp(CachedCertificate certificate, X509Certificate leaf, X509Certificate issuer) {
+    private Outcome checkOverOcsp(
+            CachedCertificate certificate, X509Certificate leaf, X509Certificate issuer, String responder) {
         try {
             CertPathValidator validator = CertPathValidator.getInstance("PKIX");
             PKIXRevocationChecker checker = (PKIXRevocationChecker) validator.getRevocationChecker();
             checker.setOptions(EnumSet.of(
                     PKIXRevocationChecker.Option.ONLY_END_ENTITY, PKIXRevocationChecker.Option.NO_FALLBACK));
-            checker.setOcspResponder(java.net.URI.create(certificate.getOcspUrl()));
+            checker.setOcspResponder(java.net.URI.create(responder));
 
             PKIXParameters parameters = new PKIXParameters(Set.of(new TrustAnchor(issuer, null)));
             // The explicit checker does the asking; the built-in one would ask again.
@@ -199,9 +201,9 @@ public class RevocationChecker {
 
             CertPath path = CertificateFactory.getInstance("X.509").generateCertPath(List.of(leaf));
             validator.validate(path, parameters);
-            return Outcome.good(RevocationMethod.OCSP, "OCSP responder " + certificate.getOcspUrl());
+            return Outcome.good(RevocationMethod.OCSP, describeResponder(certificate, responder));
         } catch (CertPathValidatorException e) {
-            return fromValidationFailure(certificate, e);
+            return fromValidationFailure(certificate, e, responder);
         } catch (java.security.GeneralSecurityException | RuntimeException e) {
             log.debug("OCSP check failed for {}", certificate.getSha256Fingerprint(), e);
             return Outcome.unknown("OCSP could not be asked: " + describe(e));
@@ -213,17 +215,18 @@ public class RevocationChecker {
      * its own issuer, so the other ways it can fail - the wrong issuer, an expired leaf -
      * mean the question went unanswered rather than answered badly.
      */
-    private Outcome fromValidationFailure(CachedCertificate certificate, CertPathValidatorException e) {
+    private Outcome fromValidationFailure(
+            CachedCertificate certificate, CertPathValidatorException e, String responder) {
         if (e.getCause() instanceof CertificateRevokedException revoked) {
             return Outcome.revoked(
                     RevocationMethod.OCSP,
                     revoked.getRevocationDate().toInstant(),
                     revoked.getRevocationReason() == null ? null : revoked.getRevocationReason().name(),
-                    "OCSP responder " + certificate.getOcspUrl());
+                    describeResponder(certificate, responder));
         }
         if (e.getReason() == CertPathValidatorException.BasicReason.REVOKED) {
             return Outcome.revoked(
-                    RevocationMethod.OCSP, null, null, "OCSP responder " + certificate.getOcspUrl());
+                    RevocationMethod.OCSP, null, null, describeResponder(certificate, responder));
         }
         return Outcome.unknown("OCSP gave no usable answer: " + describe(e));
     }
@@ -231,6 +234,33 @@ public class RevocationChecker {
     private static String describe(Exception e) {
         String message = e.getMessage();
         return message == null || message.isBlank() ? e.getClass().getSimpleName() : message;
+    }
+
+    /**
+     * Which responder to ask about this certificate.
+     *
+     * <p>The one the certificate names, where it names one: the issuer saying where to ask
+     * outranks anything configured here, and a deployment reading more than one authority
+     * has at most one configured address that is right. Otherwise the configured fallback,
+     * for the internal CAs that leave the extension out because everything that will ever
+     * validate the certificate already knows where to go.
+     */
+    static String responderFor(CachedCertificate certificate, String configuredDefault) {
+        String named = certificate.getOcspUrl();
+        if (named != null && !named.isBlank()) {
+            return named;
+        }
+        return configuredDefault == null || configuredDefault.isBlank() ? null : configuredDefault.trim();
+    }
+
+    /**
+     * Where the answer came from. A result that came back from the configured fallback says
+     * so, because "the responder said it is good" means something different when the
+     * certificate never named that responder.
+     */
+    static String describeResponder(CachedCertificate certificate, String responder) {
+        boolean named = certificate.getOcspUrl() != null && !certificate.getOcspUrl().isBlank();
+        return "OCSP responder " + responder + (named ? "" : " (configured default)");
     }
 
     /** Whether a responder could be asked at all, for a status the UI can show. */

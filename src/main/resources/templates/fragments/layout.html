@@ -17,8 +17,53 @@
     <link rel="stylesheet" th:href="@{/webjars/tabler__core/dist/css/tabler.min.css}">
     <link rel="stylesheet" th:href="@{/webjars/datatables/css/dataTables.bootstrap5.css}">
     <link rel="stylesheet" th:href="@{/css/app.css}">
+    <!--/* The banner's colours and height as custom properties, so app.css holds the
+           layout and only the three values an operator sets come from configuration.
+
+           The bean is resolved out here and handed in as a variable because Thymeleaf
+           will not evaluate a bean reference inside a style element - and it is right not
+           to, since what is written there is CSS and cannot be escaped on the way in.
+           Which is also why those three values are checked against what a colour and a
+           length may look like before they ever reach this. See BannerProperties. */-->
+    <th:block th:with="banner=${@bannerProperties}">
+    <style th:if="${banner.visible}" th:inline="text">
+        :root {
+            --banner-height: [[${banner.height}]];
+            --banner-bg: [[${banner.background}]];
+            --banner-fg: [[${banner.textColor}]];
+        }
+        /* Room at both ends so nothing ends up underneath a bar. Here rather than in
+           app.css because this block exists only when the banner does, which saves
+           app.css needing :has() to ask whether one is on the page. */
+        body {
+            padding-top: var(--banner-height);
+            padding-bottom: var(--banner-height);
+        }
+        @media print {
+            body { padding-top: 0; padding-bottom: 0; }
+        }
+    </style>
+    </th:block>
 </head>
 <body>
+
+<!--/*
+  The fixed bars across the top and the bottom.
+
+  Both are emitted together because they say the same thing, and position: fixed means
+  where they sit in the document does not decide where they appear - so one fragment near
+  the top of the body serves both ends of the page.
+
+  role="status" rather than nothing: what this says is the classification of what is on
+  the screen, and somebody using a screen reader is owed that as much as anyone looking
+  at it. aria-hidden on the second, so it is not read out twice.
+*/-->
+<div th:fragment="banners" th:if="${@bannerProperties.visible}" th:remove="tag">
+    <div class="classification-banner classification-banner-top" role="status"
+         th:text="${@bannerProperties.text}">UNCLASSIFIED</div>
+    <div class="classification-banner classification-banner-bottom" aria-hidden="true"
+         th:text="${@bannerProperties.text}">UNCLASSIFIED</div>
+</div>
 
 <!--/* The application shell: brand, navigation, and who is signed in. */-->
 <header th:fragment="navbar(active)" class="navbar navbar-expand-md d-print-none" data-bs-theme="dark">

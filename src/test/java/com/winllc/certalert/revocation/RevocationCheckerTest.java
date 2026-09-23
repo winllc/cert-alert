@@ -122,6 +122,67 @@ class RevocationCheckerTest {
         assertThat(outcome.detail()).contains(CRL_PATH);
     }
 
+    // --- the configured responder ----------------------------------------------------------
+
+    /**
+     * Where to ask is carried by the certificate and by nothing else, and an internal CA
+     * issuing inside one network often leaves the extension out - everything that will
+     * ever validate the certificate already knows where the responder is. The configured
+     * default is how this application is told.
+     */
+    @Test
+    void aCertificateNamingNoResponderFallsBackToTheConfiguredOne() {
+        CachedCertificate certificate = parse(ca.issue(
+                "no-aia", NOW.minus(Duration.ofDays(1)), NOW.plus(Duration.ofDays(30)), null, null).der());
+
+        assertThat(certificate.getOcspUrl()).as("nothing in the certificate to go on").isNull();
+        assertThat(RevocationChecker.responderFor(certificate, "http://ocsp.example.gov"))
+                .isEqualTo("http://ocsp.example.gov");
+    }
+
+    /**
+     * And the issuer saying where to ask outranks the setting. A deployment reading more
+     * than one authority has at most one configured address that is right for a given
+     * certificate, so the one in the certificate wins wherever there is one.
+     */
+    @Test
+    void butTheCertificatesOwnResponderWins() {
+        CachedCertificate certificate = parse(ca.issue(
+                "with-aia", NOW.minus(Duration.ofDays(1)), NOW.plus(Duration.ofDays(30)),
+                null, "http://ocsp.issuer.example.gov").der());
+
+        assertThat(RevocationChecker.responderFor(certificate, "http://ocsp.example.gov"))
+                .isEqualTo("http://ocsp.issuer.example.gov");
+    }
+
+    @Test
+    void andWithNeitherThereIsNowhereToAsk() {
+        CachedCertificate certificate = parse(ca.issue(
+                "no-aia", NOW.minus(Duration.ofDays(1)), NOW.plus(Duration.ofDays(30)), null, null).der());
+
+        assertThat(RevocationChecker.responderFor(certificate, null)).isNull();
+        assertThat(RevocationChecker.responderFor(certificate, "   ")).isNull();
+    }
+
+    /**
+     * A result from the configured default says so. "The responder said it is good" means
+     * something different when the certificate never named that responder, and whoever
+     * reads the result is owed the difference.
+     */
+    @Test
+    void aResultFromTheConfiguredResponderSaysWhereItCameFrom() {
+        CachedCertificate named = parse(ca.issue(
+                "with-aia", NOW.minus(Duration.ofDays(1)), NOW.plus(Duration.ofDays(30)),
+                null, "http://ocsp.issuer.example.gov").der());
+        CachedCertificate silent = parse(ca.issue(
+                "no-aia", NOW.minus(Duration.ofDays(1)), NOW.plus(Duration.ofDays(30)), null, null).der());
+
+        assertThat(RevocationChecker.describeResponder(named, "http://ocsp.issuer.example.gov"))
+                .isEqualTo("OCSP responder http://ocsp.issuer.example.gov");
+        assertThat(RevocationChecker.describeResponder(silent, "http://ocsp.example.gov"))
+                .isEqualTo("OCSP responder http://ocsp.example.gov (configured default)");
+    }
+
     // --- helpers ---------------------------------------------------------------------------
 
     private RevocationChecker checker(Path issuers) {

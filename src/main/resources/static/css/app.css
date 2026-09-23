@@ -330,3 +330,50 @@ tr.notification-unread td:first-child {
 .logo-lg {
     height: 3rem;
 }
+
+/* ---------------------------------------------------------------------------------------
+   The classification banners.
+
+   Fixed rather than sticky, so they stay put while the long tables scroll underneath -
+   the point of them is that what is on the screen is marked whatever is on the screen.
+   The page padding that clears them is set alongside --banner-height in the head, in a
+   block that exists only when the banner does - so nothing here has to ask whether a
+   banner is on the page.
+
+   Above the navigation bar and below a modal: a dialog that opened under the banner would
+   be unusable, and Tabler puts modals at 1055.
+   --------------------------------------------------------------------------------------- */
+.classification-banner {
+    position: fixed;
+    left: 0;
+    right: 0;
+    z-index: 1040;
+    height: var(--banner-height);
+    line-height: var(--banner-height);
+    background: var(--banner-bg);
+    color: var(--banner-fg);
+    text-align: center;
+    font-size: .75rem;
+    font-weight: 600;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    overflow: hidden;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.classification-banner-top {
+    top: 0;
+}
+
+.classification-banner-bottom {
+    bottom: 0;
+}
+
+/* A banner is a screen marking: fixed to the viewport means nothing on paper, where it
+   would print on the first page and nowhere else. Static, so it prints where it falls. */
+@media print {
+    .classification-banner {
+        position: static;
+    }
+}
