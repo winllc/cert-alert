@@ -91,10 +91,19 @@
         </a>
 
         <div class="navbar-nav flex-row order-md-last">
-            <!--/* What is waiting for whoever is signed in. Hidden until the count comes
-                   back, so it never flashes a zero at somebody who has nothing. */-->
-            <div class="nav-item d-none me-2" id="notification-bell">
-                <a class="nav-link px-2" th:href="@{/notifications}" title="Notifications">
+            <!--/* What is waiting for whoever is signed in, and the way to the page about
+                   it - there is no second link in the menu below, because a bell and a tab
+                   going to the same place with the same icon is one of them too many.
+
+                   Always rendered, which the badge inside it is not. It used to wait for
+                   the count to come back before appearing, so that it never flashed a zero;
+                   but the badge carries the number and hides itself when there is none, so
+                   what that actually bought was a page unreachable until an AJAX call
+                   returned, and unreachable at all when one failed. */-->
+            <div class="nav-item me-2" id="notification-bell"
+                 th:classappend="${active == 'notifications'} ? 'active'">
+                <a class="nav-link px-2" th:href="@{/notifications}" title="Notifications"
+                   aria-label="Notifications">
                     <svg class="icon"><use href="#icon-bell"></use></svg>
                     <span class="badge bg-red text-white d-none" id="notification-count">0</span>
                 </a>
@@ -168,14 +177,6 @@
                             <svg class="icon"><use href="#icon-shield-check"></use></svg>
                         </span>
                         <span class="nav-link-title">Admin</span>
-                    </a>
-                </li>
-                <li class="nav-item" th:classappend="${active == 'notifications'} ? 'active'">
-                    <a class="nav-link" th:href="@{/notifications}">
-                        <span class="nav-link-icon d-md-none d-lg-inline-block">
-                            <svg class="icon"><use href="#icon-bell"></use></svg>
-                        </span>
-                        <span class="nav-link-title">Notifications</span>
                     </a>
                 </li>
             </ul>

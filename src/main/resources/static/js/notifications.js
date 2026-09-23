@@ -17,16 +17,20 @@
         return $.ajax({url: url, type: 'POST'});
     }
 
-    /** The count on the bell. Hidden entirely when there is nothing, rather than a zero. */
+    /**
+     * The number on the bell. The badge is hidden when there is nothing rather than showing
+     * a zero; the bell itself is not touched, because it is the only way to the page and
+     * hiding it on a failed count would take the page away with it.
+     */
     function refreshCount() {
         return $.getJSON('/api/v1/notifications/unread-count')
             .done(function (result) {
                 var count = result.count || 0;
-                $('#notification-bell').toggleClass('d-none', false);
                 $('#notification-count').text(count).toggleClass('d-none', count === 0);
             })
             .fail(function () {
-                $('#notification-bell').addClass('d-none');
+                // No answer is not a count of zero, but it is not a number to show either.
+                $('#notification-count').addClass('d-none');
             });
     }
 
