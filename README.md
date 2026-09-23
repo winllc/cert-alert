@@ -1119,6 +1119,58 @@ The text templates carry their own template resolver (`EmailTemplateConfig`), be
 resolver carries one template mode; it answers only for `email/*.txt` and leaves every page
 to the resolver Spring Boot configures.
 
+#### Templates of your own
+
+What these messages say is a deployment's own — who signs them, what the internal renewal
+process is called, what somebody is meant to do next — and none of that belongs in an image
+everybody shares. Point `template-directory` at a directory and the templates in it are used
+in place of the packaged ones:
+
+```yaml
+cert-alert:
+  notifications:
+    email:
+      template-directory: /etc/cert-alert/templates
+```
+
+The layout mirrors the jar, so the files go in an `email` subdirectory:
+
+```
+/etc/cert-alert/templates/
+└── email/
+    ├── expiring-user.html      expiring-user.txt
+    └── expiring-server.html    expiring-server.txt
+```
+
+**Only what is there is used.** A directory holding one file overrides one template and the
+rest still come from the jar, so changing the wording of one message does not mean taking
+ownership of all four and keeping them in step with the packaged ones for ever. Start by
+copying the one you want to change out of `src/main/resources/templates/email`, since the
+model it renders — `digest.recipientName`, `digest.headline`, `digest.entries` and each
+entry's fields — is what the templates document.
+
+In a container, mount the directory read-only and name it in the environment:
+
+```yaml
+services:
+  cert-alert:
+    volumes:
+      - ./email-templates:/etc/cert-alert/templates:ro
+    environment:
+      CERT_ALERT_NOTIFICATIONS_EMAIL_TEMPLATE_DIRECTORY: /etc/cert-alert/templates
+```
+
+Templates are read once and cached, so an edit to a mounted file takes effect on the next
+restart. The setting has to be **absent** to be off rather than empty: an empty value is a
+misconfiguration and says so at startup, because the alternative is a resolver silently
+pointing at whatever directory the process started in. When a directory is configured, one
+line at startup says which:
+
+```
+INFO  c.w.c.config.EmailTemplateConfig : Email templates will be read from
+      /etc/cert-alert/templates/ before the packaged ones
+```
+
 ### Editing the directory
 
 The directory is the source of truth and this application is the index over it — with one

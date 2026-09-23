@@ -116,6 +116,21 @@ public class NotificationProperties {
         /** How many to send in one run, so a first run cannot spend an hour in the mailer. */
         private int maxPerRun = 500;
 
+        /**
+         * A directory of email templates to use in place of the packaged ones.
+         *
+         * <p>The wording of these messages is a deployment's own - who signs them, what an
+         * internal renewal process is called, what somebody is meant to do next - and none
+         * of that belongs in an image everybody shares. Point this at a directory and the
+         * templates in it are used; anything not in it falls back to the packaged one, so
+         * overriding the subject line of one message does not mean maintaining all four.
+         *
+         * <p>The layout mirrors the jar, so the files live in an {@code email}
+         * subdirectory: {@code <directory>/email/expiring-user.html} and so on. Read once
+         * and cached, so a change to a mounted file takes effect on the next restart.
+         */
+        private String templateDirectory;
+
         public boolean isEnabled() {
             return enabled;
         }
@@ -146,6 +161,14 @@ public class NotificationProperties {
 
         public void setMaxPerRun(int maxPerRun) {
             this.maxPerRun = maxPerRun;
+        }
+
+        public String getTemplateDirectory() {
+            return templateDirectory;
+        }
+
+        public void setTemplateDirectory(String templateDirectory) {
+            this.templateDirectory = templateDirectory;
         }
     }
 

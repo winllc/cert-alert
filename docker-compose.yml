@@ -99,11 +99,21 @@ services:
       CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS: ${CERT_ALERT_ADMINS:-alice@intelink.ic.gov}
     ports:
       - "8080:8080"
-    # X.509 client certificates need TLS, which needs keystores. Mount them read-only
-    # rather than baking them into the image, and set CERT_ALERT_TLS_ENABLED=true plus the
-    # keystore variables. Commented out so a first run does not need a ./tls directory.
+    # Mounts, all read-only and all commented out so a first run needs no directories.
+    #
+    # tls: X.509 client certificates need TLS, which needs keystores. Mount them rather
+    # than baking them into the image, and set CERT_ALERT_TLS_ENABLED=true plus the
+    # keystore variables.
+    #
+    # templates: email templates of your own, in place of the packaged ones - see
+    # CERT_ALERT_NOTIFICATIONS_EMAIL_TEMPLATE_DIRECTORY below. The files go in an `email`
+    # subdirectory of what is mounted, and only what is there is used: the rest still come
+    # from the jar.
     # volumes:
     #   - ./tls:/etc/cert-alert/tls:ro
+    #   - ./email-templates:/etc/cert-alert/templates:ro
+    # environment, alongside the rest:
+    #   CERT_ALERT_NOTIFICATIONS_EMAIL_TEMPLATE_DIRECTORY: /etc/cert-alert/templates
     networks: [default]
     restart: unless-stopped
 

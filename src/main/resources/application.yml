@@ -45,11 +45,11 @@ spring:
     default-property-inclusion: non_null
 
   thymeleaf:
-    # The pages. Behind the plain-text email templates, which carry their own resolver
-    # because a resolver carries one template mode (see EmailTemplateConfig); it answers
-    # only for email/*.txt, so ordering settles which resolver sees what rather than
-    # leaving it to one of them declining the other's templates.
-    template-resolver-order: 2
+    # The pages, and the packaged HTML emails. Last of four resolvers: ahead of it sit a
+    # deployment's own email templates, where one is configured, and then the packaged
+    # plain-text ones - which carry a resolver of their own because a resolver carries one
+    # template mode. See EmailTemplateConfig, where the order is spelled out.
+    template-resolver-order: 4
 
   # Directory connection. Credentials belong in the environment, not in source control.
   ldap:
@@ -414,6 +414,23 @@ cert-alert:
       from: cert-alert@localhost
       subject-prefix: "[cert-alert] "
       max-per-run: 500
+      # Templates of your own, in place of the packaged ones. What these messages say -
+      # who signs them, what your renewal process is called, what somebody is meant to do
+      # next - is yours, and changing a sentence should not mean rebuilding the image.
+      #
+      # The layout mirrors the jar, so the files go in an `email` subdirectory of this:
+      #   <template-directory>/email/expiring-user.html   .txt
+      #   <template-directory>/email/expiring-server.html .txt
+      #
+      # Only what is there is used; anything missing falls back to the packaged template,
+      # so overriding one message does not mean maintaining all four. Read once and cached,
+      # so an edit to a mounted file takes effect on the next restart.
+      #
+      # Deliberately not given an empty default here: the setting has to be absent to be
+      # off, and an empty one would build a resolver pointing at whatever directory the
+      # process started in. Set it in your own configuration, or in the environment as
+      # CERT_ALERT_NOTIFICATIONS_EMAIL_TEMPLATE_DIRECTORY.
+      # template-directory: /etc/cert-alert/templates
     retention:
       enabled: false
       after: 90d
