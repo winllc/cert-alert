@@ -382,11 +382,26 @@ expiry dates describe what is left. Otherwise every correct renewal read as `EXP
 until somebody cleared the old value out, and the entries that really had lapsed were the
 hardest to find among them.
 
-Only expired. A certificate that is still good counts however old it is, because nothing
-here can tell a superseded one still lying around from one half of a pair the entry is
-using — and of the two ways to be wrong, saying nothing about a credential that really is
-running out is the worse one. So two live certificates, one due in a week and one in a
-year, still read as `EXPIRING_SOON`.
+Which of what is left counts then depends on the object type, because the two are not the
+same shape.
+
+**A person** needs every certificate still standing. PKI for people issues two at once — a
+signing certificate and a key encipherment one — and both have to work, so the worse of
+them is the state of the person. Two live certificates, one due in a week and one in a
+year, read as `EXPIRING_SOON`: one half of the pair really is running out.
+
+**A server** needs the best one. An endpoint presents one certificate, so a server
+publishing a good one is a server nobody has to chase, whatever else is still lying beside
+it in the directory. Rolling the worst up reported a server as expiring soon while it had a
+certificate good for another year — a renewal already done, counted as work outstanding.
+The two expiry dates come from that same certificate, or the row argues with itself: `VALID`
+beside a column saying five days, and top of "soonest to expire" for a certificate nothing
+depends on. Best means the healthiest state, and the longest-lived where two share it, so
+the date answers *when does this server stop having a certificate that works*.
+
+That is a question about what the directory publishes. What a server is **actually
+serving** is a different one, which the directory cannot answer and
+[the endpoint probe](#what-the-server-is-actually-serving) can.
 
 When every certificate has expired they all count again, so an entry that has genuinely
 lapsed still reads `EXPIRED`. `certificate_count` is always a count of everything

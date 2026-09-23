@@ -236,6 +236,49 @@ class DirectorySyncServiceTest {
         assertThat(server.getCertificateStatus()).isEqualTo(CertificateStatus.VALID);
     }
 
+    /**
+     * A server that has renewed early holds both for a while: the new certificate, good for
+     * a year, and the one it replaced, with days left on it. The server is fine - somebody
+     * has already done the work - and reporting it as expiring soon is a renewal already
+     * made being counted as one outstanding.
+     */
+    @Test
+    void aServerWithOneGoodCertificateIsValidWhateverElseItPublishes() {
+        directory.addServer(
+                "web12",
+                "https://web12.example.gov",
+                new String[] {"alice@example.gov"},
+                TestCertificates.expiringIn("web12-old", Duration.ofDays(5)),
+                TestCertificates.expiringIn("web12-new", Duration.ofDays(365)));
+
+        syncAll();
+
+        DirectoryServer server = serverByDn("cn=web12," + EmbeddedDirectory.SERVERS_DN);
+        assertThat(server.getCertificateCount()).isEqualTo(2);
+        assertThat(server.getCertificateStatus()).isEqualTo(CertificateStatus.VALID);
+        // The dates are that certificate's too, or the row argues with itself: VALID beside
+        // a column saying five days, and top of "soonest to expire" for a certificate
+        // nothing depends on.
+        assertThat(server.getEarliestExpiry()).isEqualTo(server.getLatestExpiry());
+        assertThat(server.getEarliestExpiry()).isAfter(Instant.now().plus(Duration.ofDays(300)));
+    }
+
+    /** It takes the best of what is there; it does not invent health that is not. */
+    @Test
+    void andOneWhoseBestCertificateIsRunningOutStillSaysSo() {
+        directory.addServer(
+                "web13",
+                "https://web13.example.gov",
+                new String[] {"alice@example.gov"},
+                TestCertificates.expired("web13-old", Duration.ofDays(30)),
+                TestCertificates.expiringIn("web13-only", Duration.ofDays(5)));
+
+        syncAll();
+
+        DirectoryServer server = serverByDn("cn=web13," + EmbeddedDirectory.SERVERS_DN);
+        assertThat(server.getCertificateStatus()).isEqualTo(CertificateStatus.EXPIRING_SOON);
+    }
+
     /** With nothing left standing the entry really has lapsed, and still says so. */
     @Test
     void andOneWhoseCertificatesHaveAllExpiredStillReadsExpired() {

@@ -16,6 +16,7 @@ import jakarta.persistence.UniqueConstraint;
 import org.hibernate.annotations.BatchSize;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -141,6 +142,39 @@ public class DirectoryServer extends DirectoryEntry {
 
     public void removeCertificate(CachedCertificate certificate) {
         certificates.remove(certificate);
+    }
+
+    /**
+     * The one certificate that keeps this server working.
+     *
+     * <p>A server is not a person. A person holds a pair and needs both; an endpoint
+     * presents one certificate, so a server that publishes a good one is a server nobody
+     * has to chase - whatever else is still lying beside it in the directory. Rolling the
+     * worst of them up reported a server as expiring soon while it had a certificate good
+     * for another year, which is a renewal already done being reported as work outstanding.
+     *
+     * <p>So the roll-up describes the best of what is standing: its status, and the two
+     * dates the tables sort and filter on. Those have to come from the same certificate or
+     * the row contradicts itself - a server reading VALID while the column beside it says
+     * five days, and still sitting at the top of "soonest to expire" for a certificate
+     * nothing depends on.
+     *
+     * <p>Best is the healthiest state, and the longest-lived where two share it. The
+     * question this answers is when the server stops having a certificate that works.
+     *
+     * <p>What it is <em>actually serving</em> is a different question, which the directory
+     * cannot answer and the endpoint probe can.
+     */
+    @Override
+    protected List<CachedCertificate> rollUpOver(List<CachedCertificate> standing) {
+        return standing.stream()
+                .min(Comparator
+                        .comparingInt((CachedCertificate certificate) -> certificate.getStatus().ordinal())
+                        .thenComparing(
+                                CachedCertificate::getNotAfter,
+                                Comparator.nullsFirst(Comparator.reverseOrder())))
+                .map(List::of)
+                .orElse(standing);
     }
 
     public Set<String> getServerPocs() {

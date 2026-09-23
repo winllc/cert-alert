@@ -99,11 +99,11 @@ public abstract class DirectoryEntry {
      * entries that genuinely had expired were the hardest to pick out of them.
      *
      * <p>An expired certificate is therefore passed over, and the status and the two expiry
-     * dates the tables sort on describe what is left. Only expired: a certificate that has
-     * not expired counts however old it is, because there is no telling from here whether
-     * it is a superseded one still lying around or half of a pair the entry is using, and
-     * of the two ways to be wrong, saying nothing about a credential that really is running
-     * out is the worse one.
+     * dates the tables sort on describe what is left. Which of what is left is
+     * {@link #rollUpOver}'s to say, and the two object types answer differently: a person
+     * needs every certificate still standing, because they hold a pair and both have to
+     * work; a server needs the best one, because an endpoint presents one certificate and
+     * the rest are leftovers.
      *
      * <p>When every certificate has expired they all count again, which is what keeps a
      * genuinely lapsed entry reading EXPIRED rather than as an entry with nothing.
@@ -119,7 +119,7 @@ public abstract class DirectoryEntry {
                 .filter(certificate -> certificate.getStatus() != CertificateStatus.EXPIRED)
                 .toList();
         // Nothing left standing means the entry has lapsed, not that it holds nothing.
-        List<CachedCertificate> counted = standing.isEmpty() ? certificates : standing;
+        List<CachedCertificate> counted = standing.isEmpty() ? certificates : rollUpOver(standing);
 
         // worstOf an empty list is NONE, which is the right answer for an entry that really
         // does hold no certificates - so that case needs no branch of its own.
@@ -135,6 +135,20 @@ public abstract class DirectoryEntry {
                 .filter(java.util.Objects::nonNull)
                 .max(Instant::compareTo)
                 .orElse(null);
+    }
+
+    /**
+     * Which of the certificates still standing the roll-up describes.
+     *
+     * <p>All of them, for a person: PKI for people issues two at once, a signing
+     * certificate and a key encipherment one, and both have to work - so the worse of the
+     * two is the state of the person, and one of them running out is worth reporting even
+     * while the other is fine.
+     *
+     * <p>A server is not that shape, and {@link DirectoryServer} says so.
+     */
+    protected List<CachedCertificate> rollUpOver(List<CachedCertificate> standing) {
+        return standing;
     }
 
     public Long getId() {
