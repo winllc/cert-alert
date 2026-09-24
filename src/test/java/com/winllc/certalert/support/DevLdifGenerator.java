@@ -53,6 +53,18 @@ class DevLdifGenerator {
                 cert("db01.example.ic.gov", now.minusSeconds(340 * DAY), now.plusSeconds(25 * DAY))));
         ldif.append(server("cache01", "https://cache01.example.ic.gov", "10.1.2.30",
                 List.of("carol.chase@intelink.ic.gov"), "In Process", "Development"));
+        // A whole team on one entry, and one of the values holding several addresses at
+        // once - both of which real directories do, and between them the reason the
+        // contacts column cannot simply print what it is given.
+        ldif.append(server("mail01", "https://mail01.example.ic.gov", "10.1.2.40",
+                List.of(
+                        "alice@intelink.ic.gov",
+                        "bob.wilson@intelink.ic.gov, carol.chase@intelink.ic.gov",
+                        "dana.day@intelink.ic.gov",
+                        "messaging-ops@intelink.ic.gov",
+                        "duty-officer@intelink.ic.gov"),
+                "Authorized", "Production",
+                cert("mail01.example.ic.gov", now.minusSeconds(200 * DAY), now.plusSeconds(15 * DAY))));
 
         Files.writeString(TARGET, ldif.toString());
     }

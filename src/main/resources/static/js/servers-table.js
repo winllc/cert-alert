@@ -2,6 +2,35 @@
 (function ($) {
     'use strict';
 
+    /**
+     * The contacts column: one name, and what else there is.
+     *
+     * Two counts rather than one, because they answer different questions. "+n more" is the
+     * rest of what the directory publishes; "+n added" is what somebody added here, which is
+     * the only thing in this cell that is anybody's doing. Folding them together would lose
+     * the distinction the expanded row is built around.
+     */
+    function contactsCell(display, added) {
+        var published = (display || '').split(',')
+            .map(function (one) { return one.trim(); })
+            .filter(Boolean);
+
+        var rest = Math.max(published.length - 1, 0);
+        var html = published.length
+            ? '<span class="poc-first">' + CertAlert.escapeHtml(published[0]) + '</span>'
+            : '<span class="text-secondary">None published</span>';
+
+        if (rest) {
+            // A button, not a span: it does something, and the keyboard has to reach it.
+            html += '<button type="button" class="badge bg-secondary-lt ms-1 poc-more"'
+                + ' title="' + CertAlert.escapeHtml(published.join(", ")) + '">+'
+                + rest + ' more</button>';
+        }
+        html += '<span class="badge bg-blue-lt ms-1 contact-count' + (added ? '' : ' d-none')
+            + '">' + (added ? '+' + added + ' added' : '') + '</span>';
+        return '<div class="pocs-cell">' + html + '</div>';
+    }
+
     $(function () {
         var certState = document.getElementById('cert-state');
         var showExpired = document.getElementById('show-expired');
@@ -144,19 +173,19 @@
                 // Hidden, not dropped: still searchable, and shown in the expanded row.
                 {data: 'serverUrl', visible: false},
                 {data: 'icServerAddress', visible: false},
-                // What the directory publishes, plus a count of what was added here. The
-                // editable list is in the expanded row; this is only the signal that it
-                // has something in it.
+                // The first contact and a count of the rest. A server with a whole team on
+                // it publishes a dozen addresses, and printing them all gave that one row
+                // the width of the table and pushed the certificate columns off the side.
+                // The full list is one click away in the expanded row, where it is editable
+                // anyway, and hovering shows it without going anywhere.
                 //
                 // Not searchable as a column: it is assembled from an element collection and
                 // the contacts added here, so searching it is the poc filter's job.
-                {data: 'serverPocDisplay', searchable: false, render: function (value, type, row) {
-                    if (type !== 'display') { return value; }
-                    var count = row.managedContactCount || 0;
-                    return CertAlert.text(value)
-                        + '<span class="badge bg-blue-lt ms-1 contact-count' + (count ? '' : ' d-none')
-                        + '">' + (count ? '+' + count + ' added' : '') + '</span>';
-                }},
+                {data: 'serverPocDisplay', searchable: false, className: 'pocs',
+                    render: function (value, type, row) {
+                        if (type !== 'display') { return value; }
+                        return contactsCell(value, row.managedContactCount || 0);
+                    }},
                 {data: 'lifeCycleStatus', render: renderText},
                 // Hidden, not dropped: still searchable, and shown in the expanded row.
                 {data: 'atoStatus', visible: false},
@@ -178,6 +207,13 @@
                 // Searchable but not shown; it appears in the expanded row instead.
                 {data: 'dn', visible: false}
             ]
+        });
+
+        // The count opens the row it belongs to, where the whole list lives. Nothing is
+        // duplicated into the cell: there is one place the contacts are shown in full.
+        $('#servers-table').on('click', '.poc-more', function (event) {
+            event.stopPropagation();
+            $(this).closest('tr').find('td.expand').trigger('click');
         });
 
         pocUserClear.addEventListener('click', function () {

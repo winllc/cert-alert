@@ -606,6 +606,14 @@ stored contact is an address. On the people table it asks the opposite question:
 this `serverPOC` value mean? It matches every value the join uses, which is more than the
 table's columns show.
 
+**The contacts column shows one and counts the rest.** A server with a team on it publishes
+a dozen addresses, and a cell that printed them all took the width of the table and pushed
+the certificate columns off the side of the page. So the column shows the first contact, a
+`+n more` count that opens the row where the full list lives, and `+n added` where somebody
+has added contacts here — two counts, because they answer different questions. Hovering the
+count lists everyone without going anywhere, and the point-of-contact filter still searches
+every address, including the ones the cell does not show.
+
 ### The user ↔ server join
 
 A server names whoever is responsible for it in `serverPOC`. The specification says that

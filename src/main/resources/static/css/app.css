@@ -262,6 +262,49 @@ td.audit-actor {
     }
 }
 
+/* The contacts column on the servers table.
+
+   Bounded, because what goes in it is not: a server with a team on it publishes a dozen
+   addresses, and a cell that prints them all takes the width of the table and pushes the
+   certificate columns out of sight. One contact, a count of the rest, and a hard ceiling so
+   that a single long address cannot do the same thing on its own. */
+td.pocs {
+    max-width: 22rem;
+}
+
+.pocs-cell {
+    display: flex;
+    align-items: baseline;
+    gap: 0.125rem;
+    min-width: 0;
+}
+
+.pocs-cell .poc-first {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+/* Both counts keep their width whatever the address beside them does. */
+.pocs-cell .badge {
+    flex: none;
+}
+
+.pocs-cell .poc-more {
+    border: 0;
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.6875rem;
+    line-height: inherit;
+}
+
+@media (max-width: 40rem) {
+    td.pocs {
+        max-width: 12rem;
+    }
+}
+
 /* An unread notification, which is most of what somebody is looking for on that page. */
 tr.notification-unread td {
     font-weight: 500;
