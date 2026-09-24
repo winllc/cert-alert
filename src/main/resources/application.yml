@@ -361,6 +361,12 @@ cert-alert:
     # a result that came from this says "(configured default)" so it is never mistaken for
     # the issuer's own answer. An issuer certificate is still needed either way.
     default-ocsp-url: ${CERT_ALERT_DEFAULT_OCSP_URL:}
+    # And where to fetch the list for a certificate that names no distribution point, for
+    # the same reason. Prefer this one on a directory of any size: a list is one download
+    # that answers for every certificate the authority issued, where a responder is one
+    # request each and a read of the entry to form it. A list signed by some other
+    # authority fails its signature check, so a wrong address here cannot read as good news.
+    default-crl-url: ${CERT_ALERT_DEFAULT_CRL_URL:}
     allow-unverified-crl: true
     crl-cache-ttl: 6h
     max-crl-bytes: 16777216

@@ -4,12 +4,14 @@ import com.winllc.certalert.config.CredentialProperties;
 import com.winllc.certalert.domain.AuditAction;
 import com.winllc.certalert.domain.AuditEvent;
 import com.winllc.certalert.domain.CachedCertificate;
+import com.winllc.certalert.domain.DirectoryEntry;
 import com.winllc.certalert.domain.DirectoryServer;
 import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.domain.OwnerType;
 import com.winllc.certalert.domain.RevocationStatus;
 import com.winllc.certalert.repository.CachedCertificateRepository;
 import com.winllc.certalert.revocation.RevocationChecker;
+import java.security.cert.X509Certificate;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -44,18 +46,21 @@ public class RevocationPageProcessor {
     private final NotificationService notifications;
     private final AuditService audit;
     private final CredentialProperties credentials;
+    private final PublishedCertificates published;
 
     public RevocationPageProcessor(
             CachedCertificateRepository certificates,
             RevocationChecker checker,
             NotificationService notifications,
             AuditService audit,
-            CredentialProperties credentials) {
+            CredentialProperties credentials,
+            PublishedCertificates published) {
         this.certificates = certificates;
         this.checker = checker;
         this.notifications = notifications;
         this.audit = audit;
         this.credentials = credentials;
+        this.published = published;
     }
 
     /** What one page did, and where the next one starts. */
@@ -85,11 +90,18 @@ public class RevocationPageProcessor {
         int revokedCount = 0;
         int unknownCount = 0;
         for (List<CachedCertificate> owned : byOwner.values()) {
-            for (CachedCertificate certificate :
-                    CertificateIssuance.current(owned, credentials.getPairWindow(), now).current()) {
+            List<CachedCertificate> current =
+                    CertificateIssuance.current(owned, credentials.getPairWindow(), now).current();
+            // The bytes, where a responder is going to be asked about one of these. A read
+            // of the entry buys nothing otherwise, so it is not paid for: a deployment
+            // whose certificates name their distribution points reads the directory no
+            // more than it did before.
+            Map<String, X509Certificate> leaves = leavesFor(current, type);
 
+            for (CachedCertificate certificate : current) {
                 RevocationStatus before = certificate.getRevocationStatus();
-                RevocationChecker.Outcome outcome = checker.check(certificate, now);
+                RevocationChecker.Outcome outcome =
+                        checker.check(certificate, leaves.get(certificate.getSha256Fingerprint()), now);
                 certificate.recordRevocation(
                         outcome.status(),
                         outcome.method(),
@@ -113,6 +125,28 @@ public class RevocationPageProcessor {
             }
         }
         return new Page(owners.size(), checkedCount, revokedCount, unknownCount, owners.getLast());
+    }
+
+    /**
+     * The certificates of this entry as the directory publishes them, or nothing.
+     *
+     * <p>Asked for only where a responder is the only way to answer: no list to fetch,
+     * a responder address from the certificate or the configuration, and an issuer
+     * certificate to name the certificate by. That is the check the scheduled job could
+     * not make before - a list needs only the cached serial number, and OCSP needs the
+     * certificate itself, so a job working from the cache alone could never ask a
+     * responder anything - and it stays off the path of every deployment whose
+     * certificates name their distribution points.
+     */
+    private Map<String, X509Certificate> leavesFor(List<CachedCertificate> current, OwnerType type) {
+        DirectoryEntry entry = null;
+        for (CachedCertificate certificate : current) {
+            if (checker.onlyAResponderCanAnswer(certificate)) {
+                entry = type == OwnerType.USER ? certificate.getUser() : certificate.getServer();
+                break;
+            }
+        }
+        return entry == null ? Map.of() : published.of(entry, type);
     }
 
     /** Records it against the entry and tells whoever is responsible for it. */

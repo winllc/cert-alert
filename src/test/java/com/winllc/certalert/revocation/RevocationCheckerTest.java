@@ -183,6 +183,100 @@ class RevocationCheckerTest {
                 .isEqualTo("OCSP responder http://ocsp.example.gov (configured default)");
     }
 
+    /**
+     * The same bargain for the list, and the cheaper one to take: a CA that leaves out the
+     * responder address usually leaves out the distribution point too, and one list answers
+     * for every certificate it ever issued where a responder is one request each.
+     */
+    @Test
+    void aCertificateNamingNoDistributionPointFallsBackToTheConfiguredOne() {
+        CachedCertificate certificate = parse(ca.issue(
+                "no-crldp", NOW.minus(Duration.ofDays(1)), NOW.plus(Duration.ofDays(30)), null, null).der());
+        publisher.put(CRL_PATH, ca.emptyCrl());
+        properties.setDefaultCrlUrl(publisher.url(CRL_PATH));
+
+        assertThat(certificate.getCrlUrls()).as("nothing in the certificate to go on").isEmpty();
+
+        RevocationChecker.Outcome outcome = checker(null).check(certificate, NOW);
+
+        assertThat(outcome.status()).isEqualTo(RevocationStatus.GOOD);
+        // And says it was a guess, for the same reason the responder result does.
+        assertThat(outcome.detail()).contains(CRL_PATH).contains("(configured default)");
+    }
+
+    /** The certificate's own points win, and all of them are still tried in its order. */
+    @Test
+    void butTheCertificatesOwnDistributionPointWins() {
+        CachedCertificate certificate = parse(ca.issue(
+                "with-crldp", NOW.minus(Duration.ofDays(1)), NOW.plus(Duration.ofDays(30)),
+                publisher.url(CRL_PATH), null).der());
+
+        assertThat(RevocationChecker.distributionPointsFor(certificate, "http://crl.example.gov/other.crl"))
+                .containsExactly(publisher.url(CRL_PATH));
+    }
+
+    /**
+     * A responder that is configured and could not be asked says which piece was missing.
+     * Reporting "the certificate names no CRL distribution point" against a certificate
+     * whose responder the deployment configured itself is how a check looks broken while
+     * behaving exactly as written.
+     */
+    @Test
+    void aResponderThatCouldNotBeAskedSaysWhyRatherThanBlamingTheCertificate() throws IOException {
+        CachedCertificate certificate = parse(ca.issue(
+                "no-aia", NOW.minus(Duration.ofDays(1)), NOW.plus(Duration.ofDays(30)), null, null).der());
+        properties.setDefaultOcspUrl("http://ocsp.example.gov");
+
+        // The issuer is known and the certificate itself is not to hand.
+        RevocationChecker.Outcome withoutLeaf = checker(issuerDirectory()).check(certificate, null, NOW);
+        assertThat(withoutLeaf.status()).isEqualTo(RevocationStatus.UNKNOWN);
+        assertThat(withoutLeaf.detail())
+                .contains("http://ocsp.example.gov")
+                .contains("needs the certificate itself")
+                .doesNotContain("names no CRL distribution point");
+
+        // And the other way round: nothing to name the certificate by.
+        RevocationChecker.Outcome withoutIssuer = checker(null).check(certificate, null, NOW);
+        assertThat(withoutIssuer.status()).isEqualTo(RevocationStatus.UNKNOWN);
+        assertThat(withoutIssuer.detail()).contains("needs the issuer's certificate");
+    }
+
+    /** With no responder to ask either, the certificate really does say nothing. */
+    @Test
+    void andWithNothingConfiguredItIsTheCertificateThatSaysNothing() {
+        CachedCertificate certificate = parse(ca.issue(
+                "silent", NOW.minus(Duration.ofDays(1)), NOW.plus(Duration.ofDays(30)), null, null).der());
+
+        RevocationChecker.Outcome outcome = checker(null).check(certificate, null, NOW);
+
+        assertThat(outcome.status()).isEqualTo(RevocationStatus.UNKNOWN);
+        assertThat(outcome.detail()).isEqualTo("The certificate names no CRL distribution point");
+    }
+
+    /**
+     * The scheduled check stays on lists wherever there are lists. A responder answers
+     * about one certificate and costs one request; a list answers about all of them and
+     * costs one download, and on a directory of any size that is the whole difference.
+     */
+    @Test
+    void aCertificateWithAListIsNotWorthFetchingTheCertificateFor() throws IOException {
+        properties.setDefaultOcspUrl("http://ocsp.example.gov");
+        RevocationChecker checker = checker(issuerDirectory());
+
+        CachedCertificate withList = parse(ca.issue(
+                "with-crldp", NOW.minus(Duration.ofDays(1)), NOW.plus(Duration.ofDays(30)),
+                publisher.url(CRL_PATH), null).der());
+        CachedCertificate withNothing = parse(ca.issue(
+                "no-crldp", NOW.minus(Duration.ofDays(1)), NOW.plus(Duration.ofDays(30)), null, null).der());
+
+        assertThat(checker.onlyAResponderCanAnswer(withList)).isFalse();
+        assertThat(checker.onlyAResponderCanAnswer(withNothing)).isTrue();
+
+        // And a configured list does the same, since it answers for these too.
+        properties.setDefaultCrlUrl(publisher.url(CRL_PATH));
+        assertThat(checker(issuerDirectory()).onlyAResponderCanAnswer(withNothing)).isFalse();
+    }
+
     // --- helpers ---------------------------------------------------------------------------
 
     private RevocationChecker checker(Path issuers) {

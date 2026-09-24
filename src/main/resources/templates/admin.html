@@ -61,8 +61,9 @@
                         <p class="text-secondary mb-3">
                             Asks the issuing authorities whether the certificates these entries currently hold
                             have been revoked. It runs nightly; this is the same run started by hand, for when
-                            waiting until tomorrow is not the answer. It reads every authority's list, so on a
-                            large directory it is not instant.
+                            waiting until tomorrow is not the answer. It reads every authority's list, and asks
+                            a responder about the certificates no list covers, so on a large directory it is
+                            not instant.
                         </p>
                         <div class="btn-list align-items-center">
                             <button type="button" class="btn btn-primary" id="revocation-run">

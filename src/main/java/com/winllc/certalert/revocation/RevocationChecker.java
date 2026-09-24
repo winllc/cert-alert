@@ -100,14 +100,19 @@ public class RevocationChecker {
      * With the certificate itself in hand, which makes OCSP possible.
      *
      * <p>Preferred where it works, because it is an answer about this certificate now
-     * rather than a list published at some point before now. It needs the issuer's
-     * certificate - OCSP names a certificate by hashes of its issuer's name and key, and
-     * the leaf carries neither - so where none is configured this falls through to the list.
+     * rather than a list published at some point before now. It needs two things the cache
+     * does not hold: the issuer's certificate, since OCSP names a certificate by hashes of
+     * its issuer's name and key and the leaf carries neither, and the leaf's own bytes.
+     * Without either it falls through to the list - and where the list has nothing to say
+     * either, the result says which piece was missing rather than blaming the certificate
+     * for naming no distribution point.
+     *
+     * @param leaf the certificate itself, or null where it could not be read back
      */
     public Outcome check(CachedCertificate certificate, X509Certificate leaf, Instant now) {
         Optional<X509Certificate> issuer = issuers.issuerOf(certificate);
         String responder = responderFor(certificate, properties.getDefaultOcspUrl());
-        if (responder != null && issuer.isPresent()) {
+        if (responder != null && issuer.isPresent() && leaf != null) {
             Outcome outcome = checkOverOcsp(certificate, leaf, issuer.get(), responder);
             // A responder that answered settles it; one that did not is not an answer, and
             // the list may still have one.
@@ -117,7 +122,46 @@ public class RevocationChecker {
             Outcome fromList = checkAgainstCrl(certificate, now);
             return fromList.status() == RevocationStatus.UNKNOWN ? outcome : fromList;
         }
-        return checkAgainstCrl(certificate, now);
+
+        Outcome fromList = checkAgainstCrl(certificate, now);
+        if (fromList.status() != RevocationStatus.UNKNOWN || responder == null) {
+            return fromList;
+        }
+        // There is a responder to ask and it was not asked. Saying so is the difference
+        // between a deployment that knows what to fix and one that reads "names no CRL
+        // distribution point" against a certificate whose responder it configured itself.
+        return Outcome.unknown(whyOcspWasNotAsked(responder, issuer.isPresent(), leaf != null));
+    }
+
+    private static String whyOcspWasNotAsked(String responder, boolean haveIssuer, boolean haveLeaf) {
+        if (!haveIssuer) {
+            return "OCSP at " + responder + " needs the issuer's certificate; none is configured for this one";
+        }
+        if (!haveLeaf) {
+            return "OCSP at " + responder + " needs the certificate itself, which could not be read back";
+        }
+        return "OCSP at " + responder + " could not be asked";
+    }
+
+    /**
+     * Whether a responder is the only way to answer for this certificate.
+     *
+     * <p>Asked by the scheduled check before it pays for the certificate's bytes, which
+     * means a read of the entry that publishes it. Three things have to be true: there is
+     * a responder to ask, there is an issuer certificate to name the certificate by, and
+     * there is no revocation list to use instead.
+     *
+     * <p>That last one keeps the job affordable. A list is one download that answers for
+     * every certificate an authority issued; a responder is one request per certificate,
+     * plus one directory read per entry to form it. On a hundred thousand entries that is
+     * the difference between six downloads and a quarter of a million round trips - so the
+     * list is used wherever there is one, and the responder is what answers for the
+     * authorities that publish neither address.
+     */
+    public boolean onlyAResponderCanAnswer(CachedCertificate certificate) {
+        return distributionPointsFor(certificate, properties.getDefaultCrlUrl()).isEmpty()
+                && responderFor(certificate, properties.getDefaultOcspUrl()) != null
+                && issuers.issuerOf(certificate).isPresent();
     }
 
     // -------------------------------------------------------------------------------------
@@ -125,7 +169,7 @@ public class RevocationChecker {
     // -------------------------------------------------------------------------------------
 
     private Outcome checkAgainstCrl(CachedCertificate certificate, Instant now) {
-        List<String> urls = certificate.getCrlUrls();
+        List<String> urls = distributionPointsFor(certificate, properties.getDefaultCrlUrl());
         if (urls.isEmpty()) {
             return Outcome.unknown("The certificate names no CRL distribution point");
         }
@@ -143,7 +187,9 @@ public class RevocationChecker {
             return Outcome.unknown(
                     "The CRL from " + crl.url() + " could not be verified against a known issuer");
         }
-        String where = "CRL from " + crl.url() + (crl.verified() ? "" : " (signature not verified)");
+        String where = "CRL from " + crl.url()
+                + (certificate.getCrlUrls().isEmpty() ? " (configured default)" : "")
+                + (crl.verified() ? "" : " (signature not verified)");
 
         X509CRLEntry entry = crl.crl().getRevokedCertificate(serial);
         if (entry == null) {
@@ -251,6 +297,26 @@ public class RevocationChecker {
             return named;
         }
         return configuredDefault == null || configuredDefault.isBlank() ? null : configuredDefault.trim();
+    }
+
+    /**
+     * Where to fetch this certificate's revocation list.
+     *
+     * <p>The points it names, in its own order, where it names any. Otherwise the
+     * configured fallback, for the internal CAs that leave the extension out - the same
+     * bargain as the default responder, and the cheaper one to take: a list is one download
+     * that answers for every certificate the authority issued, where a responder is one
+     * request each. A list that turns out to be some other authority's fails its signature
+     * check and counts as no answer, so a wrong guess here cannot read as a good one.
+     */
+    static List<String> distributionPointsFor(CachedCertificate certificate, String configuredDefault) {
+        List<String> named = certificate.getCrlUrls();
+        if (!named.isEmpty()) {
+            return named;
+        }
+        return configuredDefault == null || configuredDefault.isBlank()
+                ? List.of()
+                : List.of(configuredDefault.trim());
     }
 
     /**

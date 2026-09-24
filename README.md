@@ -849,15 +849,23 @@ authority revoking one that has already been replaced is not news, and asking ab
 superseded certificate a directory has ever held would multiply the work by however long it
 has been running.
 
-**CRL is what the scheduled job uses**, because of how the two mechanisms scale. A CRL is
-one download that answers for every certificate an authority ever issued, and a directory of
-a hundred thousand entries is issued by a handful of authorities — so it is a handful of
+**CRL is what the scheduled job uses wherever there is a list to use**, because of how the
+two mechanisms scale. A CRL is one download that answers for every certificate an authority
+ever issued, and a directory of a hundred thousand entries is issued by a handful of
+authorities — so it is a handful of
 downloads, held for as long as each list says it is good for (`nextUpdate`, capped by
 `crl-cache-ttl`). OCSP is one request per certificate; it gives a fresher answer about one
 certificate, which is the right trade when the question is about one certificate and the
 wrong one when it is about two hundred thousand. Distribution points are tried in the order
 the certificate lists them, and `ldap://` ones work — which is how a PKI with no route to
 the internet publishes its lists.
+
+**Where there is no list, the job asks a responder instead.** That costs more, and it costs
+something else besides: an OCSP request names the certificate being asked about, and the
+cache holds a certificate's details rather than its bytes — so the entry has to be read back
+out of the directory to form the question. One read per entry, and only for the entries
+whose certificates can be answered no other way; a deployment whose certificates name their
+distribution points reads the directory no more than it did before.
 
 | Status | What it means |
 |---|---|
@@ -900,6 +908,27 @@ issuer saying where to ask outranks a setting here, and a deployment reading mor
 authority has at most one configured address that is right. A result that did come from the
 fallback says `(configured default)` in its detail, so it is never mistaken for the issuer's
 own answer. An issuer certificate is still needed either way, for the same reason as above.
+
+**A distribution point for certificates that name none**, on the same terms:
+
+```yaml
+cert-alert:
+  revocation:
+    default-crl-url: http://pki.example.gov/ca.crl
+```
+
+Reach for this one first. A CA that leaves out the responder address usually leaves out the
+distribution point too, and of the two fallbacks the list is much the cheaper: one download
+answering for every certificate the authority issued, against one request per certificate
+plus a directory read per entry. It is also the one that cannot be got dangerously wrong — a
+list signed by some other authority fails its signature check against the issuer
+certificates and counts as *Unknown*.
+
+Where a certificate names neither and neither is configured, the result says so. Where one
+*is* configured and the check still could not run — no issuer certificate to name the
+certificate by, or the entry could not be read back — the result says which piece was
+missing, rather than reporting that the certificate names nowhere to ask. A deployment that
+configured a responder is owed the difference.
 
 ```
 GET  /api/v1/revocation        the counts, and whether OCSP is possible here

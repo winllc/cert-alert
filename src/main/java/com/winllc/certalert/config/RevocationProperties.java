@@ -65,6 +65,21 @@ public class RevocationProperties {
      */
     private String defaultOcspUrl;
 
+    /**
+     * Where to fetch the revocation list for a certificate that names no distribution
+     * point, for the same reason and with the same caveats as {@link #defaultOcspUrl}.
+     *
+     * <p>The cheaper of the two fallbacks by a long way, and the one to reach for first on
+     * a directory of any size: a list is one download that answers for every certificate
+     * the authority ever issued, where a responder is one request per certificate. It also
+     * asks less of the deployment - a list check needs only the serial number, which is
+     * cached, so no certificate has to be read back out of the directory.
+     *
+     * <p>A wrong guess cannot read as a good answer: a list signed by some other authority
+     * fails its signature check against the issuer certificates and counts as no answer.
+     */
+    private String defaultCrlUrl;
+
     /** How long a fetched CRL is reused before being fetched again, at the most. */
     private Duration crlCacheTtl = Duration.ofHours(6);
 
@@ -105,6 +120,14 @@ public class RevocationProperties {
 
     public void setDefaultOcspUrl(String defaultOcspUrl) {
         this.defaultOcspUrl = defaultOcspUrl;
+    }
+
+    public String getDefaultCrlUrl() {
+        return defaultCrlUrl;
+    }
+
+    public void setDefaultCrlUrl(String defaultCrlUrl) {
+        this.defaultCrlUrl = defaultCrlUrl;
     }
 
     public boolean isAllowUnverifiedCrl() {

@@ -23,12 +23,23 @@ import org.bouncycastle.asn1.x509.Extension;
 import org.bouncycastle.asn1.x509.GeneralName;
 import org.bouncycastle.asn1.x509.GeneralNames;
 import org.bouncycastle.asn1.x509.KeyUsage;
+import org.bouncycastle.cert.X509CertificateHolder;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
+import org.bouncycastle.cert.jcajce.JcaX509CertificateHolder;
 import org.bouncycastle.cert.jcajce.JcaX509CRLConverter;
 import org.bouncycastle.cert.jcajce.JcaX509ExtensionUtils;
 import org.bouncycastle.cert.jcajce.JcaX509v2CRLBuilder;
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
+import org.bouncycastle.cert.ocsp.BasicOCSPResp;
+import org.bouncycastle.cert.ocsp.BasicOCSPRespBuilder;
+import org.bouncycastle.cert.ocsp.CertificateID;
+import org.bouncycastle.cert.ocsp.CertificateStatus;
+import org.bouncycastle.cert.ocsp.OCSPReq;
+import org.bouncycastle.cert.ocsp.OCSPRespBuilder;
+import org.bouncycastle.cert.ocsp.Req;
+import org.bouncycastle.cert.ocsp.RevokedStatus;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import org.bouncycastle.operator.jcajce.JcaDigestCalculatorProviderBuilder;
 import org.bouncycastle.operator.ContentSigner;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
 
@@ -185,6 +196,47 @@ public final class TestCa {
             return crl.getEncoded();
         } catch (Exception e) {
             throw new IllegalStateException("Could not build a test CRL", e);
+        }
+    }
+
+    /**
+     * An answer to one OCSP request, signed by this authority.
+     *
+     * <p>Built here rather than stubbed, because the request is the part that goes wrong:
+     * a certificate is named in it by its serial and by hashes of its issuer's name and
+     * key, and a client that computes either hash differently from the responder gets
+     * "unknown" back forever without anything looking broken. Parsing the real request and
+     * answering the identifier it actually carries is what makes this a test of that.
+     *
+     * @param revoked serial numbers this authority says are revoked, and when
+     */
+    public byte[] ocspResponse(byte[] request, Map<BigInteger, Instant> revoked) {
+        try {
+            OCSPReq asked = new OCSPReq(request);
+            X509CertificateHolder holder = new JcaX509CertificateHolder(certificate);
+            BasicOCSPRespBuilder builder = new BasicOCSPRespBuilder(
+                    holder.getSubjectPublicKeyInfo(),
+                    new JcaDigestCalculatorProviderBuilder()
+                            .setProvider(BouncyCastleProvider.PROVIDER_NAME)
+                            .build()
+                            .get(CertificateID.HASH_SHA1));
+
+            Date now = Date.from(Instant.now());
+            for (Req req : asked.getRequestList()) {
+                Instant at = revoked.get(req.getCertID().getSerialNumber());
+                CertificateStatus status = at == null
+                        ? CertificateStatus.GOOD
+                        : new RevokedStatus(Date.from(at), CRLReason.keyCompromise);
+                builder.addResponse(req.getCertID(), status, now, Date.from(Instant.now().plusSeconds(3600)), null);
+            }
+
+            ContentSigner signer = new JcaContentSignerBuilder("SHA256withRSA")
+                    .setProvider(BouncyCastleProvider.PROVIDER_NAME)
+                    .build(keyPair.getPrivate());
+            BasicOCSPResp basic = builder.build(signer, new X509CertificateHolder[] {holder}, now);
+            return new OCSPRespBuilder().build(OCSPRespBuilder.SUCCESSFUL, basic).getEncoded();
+        } catch (Exception e) {
+            throw new IllegalStateException("Could not answer an OCSP request", e);
         }
     }
 
