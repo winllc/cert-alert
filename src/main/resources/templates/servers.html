@@ -28,12 +28,16 @@
                             <option value="none">Holds no certificate</option>
                         </select>
                     </div>
-                    <div class="col-12 col-md-auto">
-                        <!--/* Lapsed entries are hidden unless asked for: they are what has already
-                               gone wrong, not what is about to. */-->
-                        <label class="form-check form-switch mb-2">
-                            <input type="checkbox" id="show-expired" class="form-check-input">
-                            <span class="form-check-label">Show expired</span>
+                    <!--/* Servers this person is a point of contact for, published by the
+                           directory or added here - the same set that decides who hears
+                           about a certificate expiring. Absent for an account the directory
+                           has no entry for, since it could only ever show nothing. */-->
+                    <div class="col-12 col-md-auto" th:if="${myDirectoryUserId}">
+                        <label class="form-check form-switch mb-2"
+                               title="Servers you are a point of contact for, published by the directory or added here">
+                            <input type="checkbox" id="only-mine" class="form-check-input"
+                                   th:attr="data-user-id=${myDirectoryUserId}">
+                            <span class="form-check-label">Only mine</span>
                         </label>
                     </div>
                     <div class="col-12 col-md-auto">

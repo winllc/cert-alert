@@ -578,9 +578,15 @@ nothing to expire — on one database and not the other. So it is said explicitl
 spring.jpa.properties.hibernate.order_by.default_null_ordering: last
 ```
 
-Hibernate then renders `nulls last` into the SQL and both databases agree. Lapsed entries
-are hidden unless **Show expired** is ticked — they are what has already gone wrong rather
-than what is about to — so the first row is normally the soonest one still standing.
+Hibernate then renders `nulls last` into the SQL and both databases agree, so the first row
+is the soonest thing to run out.
+
+On people, lapsed entries are hidden unless **Show expired** is ticked — they are what has
+already gone wrong rather than what is about to. The servers table had the same switch and
+lost it: what to do about expired servers is already the first thing the Certificates list
+asks, and a list reading "Any" beside a switch quietly hiding half the directory is two
+controls disagreeing about one question. There, **Any** means any, and **No expired
+certificate** is the old default when it is wanted.
 
 Both tables carry the same filters, and both take the two expiry dates an entry has:
 
@@ -591,6 +597,16 @@ Both tables carry the same filters, and both take the two expiry dates an entry 
 | Last certificate expires | `latestExpiryFrom`, `latestExpiryTo` | the day the **last** of them runs out, as a range of whole days, either end optional |
 | Point of contact | `poc` | on servers, a contact whose name or address contains this; on people, somebody a `serverPOC` could name by it |
 | Project | `projectId` | the entries in one project |
+| Only mine (servers) | `pocUserId` | the servers the person reading the page is a point of contact for |
+
+**Only mine** is on the servers page alone, and it is the one filter that cannot be written
+down in advance: it resolves the signed-in account to its directory entry and asks for the
+servers that entry is a point of contact for — published by the directory or added here,
+the same set that decides who hears about a certificate expiring. It is the switch form of
+the filter a person's row already links to, so the two share one state: following the link
+for yourself arrives with the switch on rather than with a badge carrying your own name.
+An account the directory has no entry for — a service account, or a name the directory
+holds twice — is not offered the switch, since it could only ever show an empty table.
 
 The two expiry dates answer different questions. "Expiring within 30 days" is the warning;
 "the last certificate expires before March" is the plan — everything this team holds is gone

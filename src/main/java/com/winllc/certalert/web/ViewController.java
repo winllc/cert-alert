@@ -10,6 +10,7 @@ import com.winllc.certalert.config.ProbeProperties;
 import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.DirectoryUserRepository;
 import com.winllc.certalert.security.ServerAccessPolicy;
+import com.winllc.certalert.security.SignedInDirectoryUser;
 import com.winllc.certalert.service.CertificateIssuance;
 import com.winllc.certalert.service.EndpointAddress;
 import com.winllc.certalert.service.ProjectService;
@@ -45,6 +46,7 @@ public class ViewController {
     private final ServerProbeService probeService;
     private final ServerAccessPolicy accessPolicy;
     private final ProbeProperties probeProperties;
+    private final SignedInDirectoryUser signedIn;
     private final Clock clock;
 
     public ViewController(
@@ -55,6 +57,7 @@ public class ViewController {
             ServerProbeService probeService,
             ServerAccessPolicy accessPolicy,
             ProbeProperties probeProperties,
+            SignedInDirectoryUser signedIn,
             Clock clock) {
         this.userRepository = userRepository;
         this.serverRepository = serverRepository;
@@ -63,6 +66,7 @@ public class ViewController {
         this.probeService = probeService;
         this.accessPolicy = accessPolicy;
         this.probeProperties = probeProperties;
+        this.signedIn = signedIn;
         this.clock = clock;
     }
 
@@ -76,8 +80,16 @@ public class ViewController {
         return "users";
     }
 
+    /**
+     * @param model carries the signed-in person's directory entry, where the directory
+     *     knows them, so the page can offer to show only the servers they are a point of
+     *     contact for. Null for an account with no entry of its own - a service account, or
+     *     a name the directory holds twice - and the switch is left off the page rather
+     *     than offered as something that would filter to nothing.
+     */
     @GetMapping("/servers")
-    public String servers() {
+    public String servers(Model model, Authentication authentication) {
+        model.addAttribute("myDirectoryUserId", signedIn.idOf(authentication));
         return "servers";
     }
 

@@ -33,7 +33,7 @@
 
     $(function () {
         var certState = document.getElementById('cert-state');
-        var showExpired = document.getElementById('show-expired');
+        var onlyMine = document.getElementById('only-mine');
         var withinDays = document.getElementById('within-days');
         var latestFrom = document.getElementById('latest-from');
         var latestTo = document.getElementById('latest-to');
@@ -51,15 +51,42 @@
         }
         var applied = document.getElementById('applied-filters');
 
-        // Arriving from a person's row filters by them. The id travels rather than the
-        // address, because the server resolves it to every value a serverPOC could use to
-        // name them - the FSD schema says that attribute carries a name, not an address.
+        // One filter, two ways in: arriving from a person's row, and the switch that names
+        // the person reading the page. The id travels rather than the address, because the
+        // server resolves it to every value a serverPOC could use to name them - the FSD
+        // schema says that attribute carries a name, not an address.
         var params = new URLSearchParams(window.location.search);
-        var pocUserId = params.get('pocUserId');
-        if (pocUserId) {
-            pocUserLabel.textContent = params.get('pocName') || ('user #' + pocUserId);
-            pocUserField.hidden = false;
+        var myId = onlyMine ? onlyMine.getAttribute('data-user-id') : null;
+        var followedUserId = params.get('pocUserId');
+        var followedName = params.get('pocName');
+
+        // Read when the filters are read rather than held in a variable of its own, so the
+        // switch and the badge cannot disagree about which of them is in force.
+        function contactUserId() {
+            return onlyMine && onlyMine.checked ? myId : followedUserId;
         }
+
+        /**
+         * The badge names whoever the table is narrowed to, unless the switch already says
+         * so: "Responsible for Alice Archer" beside a ticked "Only mine", read by Alice, is
+         * the same sentence twice.
+         */
+        function refreshPocBadge() {
+            var id = contactUserId();
+            var mine = id && myId && String(id) === String(myId);
+            pocUserField.hidden = !id || !!mine;
+            if (id && !mine) {
+                pocUserLabel.textContent = followedName || ('user #' + id);
+            }
+        }
+
+        // Arriving at one's own servers by link is the switch being on, not a badge with
+        // one's own name in it.
+        if (onlyMine && followedUserId && myId && String(followedUserId) === String(myId)) {
+            onlyMine.checked = true;
+            followedUserId = null;
+        }
+        refreshPocBadge();
         var literalPoc = params.get('poc') || params.get('pocEmail');
         if (literalPoc) {
             pocInput.value = literalPoc;
@@ -86,18 +113,13 @@
                 default:
                     break;
             }
-            // Asking for expired entries outright overrides hiding them.
-            var askedForExpired = certState.value === 'expired';
-            showExpired.disabled = askedForExpired;
-            if (!showExpired.checked && !askedForExpired) {
-                filters.hideExpired = 'true';
-            }
             var days = withinDays.value.trim();
             if (days) {
                 filters.expiringWithinDays = days;
             }
-            if (pocUserId) {
-                filters.pocUserId = pocUserId;
+            var contactUser = contactUserId();
+            if (contactUser) {
+                filters.pocUserId = contactUser;
             }
             if (latestFrom.value) {
                 filters.latestExpiryFrom = latestFrom.value;
@@ -130,7 +152,8 @@
             endpoint: '/api/v1/datatables/servers',
             statsUrl: '/api/v1/stats/servers',
             readFilters: readFilters,
-            filterInputs: [certState, showExpired, withinDays, latestFrom, latestTo, pocInput, pocColumn, riskFilter, projectFilter],
+            filterInputs: [certState, onlyMine, withinDays, latestFrom, latestTo, pocInput, pocColumn, riskFilter,
+                projectFilter],
             // Soonest to expire first, which is the order the work is in. Column 10 is
             // earliestExpiry. A server with no certificate has no expiry at all, and where
             // a NULL sorts is settled in application.yml rather than left to the database,
@@ -216,8 +239,13 @@
             $(this).closest('tr').find('td.expand').trigger('click');
         });
 
+        // The table reloads itself from filterInputs; this only keeps the badge honest.
+        if (onlyMine) {
+            onlyMine.addEventListener('change', refreshPocBadge);
+        }
+
         pocUserClear.addEventListener('click', function () {
-            pocUserId = null;
+            followedUserId = null;
             pocUserField.hidden = true;
             CertAlert.reload(table, readFilters());
         });
