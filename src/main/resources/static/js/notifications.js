@@ -156,10 +156,12 @@
 
         if (!result.messages || result.messages.length === 0) {
             $card.removeClass('d-none');
-            $('#dry-run-summary').text('');
-            $body.html('<p class="text-secondary mb-0">Nothing would be sent. '
-                + 'Either nothing is expiring inside the window, or the people it concerns '
-                + 'publish no address to write to.</p>');
+            $('#dry-run-summary').text('nothing to send');
+            // Why, rather than leaving somebody to guess which of half a dozen reasons it
+            // was. The run works it out; this only has to show it.
+            $body.html('<p class="text-secondary mb-0">'
+                + CertAlert.escapeHtml(result.note || 'Nothing would be sent.')
+                + '</p>');
             return;
         }
 
@@ -257,7 +259,7 @@
                     $('#notifications-digest-status').text(
                         result.certificates + ' expiring, ' + result.peopleTold + ' would be told, '
                         + result.emailsSent + ' email(s) would be sent'
-                        + (result.emailEnabled ? '' : ' — once email is switched on'));
+                        + (result.emailsSent && !result.emailEnabled ? ' — once email is switched on' : ''));
                     showDryRun(result);
                 })
                 .fail(function (xhr) {
@@ -278,7 +280,8 @@
                 .done(function (result) {
                     $('#notifications-digest-status').text(
                         result.certificates + ' expiring, ' + result.peopleTold + ' told, '
-                        + result.emailsSent + ' emailed');
+                        + result.emailsSent + ' emailed'
+                        + (result.note ? ' — ' + result.note : ''));
                     loadSettings();
                     loadPage(0);
                     refreshCount();

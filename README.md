@@ -1182,18 +1182,26 @@ somebody renewed last week does not, and going on about it for the weeks until t
 lapses is how a round-up teaches people to ignore it. So an expiring certificate is reported
 only while the entry still depends on it, and two questions decide that.
 
-**Has the entry published something in its place?** A renewal is the *same subject, issued
-again* — same identity, new dates, new key. A certificate is treated as replaced when the
-entry holds another one with the same subject, issued later, that has not itself expired.
-Publish the renewed certificate and the old one drops off the next round-up, without waiting
-for it to expire and without anybody marking anything read.
+**Has the entry published something in its place?** A renewal is the *same name, for the
+same job, issued again* — same identity, same use, new dates, new key. A certificate is
+treated as replaced when the entry holds another one with the same subject **and the same
+use**, issued later, that has not itself expired. Publish the renewed certificate and the old
+one drops off the next round-up, without waiting for it to expire and without anybody marking
+anything read.
 
-Deliberately not "the newest one wins". A person holds two certificates at once — one for
-signing, one for key encipherment — and an entry may publish certificates for several names
-besides. Treating the newest as standing in for the rest would stop telling somebody about a
-credential that is genuinely running out, on the strength of an unrelated certificate being
-younger. Of the two ways to be wrong, silence about a certificate nobody has renewed is much
-the worse one.
+Both halves of that rule earn their place. **Same subject**, because an entry may publish
+certificates for several names, and "the newest one wins" would stop telling somebody about a
+credential that is genuinely running out on the strength of an unrelated certificate being
+younger. **Same use**, because a person does not hold one certificate: PKI for people issues
+a signing certificate and a key encipherment one to the same name in the same breath, and the
+second is written to the directory moments after the first. On subject alone the encryption
+half reads as a renewal of the signing half — which on a directory where every person holds a
+pair means half of everything expiring goes unreported. Renewing one half replaces that half
+and leaves the other standing, which is also the case most worth hearing about: a pair
+straddling two issuances is the ordinary way to end up half expired.
+
+Of the two ways to be wrong, silence about a certificate nobody has renewed is much the worse
+one, so every comparison fails towards saying something.
 
 **Is it what the entry's state is based on?** The same roll-up the tables use: a server that
 reads VALID because it publishes one good certificate does not also generate mail about the
@@ -1216,6 +1224,13 @@ POST /api/v1/notifications/digest?dryRun=true   (admin)
 The answer carries the counts and the messages themselves — the address, the subject line
 and the rendered text — so one can be read before an estate of a hundred thousand entries is
 written to. Up to twenty-five come back; the count says how many there would be in total.
+
+**A rehearsal that builds nothing says why**, on the card and in the answer's `note`. "No
+messages" is what comes back from half a dozen different situations — a window nothing falls
+inside, a directory that has already renewed everything, points of contact that resolve to
+nobody, contacts who publish no address, the per-run cap — and which of them it is decides
+whether anybody has anything to do. An empty card that does not say which is a result nobody
+can act on.
 
 It runs **whether or not email is switched on**, which is the state it is most wanted in:
 "what would this send" is a question asked before `cert-alert.notifications.email.enabled`

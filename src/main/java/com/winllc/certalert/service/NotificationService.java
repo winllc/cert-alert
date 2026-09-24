@@ -211,7 +211,7 @@ public class NotificationService {
         // A run that found nothing still says which kind of run it was: a rehearsal
         // reported as a real run reads as one that went out and sent nothing.
         if (!properties.isEnabled()) {
-            return DigestResult.nothing(dryRun, properties.getEmail().isEnabled());
+            return nothing(dryRun, "Notifications are switched off in the configuration");
         }
         Instant now = Instant.now(clock);
         // How far ahead to look is somebody's decision, made in the UI, and it may be
@@ -226,7 +226,7 @@ public class NotificationService {
                 certificates.findExpiringBetween(floor, horizon, PageRequest.of(0, DIGEST_SCAN_LIMIT));
         if (expiring.isEmpty()) {
             log.debug("Expiry digest: nothing expiring in the next {} day(s)", leadDays);
-            return DigestResult.nothing(dryRun, properties.getEmail().isEnabled());
+            return nothing(dryRun, "Nothing is expiring in the next " + leadDays + " day(s)");
         }
 
         // Grouped by who has to do something about it, rather than by what is expiring:
@@ -256,11 +256,15 @@ public class NotificationService {
         }
 
         int told = 0;
+        int unaddressed = 0;
         mailer.beginRun(dryRun);
         boolean rehearsing = mailer.isDryRun();
         for (Round round : rounds.values()) {
             boolean went = mailer.send(round.recipient, round.entries);
             told++;
+            if (round.recipient.address() == null || round.recipient.address().isBlank()) {
+                unaddressed++;
+            }
             if (rehearsing) {
                 // Nothing saved and nothing marked: a rehearsal that left notifications
                 // behind would be answering the question by doing the thing.
@@ -279,12 +283,54 @@ public class NotificationService {
         log.info("Expiry digest{}: {} certificate(s) expiring in the next {} day(s), {} already replaced, "
                         + "{} person(s) told, {} message(s) emailed",
                 rehearsing ? " (dry run)" : "", expiring.size(), leadDays, superseded, told, emailed);
+        String note = emailed > 0
+                ? null
+                : whyNothingWasBuilt(expiring.size(), superseded, reported, told, unaddressed, leadDays);
         if (rehearsing) {
             List<NotificationMailer.Rendered> built = mailer.rendered();
-            return new DigestResult(reported, told, emailed, true, properties.getEmail().isEnabled(),
+            return new DigestResult(reported, told, emailed, true, properties.getEmail().isEnabled(), note,
                     built.size() > DRY_RUN_PREVIEW_LIMIT ? built.subList(0, DRY_RUN_PREVIEW_LIMIT) : built);
         }
-        return DigestResult.sent(reported, told, emailed, properties.getEmail().isEnabled());
+        return DigestResult.sent(reported, told, emailed, properties.getEmail().isEnabled(), note);
+    }
+
+    /**
+     * Why a run built no messages, in a sentence somebody can act on.
+     *
+     * <p>A rehearsal that comes back empty is the one result that says nothing by itself.
+     * "No messages" is the answer to half a dozen different questions - a window nothing
+     * falls inside, a directory that has renewed everything, points of contact with no
+     * address published - and which of them it is decides whether anybody has anything to
+     * do. So the run says which.
+     */
+    private String whyNothingWasBuilt(
+            int expiring, int superseded, int reported, int told, int unaddressed, int leadDays) {
+
+        if (reported == 0 && superseded > 0) {
+            return "All " + expiring + " certificate(s) expiring in the next " + leadDays
+                    + " day(s) have already been published again, so nobody needs telling";
+        }
+        if (told == 0) {
+            return reported + " certificate(s) are expiring, but none of them has anybody to tell: "
+                    + "no point of contact resolves to a person or an address";
+        }
+        if (unaddressed == told) {
+            return told + " person/people would be told on the page, but none of them publishes an "
+                    + "address to write to";
+        }
+        if (unaddressed > 0) {
+            return unaddressed + " of the " + told + " to be told publish no address to write to";
+        }
+        NotificationProperties.Email email = properties.getEmail();
+        if (told >= email.getMaxPerRun()) {
+            return "Stopped at the " + email.getMaxPerRun() + " message cap for one run "
+                    + "(cert-alert.notifications.email.max-per-run)";
+        }
+        return "Nothing was built, and nothing here says why - the log will have it";
+    }
+
+    private DigestResult nothing(boolean dryRun, String note) {
+        return DigestResult.nothing(dryRun, properties.getEmail().isEnabled(), note);
     }
 
     /**
@@ -343,6 +389,7 @@ public class NotificationService {
      * @param dryRun whether this was a rehearsal, in which case nothing was sent or saved
      * @param emailEnabled whether email is switched on - a rehearsal builds its messages
      *     either way, and this is what stops "3 would be sent" being read as "and they will"
+     * @param note why no messages were built, where none were; null where some were
      * @param messages on a rehearsal, the messages as they would have gone out
      */
     public record DigestResult(
@@ -351,16 +398,18 @@ public class NotificationService {
             int emailsSent,
             boolean dryRun,
             boolean emailEnabled,
+            String note,
             List<NotificationMailer.Rendered> messages) {
 
         /** A run with nothing to do, which is still a run of one kind or the other. */
-        static DigestResult nothing(boolean dryRun, boolean emailEnabled) {
-            return new DigestResult(0, 0, 0, dryRun, emailEnabled, List.of());
+        static DigestResult nothing(boolean dryRun, boolean emailEnabled, String note) {
+            return new DigestResult(0, 0, 0, dryRun, emailEnabled, note, List.of());
         }
 
         /** A run that sent: {@code emailsSent} is what went out, and nothing was rendered aside. */
-        static DigestResult sent(int certificates, int peopleTold, int emailsSent, boolean emailEnabled) {
-            return new DigestResult(certificates, peopleTold, emailsSent, false, emailEnabled, List.of());
+        static DigestResult sent(
+                int certificates, int peopleTold, int emailsSent, boolean emailEnabled, String note) {
+            return new DigestResult(certificates, peopleTold, emailsSent, false, emailEnabled, note, List.of());
         }
     }
 

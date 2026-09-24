@@ -6,6 +6,7 @@ import com.winllc.certalert.domain.CachedCertificate;
 import com.winllc.certalert.domain.CertificateStatus;
 import com.winllc.certalert.domain.DirectoryServer;
 import com.winllc.certalert.domain.DirectoryUser;
+import com.winllc.certalert.domain.KeyUsage;
 import com.winllc.certalert.domain.Notification;
 import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.DirectoryUserRepository;
@@ -105,6 +106,73 @@ class NotificationSupersessionTest {
     }
 
     /**
+     * A person's two certificates carry the same subject: PKI for people issues a signing
+     * certificate and a key encipherment one to the same name, minutes apart. Neither
+     * replaces the other - they are one credential in two halves - and the round-up has to
+     * name both, because renewing one and not the other is the ordinary way to end up half
+     * expired.
+     */
+    @Test
+    void theTwoHalvesOfAPairDoNotReplaceEachOther() {
+        DirectoryUser paired = user("holder", "Hol Der", "holder@example.gov");
+        CachedCertificate signing = certificate(
+                "CN=holder@example.gov",
+                now.minus(Duration.ofDays(360)),
+                now.plus(Duration.ofDays(5)),
+                CertificateStatus.EXPIRING_SOON);
+        signing.describeKeyUsage(List.of(KeyUsage.DIGITAL_SIGNATURE, KeyUsage.NON_REPUDIATION));
+        // Issued a minute later, as the second half of one issuance is.
+        CachedCertificate encryption = certificate(
+                "CN=holder@example.gov",
+                now.minus(Duration.ofDays(360)).plusSeconds(60),
+                now.plus(Duration.ofDays(5)),
+                CertificateStatus.EXPIRING_SOON);
+        encryption.describeKeyUsage(List.of(KeyUsage.KEY_ENCIPHERMENT));
+        paired.addCertificate(signing);
+        paired.addCertificate(encryption);
+        save(paired);
+
+        notificationService.digest();
+
+        List<Notification> theirs = addressedTo("holder@example.gov");
+        assertThat(theirs).hasSize(1);
+        assertThat(theirs.getFirst().getMessage()).contains("2 certificate(s) expiring");
+    }
+
+    /** And renewing one half replaces that half, and only that half. */
+    @Test
+    void renewingOneHalfLeavesTheOtherStillReported() {
+        DirectoryUser half = user("halfway", "Half Way", "halfway@example.gov");
+        CachedCertificate oldSigning = certificate(
+                "CN=halfway@example.gov",
+                now.minus(Duration.ofDays(360)),
+                now.plus(Duration.ofDays(5)),
+                CertificateStatus.EXPIRING_SOON);
+        oldSigning.describeKeyUsage(List.of(KeyUsage.DIGITAL_SIGNATURE));
+        CachedCertificate newSigning = certificate(
+                "CN=halfway@example.gov", now, now.plus(Duration.ofDays(365)), CertificateStatus.VALID);
+        newSigning.describeKeyUsage(List.of(KeyUsage.DIGITAL_SIGNATURE));
+        CachedCertificate encryption = certificate(
+                "CN=halfway@example.gov",
+                now.minus(Duration.ofDays(360)).plusSeconds(60),
+                now.plus(Duration.ofDays(5)),
+                CertificateStatus.EXPIRING_SOON);
+        encryption.describeKeyUsage(List.of(KeyUsage.KEY_ENCIPHERMENT));
+        half.addCertificate(oldSigning);
+        half.addCertificate(newSigning);
+        half.addCertificate(encryption);
+        save(half);
+
+        notificationService.digest();
+
+        List<Notification> theirs = addressedTo("halfway@example.gov");
+        assertThat(theirs).hasSize(1);
+        // The encryption half only: the signing half has been renewed and is nobody's
+        // problem, and saying "2" here would be the noise the whole rule exists to stop.
+        assertThat(theirs.getFirst().getMessage()).contains("1 certificate(s) expiring");
+    }
+
+    /**
      * An entry whose certificates have all lapsed is the one that most needs telling. Asking
      * whether something newer is standing in must not silence the case where nothing is.
      */
@@ -178,6 +246,52 @@ class NotificationSupersessionTest {
             assertThat(message.html()).contains("CN=asking@example.gov");
         });
         assertThat(notifications.count()).isZero();
+    }
+
+    /**
+     * A rehearsal that builds nothing says why. "No messages" is the answer to half a dozen
+     * different questions - a window nothing falls inside, a directory that has renewed
+     * everything, contacts with no address published - and which of them it is decides
+     * whether anybody has anything to do.
+     */
+    @Test
+    void anEmptyRehearsalSaysWhyItIsEmpty() {
+        // Nothing in the database at all: nothing is expiring.
+        NotificationService.DigestResult empty = notificationService.digest(true);
+        assertThat(empty.messages()).isEmpty();
+        assertThat(empty.note()).contains("Nothing is expiring in the next");
+
+        // Something expiring, and it has already been published again.
+        DirectoryUser renewed = user("explained", "Ex Plained", "explained@example.gov");
+        renewed.addCertificate(certificate(
+                "CN=explained@example.gov",
+                now.minus(Duration.ofDays(360)),
+                now.plus(Duration.ofDays(5)),
+                CertificateStatus.EXPIRING_SOON));
+        renewed.addCertificate(certificate(
+                "CN=explained@example.gov", now, now.plus(Duration.ofDays(365)), CertificateStatus.VALID));
+        save(renewed);
+
+        NotificationService.DigestResult replaced = notificationService.digest(true);
+        assertThat(replaced.messages()).isEmpty();
+        assertThat(replaced.note()).contains("already been published again");
+    }
+
+    /** And a rehearsal that does build something has nothing to explain. */
+    @Test
+    void aRehearsalThatBuildsSomethingSaysNothingAboutWhyNot() {
+        DirectoryUser told = user("noted", "No Ted", "noted@example.gov");
+        told.addCertificate(certificate(
+                "CN=noted@example.gov",
+                now.minus(Duration.ofDays(360)),
+                now.plus(Duration.ofDays(5)),
+                CertificateStatus.EXPIRING_SOON));
+        save(told);
+
+        NotificationService.DigestResult result = notificationService.digest(true);
+
+        assertThat(result.messages()).isNotEmpty();
+        assertThat(result.note()).isNull();
     }
 
     private List<Notification> addressedTo(String address) {
