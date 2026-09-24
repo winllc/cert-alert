@@ -114,12 +114,7 @@ public abstract class DirectoryEntry {
     public void refreshCertificateSummary() {
         List<CachedCertificate> certificates = getCertificates();
         this.certificateCount = certificates.size();
-
-        List<CachedCertificate> standing = certificates.stream()
-                .filter(certificate -> certificate.getStatus() != CertificateStatus.EXPIRED)
-                .toList();
-        // Nothing left standing means the entry has lapsed, not that it holds nothing.
-        List<CachedCertificate> counted = standing.isEmpty() ? certificates : rollUpOver(standing);
+        List<CachedCertificate> counted = standingCertificates();
 
         // worstOf an empty list is NONE, which is the right answer for an entry that really
         // does hold no certificates - so that case needs no branch of its own.
@@ -135,6 +130,22 @@ public abstract class DirectoryEntry {
                 .filter(java.util.Objects::nonNull)
                 .max(Instant::compareTo)
                 .orElse(null);
+    }
+
+    /**
+     * The certificates this entry stands on - the ones the roll-up describes, and the ones
+     * worth telling anybody about.
+     *
+     * <p>Everything that has not expired, narrowed by {@link #rollUpOver} to what the
+     * object type actually depends on. Where nothing is left the entry has lapsed rather
+     * than holding nothing, so they all count again and it reads as expired.
+     */
+    public List<CachedCertificate> standingCertificates() {
+        List<CachedCertificate> certificates = getCertificates();
+        List<CachedCertificate> standing = certificates.stream()
+                .filter(certificate -> certificate.getStatus() != CertificateStatus.EXPIRED)
+                .toList();
+        return standing.isEmpty() ? certificates : rollUpOver(standing);
     }
 
     /**

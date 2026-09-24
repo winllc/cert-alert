@@ -4,6 +4,7 @@ import com.winllc.certalert.config.NotificationProperties;
 import com.winllc.certalert.domain.OwnerType;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -47,6 +48,9 @@ public class NotificationMailer {
 
     private boolean warned;
     private int sentThisRun;
+    private boolean dryRunThisRun;
+    /** What a dry run built, in the order it built it. Empty on a run that really sent. */
+    private final List<Rendered> renderedThisRun = new ArrayList<>();
 
     public NotificationMailer(
             Optional<JavaMailSender> mailSender, TemplateEngine templates, NotificationProperties properties) {
@@ -62,10 +66,19 @@ public class NotificationMailer {
      */
     public boolean send(NotificationRecipients.Recipient recipient, List<ExpiryDigest.Entry> entries) {
         NotificationProperties.Email settings = properties.getEmail();
-        if (!settings.isEnabled() || entries.isEmpty()) {
+        if (entries.isEmpty()) {
             return false;
         }
-        if (mailSender.isEmpty()) {
+        // A rehearsal runs with sending switched off, which is the case it is most wanted
+        // in: the question "what would this send" is asked before email is turned on, not
+        // after. What comes back says which it was, so nothing reads as having gone out.
+        if (!settings.isEnabled() && !dryRunThisRun) {
+            return false;
+        }
+        // A dry run needs no transport, which is rather the point: the question it answers -
+        // how many messages, and what do they say - is one to settle before there is a mail
+        // server to answer it against.
+        if (mailSender.isEmpty() && !dryRunThisRun) {
             warnOnce("Notification email is enabled but no mail sender is configured");
             return false;
         }
@@ -100,8 +113,50 @@ public class NotificationMailer {
 
     /** Called at the start of a run, so the per-run cap means what it says. */
     public void beginRun() {
-        sentThisRun = 0;
+        beginRun(false);
     }
+
+    /**
+     * @param dryRun forces this run to build its messages and send none of them, on top of
+     *     the configured mode - so somebody can ask what a round-up would do without
+     *     putting the whole deployment into dry run to find out
+     */
+    public void beginRun(boolean dryRun) {
+        sentThisRun = 0;
+        dryRunThisRun = dryRun || properties.getEmail().isDryRun();
+        renderedThisRun.clear();
+    }
+
+    /**
+     * How many messages this run has handed over - or built and dropped, on a dry run.
+     *
+     * <p>Not the same as the number of people written to: somebody who holds an expiring
+     * certificate and looks after an expiring server gets one message about each, and "how
+     * many emails" is a question about messages.
+     */
+    public int sent() {
+        return sentThisRun;
+    }
+
+    /** Whether messages are being built and thrown away rather than sent. */
+    public boolean isDryRun() {
+        return dryRunThisRun;
+    }
+
+    /** What the run just built, for showing somebody what would have gone out. */
+    public List<Rendered> rendered() {
+        return List.copyOf(renderedThisRun);
+    }
+
+    /**
+     * One message as it would have been sent.
+     *
+     * @param to the address it was addressed to
+     * @param subject the subject line, prefix and all
+     * @param text the plain-text alternative
+     * @param html the HTML body
+     */
+    public record Rendered(String to, String subject, String text, String html) {}
 
     private boolean send(NotificationProperties.Email settings, String address, ExpiryDigest digest) {
         String template = digest.getOwnerType() == OwnerType.USER ? USER_TEMPLATE : SERVER_TEMPLATE;
@@ -109,13 +164,25 @@ public class NotificationMailer {
             Context context = new Context(Locale.ENGLISH);
             context.setVariable("digest", digest);
 
+            String subject = settings.getSubjectPrefix() + digest.getHeadline();
+            String text = templates.process(template + ".txt", context);
+            String html = templates.process(template, context);
+
+            if (dryRunThisRun) {
+                // Built and dropped, which is the point: everything that could go wrong in
+                // the building has already happened by here.
+                renderedThisRun.add(new Rendered(address, subject, text, html));
+                sentThisRun++;
+                return true;
+            }
+
             MimeMessage message = mailSender.get().createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
             helper.setFrom(settings.getFrom());
             helper.setTo(address);
-            helper.setSubject(settings.getSubjectPrefix() + digest.getHeadline());
+            helper.setSubject(subject);
             // Text first, HTML second: the order MimeMessageHelper wants for an alternative.
-            helper.setText(templates.process(template + ".txt", context), templates.process(template, context));
+            helper.setText(text, html);
 
             mailSender.get().send(message);
             sentThisRun++;

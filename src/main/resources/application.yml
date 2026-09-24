@@ -414,6 +414,15 @@ cert-alert:
       from: cert-alert@localhost
       subject-prefix: "[cert-alert] "
       max-per-run: 500
+      # Build every message and send none of them. For the question nobody wants to answer
+      # by finding out: pointed at a real directory for the first time, how many people
+      # hear from this, and does what they get read the way it was meant to?
+      #
+      # A round-up run this way writes nothing down either - no notifications, nothing
+      # marked as emailed - and reports who it would have written to and what the message
+      # said. There is a Dry run button on the notifications page that does the same for one
+      # run without putting the whole deployment into this mode.
+      dry-run: ${CERT_ALERT_EMAIL_DRY_RUN:false}
       # Templates of your own, in place of the packaged ones. What these messages say -
       # who signs them, what your renewal process is called, what somebody is meant to do
       # next - is yours, and changing a sentence should not mean rebuilding the image.

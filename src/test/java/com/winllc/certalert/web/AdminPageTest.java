@@ -48,6 +48,8 @@ class AdminPageTest {
 
     private static final String AUDIT = "/api/v1/datatables/audit";
     private static final String SUMMARY = "/api/v1/audit/summary";
+    private static final String REVOCATION = "/api/v1/revocation";
+    private static final String REVOCATION_CHECK = "/api/v1/revocation/check";
 
     @Autowired
     private WebApplicationContext context;
@@ -280,6 +282,35 @@ class AdminPageTest {
     void theSummaryIsAdministratorsToo() throws Exception {
         mockMvc.perform(get(SUMMARY).with(reader())).andExpect(status().isForbidden());
         mockMvc.perform(get(SUMMARY).with(anonymous())).andExpect(status().isUnauthorized());
+    }
+
+    /**
+     * The revocation check is on the page, and starting it is an administrator's: it asks
+     * every authority in the directory at once, which is a scheduled job brought forward
+     * rather than a page being refreshed.
+     */
+    @Test
+    void anAdministratorCanStartTheRevocationCheckFromThePage() throws Exception {
+        mockMvc.perform(get("/admin").with(admin()))
+                .andExpect(status().isOk())
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("id=\"revocation-admin\"")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("Refresh revocation statuses")));
+
+        mockMvc.perform(post(REVOCATION_CHECK).with(csrf()).with(admin()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.entries").exists())
+                .andExpect(jsonPath("$.certificatesChecked").exists())
+                .andExpect(jsonPath("$.durationMillis").exists());
+    }
+
+    /** Reading the counts beside the button is not: they are a count of what the cache holds. */
+    @Test
+    void theCountsAreReadableAndTheRunIsNot() throws Exception {
+        mockMvc.perform(get(REVOCATION).with(reader())).andExpect(status().isOk());
+        mockMvc.perform(post(REVOCATION_CHECK).with(csrf()).with(reader()))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post(REVOCATION_CHECK).with(csrf()).with(anonymous()))
+                .andExpect(status().isUnauthorized());
     }
 
     /** The UTC day an instant falls on, as the date inputs send it. */

@@ -50,6 +50,30 @@
                     </div>
                 </div>
 
+                <!--/* Revocation is the one fact about a certificate the certificate does not
+                       carry, so it is asked for on a schedule. This is the same run, now. */-->
+                <div class="card mb-3" id="revocation-admin">
+                    <div class="card-header">
+                        <h3 class="card-title">Revocation</h3>
+                        <div class="card-actions text-secondary small" id="revocation-status">&ndash;</div>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-secondary mb-3">
+                            Asks the issuing authorities whether the certificates these entries currently hold
+                            have been revoked. It runs nightly; this is the same run started by hand, for when
+                            waiting until tomorrow is not the answer. It reads every authority's list, so on a
+                            large directory it is not instant.
+                        </p>
+                        <div class="btn-list align-items-center">
+                            <button type="button" class="btn btn-primary" id="revocation-run">
+                                <svg class="icon me-1"><use href="#icon-refresh"></use></svg>
+                                Refresh revocation statuses
+                            </button>
+                            <span id="revocation-result" class="text-secondary small"></span>
+                        </div>
+                    </div>
+                </div>
+
                 <!--/* What this deployment keeps about a server beyond the directory's own
                        schema. Defined here; filled in on each server's page. */-->
                 <div class="card mb-3" id="server-attribute-admin">

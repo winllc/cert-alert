@@ -17,10 +17,20 @@
                         <div class="text-secondary mt-1">
                             Certificates you are the point of contact for, and what has happened to them
                         </div>
+                        <!--/* Under the description rather than beside the buttons: what a run
+                               reports is a sentence, and a sentence in a button list squeezes
+                               the heading off the page. */-->
+                        <div id="notifications-digest-status" class="text-secondary small mt-1"></div>
                     </div>
                     <div class="col-auto ms-auto">
                         <div class="btn-list align-items-center">
-                            <span id="notifications-digest-status" class="text-secondary small"></span>
+                            <!--/* What the round-up would do, without doing it: who hears from
+                                   it and what the message says, with nothing sent and nothing
+                                   written down. */-->
+                            <button type="button" id="notifications-dry-run" class="btn" th:if="${isAdmin}">
+                                <svg class="icon"><use href="#icon-certificate"></use></svg>
+                                Dry run
+                            </button>
                             <!--/* The round-up runs on a schedule; this is for seeing it work. */-->
                             <button type="button" id="notifications-digest" class="btn" th:if="${isAdmin}">
                                 <svg class="icon"><use href="#icon-refresh"></use></svg>
@@ -67,6 +77,15 @@
                             </div>
                         </div>
                     </div>
+                </div>
+
+                <!--/* Filled in by a dry run, and empty until one is asked for. */-->
+                <div class="card mb-3 d-none" id="dry-run-card">
+                    <div class="card-header">
+                        <h3 class="card-title">What the round-up would send</h3>
+                        <div class="card-actions text-secondary small" id="dry-run-summary"></div>
+                    </div>
+                    <div class="card-body" id="dry-run-messages"></div>
                 </div>
 
                 <div class="card">

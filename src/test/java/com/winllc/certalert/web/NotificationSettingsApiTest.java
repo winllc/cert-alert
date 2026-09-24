@@ -4,6 +4,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -33,6 +34,7 @@ import org.springframework.web.context.WebApplicationContext;
 class NotificationSettingsApiTest {
 
     private static final String SETTINGS = "/api/v1/notifications/settings";
+    private static final String DIGEST = "/api/v1/notifications/digest";
 
     @Autowired
     private WebApplicationContext context;
@@ -115,6 +117,39 @@ class NotificationSettingsApiTest {
         }
         mockMvc.perform(get(SETTINGS).with(user("alice").roles("ADMIN")))
                 .andExpect(jsonPath("$.fromConfiguration").value(true));
+    }
+
+    /**
+     * A rehearsal: what the round-up would send, asked for without sending it. The messages
+     * come back with the answer, so somebody can read one before turning email on.
+     */
+    @Test
+    void anAdministratorCanRehearseTheRoundUp() throws Exception {
+        mockMvc.perform(post(DIGEST + "?dryRun=true")
+                        .with(user("alice").roles("ADMIN"))
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.dryRun").value(true))
+                .andExpect(jsonPath("$.peopleTold").exists())
+                .andExpect(jsonPath("$.emailsSent").exists())
+                .andExpect(jsonPath("$.messages").isArray());
+    }
+
+    /** And a run without it says so, so the two are never confused on the page. */
+    @Test
+    void aRealRunSaysItWasNotARehearsal() throws Exception {
+        mockMvc.perform(post(DIGEST).with(user("alice").roles("ADMIN")).with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.dryRun").value(false))
+                .andExpect(jsonPath("$.messages").isEmpty());
+    }
+
+    @Test
+    void aReaderCannotRunTheRoundUpAtAll() throws Exception {
+        mockMvc.perform(post(DIGEST + "?dryRun=true")
+                        .with(user("reader").roles("USER"))
+                        .with(csrf()))
+                .andExpect(status().isForbidden());
     }
 
     @Test

@@ -116,10 +116,16 @@ public class NotificationController {
                 isAdmin(authentication));
     }
 
-    /** Runs the round-up now rather than waiting for the schedule. Administrators only. */
+    /**
+     * Runs the round-up now rather than waiting for the schedule. Administrators only.
+     *
+     * @param dryRun build every message and send none, and write nothing down - what a
+     *     round-up would do, asked without doing it
+     */
     @PostMapping("/digest")
-    public NotificationService.DigestResult digest() {
-        return notificationService.digest();
+    public NotificationService.DigestResult digest(
+            @RequestParam(defaultValue = "false") boolean dryRun) {
+        return notificationService.digest(dryRun);
     }
 
     private boolean isAdmin(Authentication authentication) {

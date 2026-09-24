@@ -906,6 +906,14 @@ GET  /api/v1/revocation        the counts, and whether OCSP is possible here
 POST /api/v1/revocation/check  run it now (admin)
 ```
 
+**On the admin page**, under *Revocation*, with the counts beside it and the result of the
+run beneath. It is the nightly job brought forward rather than a page refresh — for the
+morning an authority publishes a revocation and waiting until tomorrow is not the answer.
+It reads every authority's list, so on a large directory it is not instant; the button
+disables itself while it runs and says how long it took. Reading the counts is open to
+anybody signed in, since they are a count of what the cache holds; starting a run is an
+administrator's.
+
 ### Removing what should not still be published
 
 A revoked certificate that is still in the directory is not untidy, it is a hazard:
@@ -1084,6 +1092,10 @@ Two paths, deliberately different:
 | **Certificate status** | the moment a sweep or the hourly re-evaluation notices a certificate crossing into a bad state | the page, one per contact |
 | **Expiry round-up** | daily, on a cron | the page *and* an email to each contact |
 
+The page is reached through the **bell** in the navigation bar, which carries the unread
+count and is the only way in: a tab beside it would be a second control for one destination,
+and the bell says something the tab could not.
+
 The alert channels (`cert-alert.alerts.*`) are a different thing again: they tell a fixed
 list of operators about every alert as it happens. The round-up writes to the person who
 has to renew the certificate.
@@ -1133,6 +1145,67 @@ runs on may be able to reach nothing at all.
 The text templates carry their own template resolver (`EmailTemplateConfig`), because a
 resolver carries one template mode; it answers only for `email/*.txt` and leaves every page
 to the resolver Spring Boot configures.
+
+#### Until it is renewed, and no longer
+
+A round-up is worth reading only if everything in it still needs doing. A certificate
+somebody renewed last week does not, and going on about it for the weeks until the old one
+lapses is how a round-up teaches people to ignore it. So an expiring certificate is reported
+only while the entry still depends on it, and two questions decide that.
+
+**Has the entry published something in its place?** A renewal is the *same subject, issued
+again* — same identity, new dates, new key. A certificate is treated as replaced when the
+entry holds another one with the same subject, issued later, that has not itself expired.
+Publish the renewed certificate and the old one drops off the next round-up, without waiting
+for it to expire and without anybody marking anything read.
+
+Deliberately not "the newest one wins". A person holds two certificates at once — one for
+signing, one for key encipherment — and an entry may publish certificates for several names
+besides. Treating the newest as standing in for the rest would stop telling somebody about a
+credential that is genuinely running out, on the strength of an unrelated certificate being
+younger. Of the two ways to be wrong, silence about a certificate nobody has renewed is much
+the worse one.
+
+**Is it what the entry's state is based on?** The same roll-up the tables use: a server that
+reads VALID because it publishes one good certificate does not also generate mail about the
+one beside it. The page and the message agree, which they would not if the round-up asked a
+question of its own.
+
+An entry whose certificates have *all* lapsed is the case that most needs telling, and it
+still is: with nothing standing, nothing has been replaced.
+
+#### A dry run
+
+What a round-up would do, asked without doing it. **Dry run** on the notifications page
+builds every message and sends none, writes no notifications, and hands back who would hear
+from it and what each message says:
+
+```
+POST /api/v1/notifications/digest?dryRun=true   (admin)
+```
+
+The answer carries the counts and the messages themselves — the address, the subject line
+and the rendered text — so one can be read before an estate of a hundred thousand entries is
+written to. Up to twenty-five come back; the count says how many there would be in total.
+
+It runs **whether or not email is switched on**, which is the state it is most wanted in:
+"what would this send" is a question asked before `cert-alert.notifications.email.enabled`
+is set, not after. The answer says which it was, so `3 email(s) would be sent — once email
+is switched on` is never read as three that went.
+
+Everything that can go wrong in the building has already happened by the time a dry run
+answers: the templates are rendered, the recipients resolved, the addresses looked up. What
+is left untested is the transport.
+
+A whole deployment can be put into it instead, so the scheduled round-up rehearses nightly
+and sends nothing:
+
+```yaml
+cert-alert:
+  notifications:
+    email:
+      dry-run: true            # CERT_ALERT_EMAIL_DRY_RUN
+```
 
 #### Templates of your own
 
@@ -1334,7 +1407,7 @@ for.
 | `GET`  | `/api/v1/notifications/unread-count` | What the bell counts                    |
 | `POST` | `/api/v1/notifications/{id}/read`   | Mark one read                            |
 | `POST` | `/api/v1/notifications/read-all`    | Mark them all read                       |
-| `POST` | `/api/v1/notifications/digest`      | Run the expiry round-up now              |
+| `POST` | `/api/v1/notifications/digest`      | Run the expiry round-up now, `?dryRun=true` to rehearse it |
 | `GET`  | `/api/v1/notifications/settings`    | How far ahead the round-up looks         |
 | `PUT`  | `/api/v1/notifications/settings`    | Set it, `{"leadDays": 45}`               |
 | `GET`  | `/api/v1/users/{id}/addresses`      | Both lists of addresses                  |

@@ -117,6 +117,22 @@ public class NotificationProperties {
         private int maxPerRun = 500;
 
         /**
+         * Render every message and send none of them.
+         *
+         * <p>For the question nobody wants to answer by finding out: switching this on for
+         * the first time against a real directory, how many people hear from it, and does
+         * what they get read the way it was meant to? A round-up run this way reports who
+         * it would have written to and what the message says, and puts nothing in anybody's
+         * inbox.
+         *
+         * <p>The messages are built exactly as they would be otherwise - same templates,
+         * same model, same subject line - and dropped at the point the transport would have
+         * been handed one. A rendering mistake still surfaces here rather than in the first
+         * real run.
+         */
+        private boolean dryRun = false;
+
+        /**
          * A directory of email templates to use in place of the packaged ones.
          *
          * <p>The wording of these messages is a deployment's own - who signs them, what an
@@ -161,6 +177,14 @@ public class NotificationProperties {
 
         public void setMaxPerRun(int maxPerRun) {
             this.maxPerRun = maxPerRun;
+        }
+
+        public boolean isDryRun() {
+            return dryRun;
+        }
+
+        public void setDryRun(boolean dryRun) {
+            this.dryRun = dryRun;
         }
 
         public String getTemplateDirectory() {

@@ -145,6 +145,50 @@
             });
     }
 
+    /**
+     * What a dry run built. The plain-text half is shown because it is the one somebody can
+     * read at a glance and check the wording of; the HTML is what most clients will render,
+     * so it is offered beside it rather than instead.
+     */
+    function showDryRun(result) {
+        var $card = $('#dry-run-card');
+        var $body = $('#dry-run-messages');
+
+        if (!result.messages || result.messages.length === 0) {
+            $card.removeClass('d-none');
+            $('#dry-run-summary').text('');
+            $body.html('<p class="text-secondary mb-0">Nothing would be sent. '
+                + 'Either nothing is expiring inside the window, or the people it concerns '
+                + 'publish no address to write to.</p>');
+            return;
+        }
+
+        $('#dry-run-summary').text(result.messages.length < result.emailsSent
+            ? 'the first ' + result.messages.length + ' of ' + result.emailsSent
+            : result.messages.length + ' message(s)');
+
+        $body.html(result.messages.map(function (message, index) {
+            var id = 'dry-run-body-' + index;
+            return '<div class="mb-3 pb-3' + (index ? '' : '') + ' border-bottom">'
+                + '<div class="d-flex flex-wrap align-items-baseline gap-2 mb-2">'
+                + '<span class="badge bg-blue-lt">' + CertAlert.escapeHtml(message.to) + '</span>'
+                + '<strong>' + CertAlert.escapeHtml(message.subject) + '</strong>'
+                + '<button type="button" class="btn btn-sm ms-auto dry-run-toggle" data-target="' + id + '">'
+                + 'Show message</button>'
+                + '</div>'
+                + '<pre class="d-none bg-light text-body border rounded p-3 mb-0 small" id="' + id + '">'
+                + CertAlert.escapeHtml(message.text) + '</pre>'
+                + '</div>';
+        }).join(''));
+
+        $body.find('.dry-run-toggle').on('click', function () {
+            var $pre = $('#' + $(this).data('target')).toggleClass('d-none');
+            $(this).text($pre.hasClass('d-none') ? 'Show message' : 'Hide message');
+        });
+
+        $card.removeClass('d-none');
+    }
+
     function loadPage(page) {
         var $body = $('#notifications-body');
         $.getJSON('/api/v1/notifications', {page: page, size: 20})
@@ -203,6 +247,28 @@
                 loadPage(0);
                 refreshCount();
             });
+        });
+
+        $('#notifications-dry-run').on('click', function () {
+            var $button = $(this).prop('disabled', true);
+            $('#notifications-digest-status').text('Rehearsing…');
+            post('/api/v1/notifications/digest?dryRun=true')
+                .done(function (result) {
+                    $('#notifications-digest-status').text(
+                        result.certificates + ' expiring, ' + result.peopleTold + ' would be told, '
+                        + result.emailsSent + ' email(s) would be sent'
+                        + (result.emailEnabled ? '' : ' — once email is switched on'));
+                    showDryRun(result);
+                })
+                .fail(function (xhr) {
+                    if (CertAlert.handleUnauthorized(xhr)) {
+                        return;
+                    }
+                    $('#notifications-digest-status').text('The dry run failed; see the log.');
+                })
+                .always(function () {
+                    $button.prop('disabled', false);
+                });
         });
 
         $('#notifications-digest').on('click', function () {

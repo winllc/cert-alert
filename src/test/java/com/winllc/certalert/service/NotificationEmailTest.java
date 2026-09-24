@@ -203,6 +203,52 @@ class NotificationEmailTest {
                 .allSatisfy(notification -> assertThat(notification.getEmailedAt()).isNotNull());
     }
 
+    /**
+     * A rehearsal: every message built and none of them sent, nothing written down either.
+     * The question it answers - how many people would hear from this, and what would it say
+     * - is one to settle before a mail server is pointed at a directory, not after.
+     */
+    @Test
+    void aDryRunBuildsEveryMessageAndSendsNone() {
+        NotificationService.DigestResult result = notificationService.digest(true);
+
+        assertThat(result.dryRun()).isTrue();
+        assertThat(result.emailEnabled()).isTrue();
+        assertThat(mailSender.sent).as("nothing left the building").isEmpty();
+        assertThat(notifications.count()).as("and nothing was written down").isZero();
+
+        // Three messages to two people: Alice's own and Alice's server, plus the unclaimed
+        // address's server.
+        assertThat(result.peopleTold()).isEqualTo(2);
+        assertThat(result.emailsSent()).isEqualTo(3);
+        assertThat(result.messages()).hasSize(3);
+        assertThat(result.messages())
+                .extracting(NotificationMailer.Rendered::to)
+                .containsExactlyInAnyOrder("alice@example.gov", "alice@example.gov", "ops@example.gov");
+
+        NotificationMailer.Rendered own = result.messages().stream()
+                .filter(message -> message.subject().contains("your certificate"))
+                .findFirst()
+                .orElseThrow();
+        assertThat(own.subject()).isEqualTo("[cert-alert] 1 of your certificate(s) expiring soon");
+        assertThat(own.html()).contains("Hello Alice Archer,").contains("CN=alice@example.gov");
+        assertThat(own.text()).contains("CN=alice@example.gov").doesNotContain("<");
+    }
+
+    /** And a real run after one behaves as though the rehearsal never happened. */
+    @Test
+    void aRealRunAfterARehearsalStillSends() {
+        notificationService.digest(true);
+
+        NotificationService.DigestResult real = notificationService.digest();
+
+        assertThat(real.dryRun()).isFalse();
+        assertThat(real.messages()).isEmpty();
+        assertThat(mailSender.sent).hasSize(3);
+        assertThat(real.emailsSent()).isEqualTo(3);
+        assertThat(notifications.count()).as("one notification per person").isEqualTo(2);
+    }
+
     private List<MimeMessage> to(String address) {
         return mailSender.sent.stream()
                 .filter(message -> {

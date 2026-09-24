@@ -327,5 +327,58 @@
                     }
                 });
         });
+
+        loadRevocationStatus();
+        $('#revocation-run').on('click', runRevocation);
     });
+
+    /* --- revocation ------------------------------------------------------------------- */
+
+    /** What the last run found, so the button is not the only thing on the card. */
+    function loadRevocationStatus() {
+        if ($('#revocation-admin').length === 0) {
+            return;
+        }
+        $.getJSON('/api/v1/revocation')
+            .done(function (status) {
+                if (!status.enabled) {
+                    $('#revocation-status').text('Switched off in the configuration');
+                    $('#revocation-run').prop('disabled', true);
+                    return;
+                }
+                $('#revocation-status').text(
+                    status.revoked + ' revoked, ' + status.unknown + ' unanswered, '
+                    + status.notChecked + ' never asked'
+                    + (status.ocspPossible ? '' : ' · no issuer certificates, so CRL only'));
+            })
+            .fail(function () {
+                $('#revocation-status').text('Could not read the revocation counts');
+            });
+    }
+
+    function runRevocation() {
+        var $button = $('#revocation-run').prop('disabled', true);
+        $('#revocation-result').removeClass('text-danger')
+            .html('<span class="spinner-border spinner-border-sm me-2" role="status"></span>Asking the authorities…');
+
+        $.ajax({url: '/api/v1/revocation/check', type: 'POST'})
+            .done(function (result) {
+                $('#revocation-result').text(
+                    result.certificatesChecked + ' certificate(s) across ' + result.entries + ' entr'
+                    + (result.entries === 1 ? 'y' : 'ies') + ' · ' + result.revoked + ' revoked, '
+                    + result.unanswered + ' unanswered · ' + Math.round(result.durationMillis / 1000) + 's');
+                loadRevocationStatus();
+            })
+            .fail(function (xhr) {
+                if (CertAlert.handleUnauthorized(xhr)) {
+                    return;
+                }
+                $('#revocation-result')
+                    .text(problem(xhr, 'The revocation run failed; see the log.'))
+                    .addClass('text-danger');
+            })
+            .always(function () {
+                $button.prop('disabled', false);
+            });
+    }
 })(window, jQuery);

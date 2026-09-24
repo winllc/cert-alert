@@ -4,6 +4,7 @@ import com.winllc.certalert.alert.CertificateAlert;
 import com.winllc.certalert.config.NotificationProperties;
 import com.winllc.certalert.domain.AuditEvent;
 import com.winllc.certalert.domain.CachedCertificate;
+import com.winllc.certalert.domain.DirectoryEntry;
 import com.winllc.certalert.domain.DirectoryServer;
 import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.domain.Notification;
@@ -16,9 +17,12 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -46,6 +50,9 @@ public class NotificationService {
 
     /** A digest reads a page of certificates at a time; this is a bound, not a target. */
     private static final int DIGEST_SCAN_LIMIT = 10_000;
+
+    /** How many built messages a dry run hands back, so a large estate cannot return a book. */
+    private static final int DRY_RUN_PREVIEW_LIMIT = 25;
 
     private final NotificationRepository notifications;
     private final CachedCertificateRepository certificates;
@@ -190,9 +197,21 @@ public class NotificationService {
      */
     @Transactional
     public DigestResult digest() {
+        return digest(false);
+    }
+
+    /**
+     * @param dryRun build every message and send none, writing nothing down either - so the
+     *     question "who would hear from this, and what would it say" can be asked of a real
+     *     directory without anybody's inbox or the notifications page being the answer
+     */
+    @Transactional
+    public DigestResult digest(boolean dryRun) {
         NotificationProperties.Digest digestSettings = properties.getDigest();
+        // A run that found nothing still says which kind of run it was: a rehearsal
+        // reported as a real run reads as one that went out and sent nothing.
         if (!properties.isEnabled()) {
-            return DigestResult.NOTHING;
+            return DigestResult.nothing(dryRun, properties.getEmail().isEnabled());
         }
         Instant now = Instant.now(clock);
         // How far ahead to look is somebody's decision, made in the UI, and it may be
@@ -207,16 +226,27 @@ public class NotificationService {
                 certificates.findExpiringBetween(floor, horizon, PageRequest.of(0, DIGEST_SCAN_LIMIT));
         if (expiring.isEmpty()) {
             log.debug("Expiry digest: nothing expiring in the next {} day(s)", leadDays);
-            return DigestResult.NOTHING;
+            return DigestResult.nothing(dryRun, properties.getEmail().isEnabled());
         }
 
         // Grouped by who has to do something about it, rather than by what is expiring:
         // one person with eight expiring certificates should get one email, not eight.
         Map<String, Round> rounds = new LinkedHashMap<>();
+        // What each owner still depends on, worked out once per owner rather than per
+        // certificate: the entry is the same object for all of its own certificates.
+        Map<DirectoryEntry, Set<Long>> dependedOn = new IdentityHashMap<>();
+        int superseded = 0;
         for (CachedCertificate certificate : expiring) {
             OwnerType type = certificate.getUser() != null ? OwnerType.USER : OwnerType.SERVER;
             AuditEvent.SubjectRef subject = subjectOf(certificate);
             if (subject.id() == null) {
+                continue;
+            }
+            DirectoryEntry owner = certificate.getUser() != null ? certificate.getUser() : certificate.getServer();
+            if (owner != null
+                    && !dependedOn.computeIfAbsent(owner, this::stillDependedOn)
+                            .contains(certificate.getId())) {
+                superseded++;
                 continue;
             }
             for (NotificationRecipients.Recipient recipient : resolve(type, subject.id())) {
@@ -226,20 +256,66 @@ public class NotificationService {
         }
 
         int told = 0;
-        int emailed = 0;
-        mailer.beginRun();
+        mailer.beginRun(dryRun);
+        boolean rehearsing = mailer.isDryRun();
         for (Round round : rounds.values()) {
+            boolean went = mailer.send(round.recipient, round.entries);
+            told++;
+            if (rehearsing) {
+                // Nothing saved and nothing marked: a rehearsal that left notifications
+                // behind would be answering the question by doing the thing.
+                continue;
+            }
             Notification notification = round.toNotification(now);
             notifications.save(notification);
-            told++;
-            if (mailer.send(round.recipient, round.entries)) {
+            if (went) {
                 notification.markEmailed(now);
-                emailed++;
             }
         }
-        log.info("Expiry digest: {} certificate(s) expiring in the next {} day(s), {} person(s) told, {} emailed",
-                expiring.size(), leadDays, told, emailed);
-        return new DigestResult(expiring.size(), told, emailed);
+        // Asked of the mailer rather than counted here: one person can be owed two messages,
+        // and "how many emails" is a question about messages.
+        int emailed = mailer.sent();
+        int reported = expiring.size() - superseded;
+        log.info("Expiry digest{}: {} certificate(s) expiring in the next {} day(s), {} already replaced, "
+                        + "{} person(s) told, {} message(s) emailed",
+                rehearsing ? " (dry run)" : "", expiring.size(), leadDays, superseded, told, emailed);
+        if (rehearsing) {
+            List<NotificationMailer.Rendered> built = mailer.rendered();
+            return new DigestResult(reported, told, emailed, true, properties.getEmail().isEnabled(),
+                    built.size() > DRY_RUN_PREVIEW_LIMIT ? built.subList(0, DRY_RUN_PREVIEW_LIMIT) : built);
+        }
+        return DigestResult.sent(reported, told, emailed, properties.getEmail().isEnabled());
+    }
+
+    /**
+     * The certificates an entry is still relying on, by id.
+     *
+     * <p>Two things have to be true of a certificate before anybody is written to about it,
+     * and they answer different questions.
+     *
+     * <p>{@link DirectoryEntry#standingCertificates()} says what the entry's own state is
+     * based on. It is what the tables show, so a server reading VALID because it publishes
+     * a good certificate does not also generate mail about the one beside it; the page and
+     * the message agree, which they would not if this asked a question of its own.
+     *
+     * <p>{@link Renewals} says whether a certificate has been <em>replaced</em> - the same
+     * subject, published again and still live. That is what stops the round-up going on
+     * about a certificate somebody has already dealt with, which is how a round-up teaches
+     * people to ignore it. Note that it is not "the newest one wins": an entry holding two
+     * certificates for different names holds both because it needs both.
+     */
+    private Set<Long> stillDependedOn(DirectoryEntry entry) {
+        List<CachedCertificate> held = entry.getCertificates();
+        Set<Long> ids = new HashSet<>();
+        for (CachedCertificate certificate : entry.standingCertificates()) {
+            if (certificate.getId() == null) {
+                continue;
+            }
+            if (!Renewals.replaced(certificate, held)) {
+                ids.add(certificate.getId());
+            }
+        }
+        return ids;
     }
 
     /** Removes notifications that have been read and gone stale, when asked to. */
@@ -256,9 +332,36 @@ public class NotificationService {
         return removed;
     }
 
-    /** What one run of the digest did. */
-    public record DigestResult(int certificates, int peopleTold, int emailsSent) {
-        static final DigestResult NOTHING = new DigestResult(0, 0, 0);
+    /**
+     * What one run of the digest did.
+     *
+     * @param certificates how many expiring certificates were reported, replaced ones aside
+     * @param peopleTold how many recipients were written to
+     * @param emailsSent how many messages went out - more than {@code peopleTold} where
+     *     somebody is owed one message about their own certificates and another about the
+     *     servers they look after
+     * @param dryRun whether this was a rehearsal, in which case nothing was sent or saved
+     * @param emailEnabled whether email is switched on - a rehearsal builds its messages
+     *     either way, and this is what stops "3 would be sent" being read as "and they will"
+     * @param messages on a rehearsal, the messages as they would have gone out
+     */
+    public record DigestResult(
+            int certificates,
+            int peopleTold,
+            int emailsSent,
+            boolean dryRun,
+            boolean emailEnabled,
+            List<NotificationMailer.Rendered> messages) {
+
+        /** A run with nothing to do, which is still a run of one kind or the other. */
+        static DigestResult nothing(boolean dryRun, boolean emailEnabled) {
+            return new DigestResult(0, 0, 0, dryRun, emailEnabled, List.of());
+        }
+
+        /** A run that sent: {@code emailsSent} is what went out, and nothing was rendered aside. */
+        static DigestResult sent(int certificates, int peopleTold, int emailsSent, boolean emailEnabled) {
+            return new DigestResult(certificates, peopleTold, emailsSent, false, emailEnabled, List.of());
+        }
     }
 
     private List<NotificationRecipients.Recipient> resolve(OwnerType type, Long ownerId) {
