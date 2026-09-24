@@ -102,7 +102,7 @@ class NotificationSupersessionTest {
 
         List<Notification> theirs = addressedTo("paired@example.gov");
         assertThat(theirs).hasSize(1);
-        assertThat(theirs.getFirst().getMessage()).contains("2 certificate(s) expiring");
+        assertThat(theirs.getFirst().getMessage()).contains("2 credential(s) expiring");
     }
 
     /**
@@ -136,7 +136,10 @@ class NotificationSupersessionTest {
 
         List<Notification> theirs = addressedTo("holder@example.gov");
         assertThat(theirs).hasSize(1);
-        assertThat(theirs.getFirst().getMessage()).contains("2 certificate(s) expiring");
+        // One credential, named as the pair it is: two certificates, one thing to do.
+        assertThat(theirs.getFirst().getMessage())
+                .contains("1 credential(s) expiring")
+                .contains("(signing and encryption)");
     }
 
     /** And renewing one half replaces that half, and only that half. */
@@ -169,7 +172,9 @@ class NotificationSupersessionTest {
         assertThat(theirs).hasSize(1);
         // The encryption half only: the signing half has been renewed and is nobody's
         // problem, and saying "2" here would be the noise the whole rule exists to stop.
-        assertThat(theirs.getFirst().getMessage()).contains("1 certificate(s) expiring");
+        assertThat(theirs.getFirst().getMessage())
+                .contains("1 credential(s) expiring")
+                .doesNotContain("(signing and encryption)");
     }
 
     /**

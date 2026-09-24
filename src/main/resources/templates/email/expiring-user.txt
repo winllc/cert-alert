@@ -2,15 +2,17 @@
 
 [(${digest.headline})].
 
-The directory publishes these certificates against your entry. Renew them and publish the
-new certificate, and they will drop off this list.
+The directory publishes these against your entry. Renew them and publish the new
+certificates, and they will drop off this list.
 [# th:each="entry : ${digest.entries}"]
   * [(${entry.subjectDn})]
     Issued to [(${entry.ownerName})] ([(${entry.ownerDn})])
-    [# th:if="${entry.expired}"]Expired [(${entry.daysAbsolute})] day(s) ago, on [(${entry.day})][/][# th:unless="${entry.expired}"]Expires in [(${entry.days})] day(s), on [(${entry.day})][/]
+[# th:if="${entry.useSummary}"]    [(${entry.useSummary})][# th:if="${entry.pair}"] - 2 certificates, issued together and renewed together (serials [(${#strings.listJoin(entry.serialNumbers, ', ')})])[/]
+[/]    [# th:if="${entry.expired}"]Expired [(${entry.daysAbsolute})] day(s) ago, on [(${entry.day})][/][# th:unless="${entry.expired}"]Expires in [(${entry.days})] day(s), on [(${entry.day})][/]
     [(${entry.keyDescription})][# th:if="${entry.hashAlgorithm}"] / [(${entry.hashAlgorithm})][/], issued by [(${entry.issuerDn})]
 [/]
-You are receiving this because these certificates were issued to you.
+You are receiving this because these were issued to you. Where a line covers a pair, both
+halves expire together and both have to be renewed.
 
 This is the daily round-up from cert-alert. It reports what the directory publishes: a
 certificate stops appearing here once the renewed one is published in its place.

@@ -56,9 +56,20 @@
         </td>
         <td valign="top" style="padding:10px;border-bottom:1px solid #eceff2;">
             <div style="color:#1a2530;word-wrap:break-word;overflow-wrap:anywhere;" th:text="${entry.subjectDn}">CN=alice@example.gov</div>
+            <!--/* What this one line covers. A person's pair is one credential and one
+                   renewal, so it is one row - but it is two certificates to replace, and
+                   the row has to say so or it reads as half the job. */-->
+            <div th:if="${entry.useSummary}" style="color:#5a6672;font-size:12px;"
+                 th:text="${entry.useSummary} + (${entry.pair} ? ' (2 certificates, renewed together)' : '')">
+                Signing and encryption
+            </div>
             <div style="color:#7b8794;font-size:12px;">
                 <span th:text="${entry.keyDescription}">RSA 2048</span>
                 <span th:if="${entry.hashAlgorithm}" th:text="'/ ' + ${entry.hashAlgorithm}">/ SHA-256</span>
+            </div>
+            <div th:if="${entry.pair}" style="color:#7b8794;font-size:12px;word-wrap:break-word;overflow-wrap:anywhere;"
+                 th:text="'Serials ' + ${#strings.listJoin(entry.serialNumbers, ', ')}">
+                Serials 65, 66
             </div>
             <div style="color:#7b8794;font-size:12px;word-wrap:break-word;overflow-wrap:anywhere;"
                  th:text="'Issued by ' + ${entry.issuerDn}">Issued by CN=Example CA

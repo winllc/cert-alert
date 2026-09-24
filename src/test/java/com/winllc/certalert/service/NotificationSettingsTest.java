@@ -125,14 +125,14 @@ class NotificationSettingsTest {
     void theRoundUpLooksAsFarAheadAsItIsTold() {
         notificationService.digest();
         assertThat(messagesFor(userId)).singleElement().satisfies(message ->
-                assertThat(message).contains("1 certificate(s) expiring").contains("CN=soon"));
+                assertThat(message).contains("1 credential(s) expiring").contains("CN=soon"));
 
         notifications.deleteAll();
         settingsService.update(60, "alice");
         notificationService.digest();
 
         assertThat(messagesFor(userId)).singleElement().satisfies(message ->
-                assertThat(message).contains("2 certificate(s) expiring").contains("across 2"));
+                assertThat(message).contains("2 credential(s) expiring").contains("for Cert Holder"));
 
         notifications.deleteAll();
         settingsService.update(2, "alice");

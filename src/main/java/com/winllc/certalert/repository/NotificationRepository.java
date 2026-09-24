@@ -45,6 +45,29 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
             com.winllc.certalert.domain.NotificationKind kind,
             Instant after);
 
+    /**
+     * The same question asked of a whole credential rather than one certificate.
+     *
+     * <p>A person's signing and key encipherment certificates cross into a bad state within
+     * moments of each other, because they were issued within moments of each other. Asked
+     * one certificate at a time, that is two notifications saying the same thing; asked of
+     * both fingerprints at once, it is one.
+     */
+    boolean existsByRecipientUserIdAndCertificateFingerprintInAndSeverityAndKindAndCreatedAtAfter(
+            Long recipientUserId,
+            java.util.Collection<String> certificateFingerprints,
+            com.winllc.certalert.domain.Severity severity,
+            com.winllc.certalert.domain.NotificationKind kind,
+            Instant after);
+
+    /** The same for a recipient who is only an address. */
+    boolean existsByRecipientAddressAndCertificateFingerprintInAndSeverityAndKindAndCreatedAtAfter(
+            String recipientAddress,
+            java.util.Collection<String> certificateFingerprints,
+            com.winllc.certalert.domain.Severity severity,
+            com.winllc.certalert.domain.NotificationKind kind,
+            Instant after);
+
     @Modifying
     @Query("delete from Notification n where n.createdAt < :cutoff and n.readAt is not null")
     int deleteReadBefore(@Param("cutoff") Instant cutoff);

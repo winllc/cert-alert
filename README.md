@@ -1129,6 +1129,25 @@ The alert channels (`cert-alert.alerts.*`) are a different thing again: they tel
 list of operators about every alert as it happens. The round-up writes to the person who
 has to renew the certificate.
 
+**A person's pair is one notification.** PKI for people issues two certificates at a time —
+one that signs, one that is encrypted to — to the same name, within moments of each other.
+They expire within moments of each other too, and renewing means replacing both. So the
+round-up counts credentials rather than certificates: the pair is one line, with one date and
+both serial numbers on it, and a person who holds a pair and looks after a server has two
+things to do rather than three. The transition alerts do the same — both halves crossing into
+a bad state is one notification, not two that differ only in serial number.
+
+Two certificates are one credential when they carry the same subject, one signs and the other
+is encrypted to, and they were issued within `cert-alert.credentials.pair-window` of each
+other (a week by default) — which is the question "was this one renewal or two" with some
+slack on it. Anything else stands alone: a server's certificate does both jobs and is a
+credential by itself, and so is a half whose partner was never published. Where a pair
+straddles two issuances — one half renewed, one not — the renewed half drops off and the
+other is still reported, which is exactly the case worth hearing about.
+
+The date on the line is the **sooner** of the two. A pair is only as good as its first half to
+lapse: renewing one and not the other leaves somebody able to sign and not to read.
+
 Recipients are resolved through everything this application knows about who is responsible:
 a person's own certificate is theirs, and a server's is its points of contact's — the
 directory's `serverPOC` values resolved to people, which now includes group addresses, plus

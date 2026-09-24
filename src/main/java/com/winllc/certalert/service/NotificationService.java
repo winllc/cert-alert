@@ -1,6 +1,7 @@
 package com.winllc.certalert.service;
 
 import com.winllc.certalert.alert.CertificateAlert;
+import com.winllc.certalert.config.CredentialProperties;
 import com.winllc.certalert.config.NotificationProperties;
 import com.winllc.certalert.domain.AuditEvent;
 import com.winllc.certalert.domain.CachedCertificate;
@@ -22,6 +23,7 @@ import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,6 +62,7 @@ public class NotificationService {
     private final NotificationMailer mailer;
     private final NotificationSettingsService settings;
     private final NotificationProperties properties;
+    private final CredentialProperties credentialProperties;
     private final Clock clock;
 
     public NotificationService(
@@ -69,6 +72,7 @@ public class NotificationService {
             NotificationMailer mailer,
             NotificationSettingsService settings,
             NotificationProperties properties,
+            CredentialProperties credentialProperties,
             Clock clock) {
         this.notifications = notifications;
         this.certificates = certificates;
@@ -76,6 +80,7 @@ public class NotificationService {
         this.mailer = mailer;
         this.settings = settings;
         this.properties = properties;
+        this.credentialProperties = credentialProperties;
         this.clock = clock;
     }
 
@@ -124,9 +129,14 @@ public class NotificationService {
         AuditEvent.SubjectRef subject =
                 new AuditEvent.SubjectRef(alert.ownerType(), alert.ownerId(), alert.ownerDn(), alert.ownerName());
 
+        // A person's pair crosses into a bad state together, because it was issued together.
+        // Asked about the whole credential, the second half finds the first half's
+        // notification already there and adds nothing.
+        List<String> credential = credentialFingerprintsOf(alert);
+
         List<Notification> created = new ArrayList<>();
         for (NotificationRecipients.Recipient recipient : resolve(alert.ownerType(), alert.ownerId())) {
-            if (alreadyTold(recipient, alert.certificateFingerprint(), alert.severity(),
+            if (alreadyTold(recipient, credential, alert.severity(),
                     NotificationKind.CERTIFICATE_STATUS, since)) {
                 continue;
             }
@@ -236,6 +246,14 @@ public class NotificationService {
         // certificate: the entry is the same object for all of its own certificates.
         Map<DirectoryEntry, Set<Long>> dependedOn = new IdentityHashMap<>();
         int superseded = 0;
+
+        // Held per entry before anything is reported, because a person's signing and key
+        // encipherment certificates are one credential and have to be seen together to be
+        // recognised as one. The order they arrived in - soonest to expire first - is kept.
+        Map<Long, List<CachedCertificate>> byEntry = new LinkedHashMap<>();
+        Map<Long, AuditEvent.SubjectRef> subjects = new LinkedHashMap<>();
+        Map<Long, OwnerType> types = new LinkedHashMap<>();
+
         for (CachedCertificate certificate : expiring) {
             OwnerType type = certificate.getUser() != null ? OwnerType.USER : OwnerType.SERVER;
             AuditEvent.SubjectRef subject = subjectOf(certificate);
@@ -249,9 +267,24 @@ public class NotificationService {
                 superseded++;
                 continue;
             }
-            for (NotificationRecipients.Recipient recipient : resolve(type, subject.id())) {
-                rounds.computeIfAbsent(keyOf(recipient), key -> new Round(recipient))
-                        .add(certificate, subject, type, now);
+            // Users and servers cannot collide: an id is unique within its own table, and
+            // this key carries which table it came from.
+            long key = type == OwnerType.USER ? subject.id() : -subject.id();
+            byEntry.computeIfAbsent(key, id -> new ArrayList<>()).add(certificate);
+            subjects.putIfAbsent(key, subject);
+            types.putIfAbsent(key, type);
+        }
+
+        int credentials = 0;
+        for (Map.Entry<Long, List<CachedCertificate>> owned : byEntry.entrySet()) {
+            AuditEvent.SubjectRef subject = subjects.get(owned.getKey());
+            OwnerType type = types.get(owned.getKey());
+            for (Credential credential : Credential.group(owned.getValue(), credentialProperties.getPairWindow())) {
+                credentials++;
+                for (NotificationRecipients.Recipient recipient : resolve(type, subject.id())) {
+                    rounds.computeIfAbsent(keyOf(recipient), key -> new Round(recipient))
+                            .add(credential, subject, type, now);
+                }
             }
         }
 
@@ -364,6 +397,34 @@ public class NotificationService {
         return ids;
     }
 
+    /**
+     * Every certificate of the credential this alert is about, by fingerprint.
+     *
+     * <p>Just the one for a server: its certificate signs and is encrypted to, so it is a
+     * whole credential by itself. For a person it is the pair, which is the point - the two
+     * halves are issued together, expire together and are renewed together, so being told
+     * about them twice is being told the same thing twice.
+     */
+    private List<String> credentialFingerprintsOf(CertificateAlert alert) {
+        String fingerprint = alert.certificateFingerprint();
+        if (fingerprint == null) {
+            return List.of();
+        }
+        if (alert.ownerType() != OwnerType.USER || alert.ownerId() == null) {
+            return List.of(fingerprint);
+        }
+        List<CachedCertificate> held = certificates.findForUsers(List.of(alert.ownerId()));
+        return Credential.group(held, credentialProperties.getPairWindow()).stream()
+                .filter(credential -> credential.certificates().stream()
+                        .anyMatch(certificate -> fingerprint.equals(certificate.getSha256Fingerprint())))
+                .findFirst()
+                .map(credential -> credential.certificates().stream()
+                        .map(CachedCertificate::getSha256Fingerprint)
+                        .filter(Objects::nonNull)
+                        .toList())
+                .orElse(List.of(fingerprint));
+    }
+
     /** Removes notifications that have been read and gone stale, when asked to. */
     @Transactional
     public int trim() {
@@ -427,15 +488,26 @@ public class NotificationService {
             NotificationKind kind,
             Instant since) {
 
-        if (fingerprint == null) {
+        return fingerprint != null && alreadyTold(recipient, List.of(fingerprint), severity, kind, since);
+    }
+
+    /** The same question about every certificate of one credential: told about any is told. */
+    private boolean alreadyTold(
+            NotificationRecipients.Recipient recipient,
+            List<String> fingerprints,
+            Severity severity,
+            NotificationKind kind,
+            Instant since) {
+
+        if (fingerprints.isEmpty()) {
             return false;
         }
         if (recipient.userId() != null) {
-            return notifications.existsByRecipientUserIdAndCertificateFingerprintAndSeverityAndKindAndCreatedAtAfter(
-                    recipient.userId(), fingerprint, severity, kind, since);
+            return notifications.existsByRecipientUserIdAndCertificateFingerprintInAndSeverityAndKindAndCreatedAtAfter(
+                    recipient.userId(), fingerprints, severity, kind, since);
         }
-        return notifications.existsByRecipientAddressAndCertificateFingerprintAndSeverityAndKindAndCreatedAtAfter(
-                recipient.address(), fingerprint, severity, kind, since);
+        return notifications.existsByRecipientAddressAndCertificateFingerprintInAndSeverityAndKindAndCreatedAtAfter(
+                recipient.address(), fingerprints, severity, kind, since);
     }
 
     private static String keyOf(NotificationRecipients.Recipient recipient) {
@@ -467,9 +539,9 @@ public class NotificationService {
         }
 
         private void add(
-                CachedCertificate certificate, AuditEvent.SubjectRef subject, OwnerType ownerType, Instant now) {
+                Credential credential, AuditEvent.SubjectRef subject, OwnerType ownerType, Instant now) {
 
-            ExpiryDigest.Entry entry = ExpiryDigest.Entry.of(certificate, subject, ownerType, now);
+            ExpiryDigest.Entry entry = ExpiryDigest.Entry.of(credential, subject, ownerType, now);
             if (entry.isExpired()) {
                 expired++;
                 severity = Severity.CRITICAL;
@@ -483,11 +555,19 @@ public class NotificationService {
         }
 
         private Notification toNotification(Instant now) {
-            String message = "%s %s".formatted(
-                    summary(),
-                    entries.size() == 1
-                            ? "(" + entries.getFirst().getSummary() + ")"
-                            : "across " + entries.size() + " certificate(s)");
+            // One of them is named outright. Several on one entry name the entry; several
+            // across the directory are counted by how many entries they are on. Repeating
+            // the same number twice - "2 expiring across 2" - tells nobody anything.
+            long named = entries.stream().map(ExpiryDigest.Entry::getOwnerDn).distinct().count();
+            String where;
+            if (entries.size() == 1) {
+                where = "(" + entries.getFirst().getSummary() + ")";
+            } else if (named == 1) {
+                where = "for " + entries.getFirst().getOwnerName();
+            } else {
+                where = "across " + named + " directory entries";
+            }
+            String message = "%s %s".formatted(summary(), where);
             return new Notification(
                     recipient.userId(),
                     recipient.address(),
@@ -501,13 +581,18 @@ public class NotificationService {
                     now);
         }
 
+        /**
+         * What the page says. Counted in credentials, since that is what somebody has to
+         * do something about: a person's pair is one of them, and two lines with two
+         * serial numbers describing one renewal is the noise this avoids.
+         */
         private String summary() {
             if (expired > 0 && expiring > 0) {
-                return "%d certificate(s) expired and %d expiring".formatted(expired, expiring);
+                return "%d credential(s) expired and %d expiring".formatted(expired, expiring);
             }
             return expired > 0
-                    ? "%d certificate(s) expired".formatted(expired)
-                    : "%d certificate(s) expiring".formatted(expiring);
+                    ? "%d credential(s) expired".formatted(expired)
+                    : "%d credential(s) expiring".formatted(expiring);
         }
 
         private static String truncate(String message) {

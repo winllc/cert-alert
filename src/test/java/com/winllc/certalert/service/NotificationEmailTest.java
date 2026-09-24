@@ -126,7 +126,7 @@ class NotificationEmailTest {
 
         String ownSubject = subject(hers.getFirst());
         String serverSubject = subject(hers.get(1));
-        assertThat(ownSubject).isEqualTo("[cert-alert] 1 of your certificate(s) expiring soon");
+        assertThat(ownSubject).isEqualTo("[cert-alert] 1 of your credential(s) expiring soon");
         assertThat(serverSubject).isEqualTo("[cert-alert] 1 server certificate(s) expired");
 
         String own = html(hers.getFirst());
@@ -159,7 +159,7 @@ class NotificationEmailTest {
 
         assertThat(text)
                 .contains("Hello Alice Archer,")
-                .contains("1 of your certificate(s) expiring soon")
+                .contains("1 of your credential(s) expiring soon")
                 .contains("CN=alice@example.gov")
                 .contains("Expires in 5 day(s), on")
                 .contains("RSA 2048 / SHA-256")
@@ -227,10 +227,10 @@ class NotificationEmailTest {
                 .containsExactlyInAnyOrder("alice@example.gov", "alice@example.gov", "ops@example.gov");
 
         NotificationMailer.Rendered own = result.messages().stream()
-                .filter(message -> message.subject().contains("your certificate"))
+                .filter(message -> message.subject().contains("your credential"))
                 .findFirst()
                 .orElseThrow();
-        assertThat(own.subject()).isEqualTo("[cert-alert] 1 of your certificate(s) expiring soon");
+        assertThat(own.subject()).isEqualTo("[cert-alert] 1 of your credential(s) expiring soon");
         assertThat(own.html()).contains("Hello Alice Archer,").contains("CN=alice@example.gov");
         assertThat(own.text()).contains("CN=alice@example.gov").doesNotContain("<");
     }

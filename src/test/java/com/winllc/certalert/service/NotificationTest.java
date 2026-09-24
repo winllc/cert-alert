@@ -216,7 +216,7 @@ class NotificationTest {
                 .getContent();
         assertThat(mine).hasSize(1);
         assertThat(mine.getFirst().getKind()).isEqualTo(NotificationKind.EXPIRY_DIGEST);
-        assertThat(mine.getFirst().getMessage()).contains("1 certificate(s) expiring").contains("Di Gested");
+        assertThat(mine.getFirst().getMessage()).contains("1 credential(s) expiring").contains("Di Gested");
         // Email is off in the tests, so nothing claims to have been sent.
         assertThat(mine.getFirst().getEmailedAt()).isNull();
     }
@@ -243,7 +243,9 @@ class NotificationTest {
                 .getContent();
         // One message, listing all three, rather than one message per certificate.
         assertThat(mine).hasSize(1);
-        assertThat(mine.getFirst().getMessage()).contains("3 certificate(s) expiring").contains("across 3");
+        assertThat(mine.getFirst().getMessage())
+                .contains("3 credential(s) expiring")
+                .contains("across 2 directory entries");
     }
 
     /**
