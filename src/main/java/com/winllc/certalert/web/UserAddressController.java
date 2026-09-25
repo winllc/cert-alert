@@ -82,7 +82,14 @@ public class UserAddressController {
         aliasService.remove(id, aliasId);
     }
 
-    /** The five the directory may publish, in the order the mapping reads them. */
+    /**
+     * What the directory publishes: the five the schema defines, in the order the mapping
+     * reads them, then anything from the attributes this deployment named for itself.
+     *
+     * <p>Those last ones are indexed like any other address a person answers to, so a
+     * {@code serverPOC} written with one binds that server to them - and a page that did
+     * not show them would leave somebody unable to see why.
+     */
     private List<String> published(DirectoryUser user) {
         Set<String> addresses = new LinkedHashSet<>();
         for (String address : new String[] {
@@ -93,6 +100,7 @@ public class UserAddressController {
                 addresses.add(address);
             }
         }
+        addresses.addAll(user.getAdditionalEmails());
         return new ArrayList<>(addresses);
     }
 

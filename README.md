@@ -670,8 +670,37 @@ to show the join landing on the same person either way, so both set it `false`.
 
 ### Addresses a person answers to
 
-The directory publishes up to five addresses per person and all five are indexed. A
-server's `serverPOC`, though, is written by whoever runs the server, and they write what
+The directory publishes up to five addresses per person — `mail`, `icEmail`,
+`internetEmail`, `niprnetEmail`, `siprnetEmail` — and all five are indexed. Those are the
+ones the IC FSD schema defines, and a real directory usually carries more: an agency's own
+`alternateMail`, a mail-system attribute that predates the schema, a team address kept on
+the person who owns it. Name them and they are read too:
+
+```yaml
+cert-alert:
+  ldap:
+    user:
+      additional-email-attributes: [alternateMail, legacyMail]
+```
+
+An address found in one is indexed like any other the person answers to, so a `serverPOC`
+written with it resolves to them and they hear about that server's certificates. Values are
+read whole and split on commas — an attribute can hold several values, and a directory
+filled in through a form often holds several addresses inside one of them. Anything that is
+not an address is dropped and logged against the entry it came from: these attributes are
+declared as places addresses live, so a display name in one is bad data rather than a second
+kind of value, and indexing it would widen what a `serverPOC` matches to something nothing
+can be sent to.
+
+Naming one of them in `email-precedence` makes it the primary address, the one the tables
+show. They are held on the entry rather than folded straight into the identifier set,
+because that set is rebuilt from what the entry holds — by a sweep, and again whenever
+somebody edits the addresses added here — and anything only the directory knows has to
+survive the second of those. They appear under *Addresses this person answers to* on their
+page; the *Addresses* card above it lists the five schema attributes by name, since only
+those have a column of their own.
+
+A server's `serverPOC`, though, is written by whoever runs the server, and they write what
 they use: an old address, a role address, or the team's distribution list. A server named
 after a list has no contact at all as far as the directory is concerned.
 

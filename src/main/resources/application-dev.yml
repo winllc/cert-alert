@@ -50,6 +50,9 @@ cert-alert:
       enabled: false
     user:
       search-base: ou=people
+      # The sample holds one person's team address in an attribute outside the schema,
+      # which is what a real directory does with the ones it had before the schema.
+      additional-email-attributes: [alternateMail]
     server:
       search-base: ou=servers
       # The sample directory writes serverPOC both ways round - as an address and as a

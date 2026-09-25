@@ -133,6 +133,25 @@ public class DirectoryUser extends DirectoryEntry {
     @Column(name = "identifier", length = 320, nullable = false)
     private Set<String> identifiers = new LinkedHashSet<>();
 
+    /**
+     * Addresses read out of the attributes a deployment named beyond the schema's five.
+     *
+     * <p>Held rather than folded straight into {@link #identifiers} because that set is
+     * rebuilt from what this entry holds - by a sweep, and again whenever somebody edits
+     * the addresses added here. Anything only the directory knows has to survive the second
+     * of those, or an alias being added would quietly drop it until the next sweep.
+     */
+    @BatchSize(size = 200)
+    @ElementCollection(fetch = FetchType.LAZY)
+    @CollectionTable(
+            name = "directory_user_email",
+            joinColumns = @JoinColumn(
+                    name = "user_id",
+                    foreignKey = @ForeignKey(name = "fk_user_email_user")),
+            indexes = @Index(name = "idx_user_email_value", columnList = "address"))
+    @Column(name = "address", length = 320, nullable = false)
+    private Set<String> additionalEmails = new LinkedHashSet<>();
+
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<CachedCertificate> certificates = new ArrayList<>();
 
@@ -184,6 +203,12 @@ public class DirectoryUser extends DirectoryEntry {
                 .map(DirectoryUser::normalise)
                 .filter(java.util.Objects::nonNull)
                 .forEach(refreshed::add);
+        // The attributes this deployment named beyond the schema's five. Read from the
+        // entry rather than passed in, so rebuilding after an alias edit keeps them.
+        additionalEmails.stream()
+                .map(DirectoryUser::normalise)
+                .filter(java.util.Objects::nonNull)
+                .forEach(refreshed::add);
         if (aliases != null) {
             aliases.stream()
                     .map(DirectoryUser::normalise)
@@ -208,6 +233,36 @@ public class DirectoryUser extends DirectoryEntry {
 
     public Set<String> getIdentifiers() {
         return identifiers;
+    }
+
+    /** Addresses from the extra attributes this deployment reads, lowercased. */
+    public Set<String> getAdditionalEmails() {
+        return additionalEmails;
+    }
+
+    /**
+     * Replaces them, and says whether anything changed.
+     *
+     * <p>In place rather than by swapping the set: Hibernate tracks this collection, and a
+     * new instance would delete and re-insert every row on every sweep of the directory.
+     *
+     * @return whether the set now holds something different, so a sweep can tell an entry
+     *     that has changed from one it has merely looked at again
+     */
+    public boolean setAdditionalEmails(Collection<String> addresses) {
+        Set<String> refreshed = new LinkedHashSet<>();
+        if (addresses != null) {
+            addresses.stream()
+                    .map(DirectoryUser::normalise)
+                    .filter(java.util.Objects::nonNull)
+                    .forEach(refreshed::add);
+        }
+        if (refreshed.equals(this.additionalEmails)) {
+            return false;
+        }
+        this.additionalEmails.clear();
+        this.additionalEmails.addAll(refreshed);
+        return true;
     }
 
     public String getUid() {

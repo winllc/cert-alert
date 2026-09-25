@@ -229,6 +229,8 @@ public class DirectoryPersistenceService {
         user.setResourceSecurityMark(entry.get(UserField.RESOURCE_SECURITY_MARK));
         user.setOrganization(entry.get(UserField.ORGANIZATION));
         user.setOrganizationalUnit(entry.get(UserField.ORGANIZATIONAL_UNIT));
+        // Before the identifiers are rebuilt, because they are rebuilt from these.
+        user.setAdditionalEmails(entry.allExtraEmails());
         user.refreshIdentifiers(primaryEmail(entry), aliases);
     }
 
@@ -313,6 +315,11 @@ public class DirectoryPersistenceService {
     /**
      * Picks the address shown as primary. A person may hold four network addresses at
      * once, so which one leads is a policy decision, not a fact about the entry.
+     *
+     * <p>A name in the precedence list is either one of the schema's fields or one of the
+     * attributes this deployment named for itself - a deployment that reads addresses out
+     * of its own attribute usually means that one to lead, and having to keep a second
+     * setting in step to say so would be a way of getting it wrong.
      */
     private String primaryEmail(LdapUserEntry entry) {
         for (String name : ldapProperties.getUser().getEmailPrecedence()) {
@@ -322,6 +329,11 @@ public class DirectoryPersistenceService {
                 if (value != null && !value.isBlank()) {
                     return value;
                 }
+                continue;
+            }
+            List<String> extra = entry.extraEmails(name);
+            if (!extra.isEmpty()) {
+                return extra.getFirst();
             }
         }
         return null;

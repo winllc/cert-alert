@@ -15,6 +15,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * An in-memory LDAP server holding IC FSD shaped entries.
@@ -174,6 +175,20 @@ public final class EmbeddedDirectory implements AutoCloseable {
         if (certificates.length > 0) {
             entry.addAttribute(new Attribute("userCertificate", certificates));
         }
+        add(entry);
+        return "uid=" + uid + "," + PEOPLE_DN;
+    }
+
+    /**
+     * Adds an IC Person carrying attributes beyond the schema's, for the deployments that
+     * keep addresses in one of their own. No schema is loaded here, so an attribute nothing
+     * has heard of is accepted exactly as a real directory with its own schema would.
+     */
+    public String addUserWithExtraAttributes(
+            String uid, String displayName, String icEmail, Map<String, List<String>> extra) {
+
+        Entry entry = userEntry(uid, displayName, icEmail);
+        extra.forEach((name, values) -> entry.addAttribute(new Attribute(name, values)));
         add(entry);
         return "uid=" + uid + "," + PEOPLE_DN;
     }

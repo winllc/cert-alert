@@ -348,6 +348,26 @@ public class LdapProperties {
          */
         private List<String> emailPrecedence = List.of("icEmail", "mail", "internetEmail", "siprnetEmail", "niprnetEmail");
 
+        /**
+         * Further attributes to read addresses out of, named as the directory names them.
+         *
+         * <p>The five above are the ones the IC FSD schema defines, and a real directory
+         * usually carries more: an agency's own {@code alternateMail}, a mail-system
+         * attribute that predates the schema, a team address on the person who owns it. An
+         * address here is indexed like any other the person answers to, so a
+         * {@code serverPOC} written with it resolves to them and they hear about that
+         * server's certificates.
+         *
+         * <p>Multi-valued attributes are read whole, and a value holding several addresses
+         * separated by commas is split - both of which a directory filled in through a form
+         * does. Anything that is not an address is dropped and logged with the entry it came
+         * from: these attributes are declared as places addresses live, so a name in one is
+         * bad data rather than a second kind of value to guess at.
+         *
+         * <p>Naming one here in {@code email-precedence} makes it the primary address.
+         */
+        private List<String> additionalEmailAttributes = List.of();
+
         /** IC FSD: inetOrgPerson uid. */
         private String uid = "uid";
 
@@ -649,6 +669,15 @@ public class LdapProperties {
 
         public void setEmailPrecedence(List<String> emailPrecedence) {
             this.emailPrecedence = emailPrecedence;
+        }
+
+        public List<String> getAdditionalEmailAttributes() {
+            return additionalEmailAttributes;
+        }
+
+        public void setAdditionalEmailAttributes(List<String> additionalEmailAttributes) {
+            this.additionalEmailAttributes =
+                    additionalEmailAttributes == null ? List.of() : List.copyOf(additionalEmailAttributes);
         }
     }
 

@@ -231,6 +231,12 @@ cert-alert:
       # A person may hold four network addresses at once; this decides which one leads.
       # All of them are indexed for the point-of-contact join regardless.
       email-precedence: [icEmail, mail, internetEmail, siprnetEmail, niprnetEmail]
+      # Attributes beyond the five the schema defines, named as your directory names them.
+      # An address found in one is indexed like any other the person answers to, so a
+      # serverPOC written with it resolves to them. Values are read whole and split on
+      # commas; anything that is not an address is dropped and logged against the entry.
+      # Name one here in email-precedence above to make it the primary address.
+      additional-email-attributes: []
       uid: uid
       common-name: cn
       display-name: displayName

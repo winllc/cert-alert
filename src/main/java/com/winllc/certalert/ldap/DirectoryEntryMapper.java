@@ -3,6 +3,7 @@ package com.winllc.certalert.ldap;
 import com.winllc.certalert.domain.EmailAddresses;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -39,6 +40,11 @@ public class DirectoryEntryMapper {
         for (UserField field : UserField.values()) {
             addIfPresent(attributes, field.attributeName(mapping));
         }
+        // Whatever else this deployment keeps addresses in. Asked for by name, since there
+        // is no schema to look them up in - that is the point of the setting.
+        for (String attribute : mapping.getAdditionalEmailAttributes()) {
+            addIfPresent(attributes, attribute);
+        }
         addIfPresent(attributes, requestedCertificate(mapping.getCertificate()));
         return attributes.toArray(String[]::new);
     }
@@ -70,8 +76,62 @@ public class DirectoryEntryMapper {
                 values.put(field, value);
             }
         }
+        String dn = ctx.getNameInNamespace();
         return new LdapUserEntry(
-                ctx.getNameInNamespace(), values, LdapAttributes.binaries(source, mapping.getCertificate()));
+                dn,
+                values,
+                extraEmails(source, mapping, dn),
+                LdapAttributes.binaries(source, mapping.getCertificate()));
+    }
+
+    /**
+     * Addresses out of the attributes a deployment named for itself.
+     *
+     * <p>Read as multi-valued and split on commas, for the same reason {@code serverPOC} is:
+     * an attribute can hold several values, and a directory filled in through a form often
+     * holds several addresses inside one of them.
+     *
+     * <p>Anything that is not an address is dropped. These attributes were named as places
+     * addresses live, so a display name in one is bad data rather than a second kind of
+     * value to guess at - and an identifier that is not an address would silently widen
+     * what a {@code serverPOC} matches. It is logged with the entry it came from, so it can
+     * be fixed where it lives.
+     */
+    private Map<String, List<String>> extraEmails(
+            Attributes source, LdapProperties.User mapping, String dn) throws NamingException {
+
+        List<String> configured = mapping.getAdditionalEmailAttributes();
+        if (configured.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, List<String>> found = new LinkedHashMap<>();
+        List<String> rejected = new ArrayList<>();
+        for (String attribute : configured) {
+            if (attribute == null || attribute.isBlank()) {
+                continue;
+            }
+            List<String> addresses = new ArrayList<>();
+            for (String value : LdapAttributes.strings(source, attribute.trim())) {
+                for (String candidate : EmailAddresses.split(value)) {
+                    if (EmailAddresses.isAddress(candidate)) {
+                        String normalised = EmailAddresses.normalise(candidate);
+                        if (!addresses.contains(normalised)) {
+                            addresses.add(normalised);
+                        }
+                    } else {
+                        rejected.add(attribute.trim() + "=" + candidate);
+                    }
+                }
+            }
+            if (!addresses.isEmpty()) {
+                found.put(attribute.trim(), List.copyOf(addresses));
+            }
+        }
+        if (!rejected.isEmpty()) {
+            log.warn("'{}' holds {} value(s) in its email attribute(s) that are not addresses and were "
+                    + "ignored: {}", dn, rejected.size(), String.join(", ", rejected));
+        }
+        return Map.copyOf(found);
     }
 
     public LdapServerEntry toServer(DirContextOperations ctx) throws NamingException {
