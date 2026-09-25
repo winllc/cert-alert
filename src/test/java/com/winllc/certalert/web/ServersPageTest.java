@@ -109,8 +109,21 @@ class ServersPageTest {
         mockMvc.perform(get("/servers").with(signedIn(aliceId, "alice")))
                 .andExpect(status().isOk())
                 .andExpect(content().string(not(containsString("id=\"show-expired\""))))
-                .andExpect(content().string(containsString("Has an expired certificate")))
-                .andExpect(content().string(containsString("No expired certificate")));
+                .andExpect(content().string(containsString("Has an expired certificate")));
+    }
+
+    /**
+     * What has already lapsed is not what is about to, so it is out of the way to begin
+     * with - and the option that does it is the one selected, rather than a switch
+     * somewhere else quietly doing it while the list reads "Any".
+     */
+    @Test
+    void expiredEntriesAreOutOfTheWayByDefaultAndTheListSaysSo() throws Exception {
+        mockMvc.perform(get("/servers").with(signedIn(aliceId, "alice")))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("<option value=\"standing\" selected>Hide expired")))
+                // And reaching them is a choice on the same list, not a hunt.
+                .andExpect(content().string(containsString("Any, expired included")));
     }
 
     /** The people page keeps its own, which this did not touch. */

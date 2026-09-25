@@ -19,10 +19,15 @@
                         <div class="row g-3 align-items-end">
                     <div class="col-12 col-md-auto">
                         <label class="form-label" for="cert-state">Certificates</label>
+                        <!--/* What has already lapsed is not what is about to, so it is out of
+                               the way by default - said here rather than by a switch beside a
+                               list reading "Any", which is two controls disagreeing about one
+                               question. The first option is the default and says what it does. */-->
                         <select id="cert-state" class="form-select">
-                            <option value="">Any</option>
+                            <option value="standing" selected>Hide expired</option>
+                            <option value="">Any, expired included</option>
                             <option value="expired">Has an expired certificate</option>
-                            <option value="not-expired">No expired certificate</option>
+                            <option value="not-expired">Holds one, none expired</option>
                             <option value="expiring-soon">Expiring soon</option>
                             <option value="valid">Valid only</option>
                             <option value="none">Holds no certificate</option>

@@ -49,6 +49,12 @@
         if (wantedRisk) {
             riskFilter.value = wantedRisk;
         }
+        // A link may want something other than the default - the metrics page sends people
+        // here to see every server holding a risky name, lapsed ones among them.
+        var wantedState = new URLSearchParams(window.location.search).get('certState');
+        if (wantedState !== null) {
+            certState.value = wantedState;
+        }
         var applied = document.getElementById('applied-filters');
 
         // One filter, two ways in: arriving from a person's row, and the switch that names
@@ -95,6 +101,12 @@
         function readFilters() {
             var filters = {};
             switch (certState.value) {
+                case 'standing':
+                    // Everything except what has lapsed, entries holding no certificate at
+                    // all included - they have nothing expired either, and dropping them
+                    // would make the default quietly narrower than it says.
+                    filters.hideExpired = 'true';
+                    break;
                 case 'expired':
                     filters.expired = 'true';
                     break;

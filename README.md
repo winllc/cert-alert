@@ -581,12 +581,17 @@ spring.jpa.properties.hibernate.order_by.default_null_ordering: last
 Hibernate then renders `nulls last` into the SQL and both databases agree, so the first row
 is the soonest thing to run out.
 
-On people, lapsed entries are hidden unless **Show expired** is ticked — they are what has
-already gone wrong rather than what is about to. The servers table had the same switch and
-lost it: what to do about expired servers is already the first thing the Certificates list
-asks, and a list reading "Any" beside a switch quietly hiding half the directory is two
-controls disagreeing about one question. There, **Any** means any, and **No expired
-certificate** is the old default when it is wanted.
+Lapsed entries are out of the way to begin with on both tables — they are what has already
+gone wrong rather than what is about to — but the two say so differently. On people it is
+the **Show expired** switch, off by default. On servers it is the first option of the
+Certificates list, **Hide expired**, which is the one selected when the page opens.
+
+Servers had the switch too and lost it. What to do about expired entries is the first thing
+that list asks, so a switch beside it hiding half the directory while the list read "Any"
+was two controls disagreeing about one question. One control now answers it, and the
+answer is visible rather than implied: **Any, expired included** reaches them, and a link
+can opt out of the default with `?certState=` — which is how the metrics page sends somebody
+to every server holding a risky name, lapsed ones among them.
 
 Both tables carry the same filters, and both take the two expiry dates an entry has:
 
