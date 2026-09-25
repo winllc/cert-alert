@@ -337,9 +337,83 @@ class NotificationTest {
         notificationService.markRead(userId, first);
         assertThat(notificationService.unreadCount(userId)).isZero();
 
+        // A second run says the same thing, so it leaves the same row alone: read stays
+        // read, and the page does not grow a copy of what is already on it.
         notificationService.digest();
-        assertThat(notificationService.unreadCount(userId)).isEqualTo(1);
+        assertThat(notificationService.forRecipient(userId, PageRequest.of(0, 10)).getContent())
+                .singleElement()
+                .satisfies(notification -> {
+                    assertThat(notification.getId()).isEqualTo(first);
+                    assertThat(notification.isUnread()).isFalse();
+                });
+        assertThat(notificationService.markAllRead(userId)).isZero();
+    }
+
+    /**
+     * Run nightly, the round-up reports the same thing every night. One person, one
+     * round-up: what it says is brought up to date, and the page does not fill with copies
+     * of a message somebody has already read.
+     */
+    @Test
+    void theRoundUpIsOneStandingMessageRatherThanOnePerRun() {
+        String dn = directory.addUser("standing", "Stan Ding", "standing@example.gov",
+                TestCertificates.expiringIn("standing-a", Duration.ofDays(4)));
+        syncService.syncUsers();
+
+        notificationService.digest();
+        notificationService.digest();
+        notificationService.digest();
+
+        Long userId = userRepository.findByDn(dn).orElseThrow().getId();
+        assertThat(notificationService.forRecipient(userId, PageRequest.of(0, 10)).getContent())
+                .as("three runs, one round-up")
+                .hasSize(1);
+    }
+
+    /** And when what is expiring changes, it says the new thing and reads as unread again. */
+    @Test
+    void aRoundUpThatHasSomethingNewToSayComesBackUnread() {
+        String dn = directory.addUser("changing", "Cha Nging", "changing@example.gov",
+                TestCertificates.expiringIn("changing-a", Duration.ofDays(4)));
+        syncService.syncUsers();
+        notificationService.digest();
+
+        Long userId = userRepository.findByDn(dn).orElseThrow().getId();
         assertThat(notificationService.markAllRead(userId)).isEqualTo(1);
-        assertThat(notificationService.unreadCount(userId)).isZero();
+
+        // A second certificate of theirs comes inside the window.
+        directory.replaceCertificates(dn,
+                TestCertificates.expiringIn("changing-a", Duration.ofDays(4)),
+                TestCertificates.expiringIn("changing-b", Duration.ofDays(6)));
+        syncService.syncUsers();
+        notificationService.digest();
+
+        assertThat(notificationService.forRecipient(userId, PageRequest.of(0, 10)).getContent())
+                .singleElement()
+                .satisfies(notification -> {
+                    assertThat(notification.isUnread()).as("something new to look at").isTrue();
+                    assertThat(notification.getMessage()).contains("2 credential(s) expiring");
+                });
+    }
+
+    /** And once everything it named is renewed, it goes: a stale report is worse than none. */
+    @Test
+    void aRoundUpWithNothingLeftToReportIsTakenAway() {
+        String dn = directory.addUser("renewing", "Ren Ewing", "renewing@example.gov",
+                TestCertificates.expiringIn("renewing-a", Duration.ofDays(4)));
+        syncService.syncUsers();
+        notificationService.digest();
+
+        Long userId = userRepository.findByDn(dn).orElseThrow().getId();
+        assertThat(notificationService.forRecipient(userId, PageRequest.of(0, 10)).getContent()).hasSize(1);
+
+        // Renewed: the same name, published again and good for a year.
+        directory.replaceCertificates(dn, TestCertificates.expiringIn("renewing-a", Duration.ofDays(365)));
+        syncService.syncUsers();
+        notificationService.digest();
+
+        assertThat(notificationService.forRecipient(userId, PageRequest.of(0, 10)).getContent())
+                .as("nothing of theirs is expiring any more")
+                .isEmpty();
     }
 }

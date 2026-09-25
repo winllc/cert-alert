@@ -112,6 +112,26 @@ public class Notification {
         this.createdAt = createdAt;
     }
 
+    /**
+     * Says the same thing again, with what is expiring now.
+     *
+     * <p>A round-up is a report of the current state rather than a record that something
+     * happened, so a person has one of them rather than one per run: a nightly job that
+     * left a fresh copy behind every night would bury the page in identical rows, and the
+     * page is where somebody looks to find out what they have to do.
+     *
+     * <p>Called only when the wording has actually changed, and it then reads as unread
+     * again - something is expiring that was not before, or something has been renewed, and
+     * either is worth another look. An unchanged round-up is left exactly as it is, read or
+     * not: marking it unread every night is how a notification becomes furniture.
+     */
+    public void refresh(Severity severity, String message, Instant when) {
+        this.severity = severity;
+        this.message = message;
+        this.createdAt = when;
+        this.readAt = null;
+    }
+
     public void markRead(Instant when) {
         if (readAt == null) {
             this.readAt = when;

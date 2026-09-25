@@ -236,6 +236,10 @@ public class NotificationService {
                 certificates.findExpiringBetween(floor, horizon, PageRequest.of(0, DIGEST_SCAN_LIMIT));
         if (expiring.isEmpty()) {
             log.debug("Expiry digest: nothing expiring in the next {} day(s)", leadDays);
+            // Nothing expiring means nobody's round-up still says anything true.
+            if (!dryRun && !mailer.isDryRun()) {
+                clearRoundUpsExcept(Set.of(), 0);
+            }
             return nothing(dryRun, "Nothing is expiring in the next " + leadDays + " day(s)");
         }
 
@@ -290,6 +294,7 @@ public class NotificationService {
 
         int told = 0;
         int unaddressed = 0;
+        Set<Long> standing = new HashSet<>();
         mailer.beginRun(dryRun);
         boolean rehearsing = mailer.isDryRun();
         for (Round round : rounds.values()) {
@@ -303,11 +308,14 @@ public class NotificationService {
                 // behind would be answering the question by doing the thing.
                 continue;
             }
-            Notification notification = round.toNotification(now);
-            notifications.save(notification);
+            Notification notification = roundUpFor(round, now);
+            standing.add(notification.getId());
             if (went) {
                 notification.markEmailed(now);
             }
+        }
+        if (!rehearsing) {
+            clearRoundUpsExcept(standing, expiring.size());
         }
         // Asked of the mailer rather than counted here: one person can be owed two messages,
         // and "how many emails" is a question about messages.
@@ -325,6 +333,64 @@ public class NotificationService {
                     built.size() > DRY_RUN_PREVIEW_LIMIT ? built.subList(0, DRY_RUN_PREVIEW_LIMIT) : built);
         }
         return DigestResult.sent(reported, told, emailed, properties.getEmail().isEnabled(), note);
+    }
+
+    /**
+     * The one round-up this person has, brought up to date.
+     *
+     * <p>A round-up reports what is expiring now. Run nightly, a job that saved a new one
+     * each time would leave a month of identical rows on the page of somebody who has one
+     * certificate to renew - and the page is where they go to find out what to do.
+     *
+     * <p>So there is one per person. Unchanged, it is left exactly as it is, read or not:
+     * marking it unread every night is how a notification becomes furniture. Changed, it
+     * says the new thing and reads as unread again, because something is expiring that was
+     * not before, or something has been renewed.
+     */
+    private Notification roundUpFor(Round round, Instant now) {
+        Notification fresh = round.toNotification(now);
+        Notification held = round.recipient.userId() != null
+                ? notifications
+                        .findFirstByRecipientUserIdAndKindOrderByCreatedAtDesc(
+                                round.recipient.userId(), NotificationKind.EXPIRY_DIGEST)
+                        .orElse(null)
+                : notifications
+                        .findFirstByRecipientAddressAndRecipientUserIdIsNullAndKindOrderByCreatedAtDesc(
+                                round.recipient.address(), NotificationKind.EXPIRY_DIGEST)
+                        .orElse(null);
+
+        if (held == null) {
+            return notifications.save(fresh);
+        }
+        if (!held.getMessage().equals(fresh.getMessage())) {
+            held.refresh(fresh.getSeverity(), fresh.getMessage(), now);
+        }
+        return held;
+    }
+
+    /**
+     * Takes away the round-ups this run did not write.
+     *
+     * <p>They are the ones that have stopped being true: everything they named has been
+     * renewed, or the entry has gone from the directory. A report of the current state that
+     * outlives the state is worse than no report, since somebody reading it goes looking for
+     * work that is already done.
+     */
+    private void clearRoundUpsExcept(Set<Long> keep, int scanned) {
+        if (scanned >= DIGEST_SCAN_LIMIT) {
+            // The scan stopped at its limit, so "this run did not write it" does not mean
+            // "there is nothing to report" - it may mean the certificate never came up.
+            // Taking somebody's round-up away on that basis would hide real work.
+            log.warn("Expiry digest stopped at {} certificate(s); round-ups that no longer apply were left "
+                    + "in place, since this run cannot tell them from ones it never reached", DIGEST_SCAN_LIMIT);
+            return;
+        }
+        int removed = keep.isEmpty()
+                ? notifications.deleteOfKind(NotificationKind.EXPIRY_DIGEST)
+                : notifications.deleteOfKindExcept(NotificationKind.EXPIRY_DIGEST, keep);
+        if (removed > 0) {
+            log.debug("Expiry digest: removed {} round-up(s) with nothing left to report", removed);
+        }
     }
 
     /**
@@ -355,6 +421,10 @@ public class NotificationService {
             return unaddressed + " of the " + told + " to be told publish no address to write to";
         }
         NotificationProperties.Email email = properties.getEmail();
+        if (!email.isEnabled()) {
+            return told + " person/people were told on the page; no email was built because sending is "
+                    + "switched off (cert-alert.notifications.email.enabled)";
+        }
         if (told >= email.getMaxPerRun()) {
             return "Stopped at the " + email.getMaxPerRun() + " message cap for one run "
                     + "(cert-alert.notifications.email.max-per-run)";

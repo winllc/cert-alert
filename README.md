@@ -1207,9 +1207,23 @@ directory's `serverPOC` values resolved to people, which now includes group addr
 the contacts added here. An address nobody has claimed is still a recipient by email; it
 just has nobody to show a notification to.
 
-Nobody hears the same thing twice inside `cert-alert.notifications.repeat-after` (a week by
-default). A nightly sweep and a certificate that stays expiring for a month would otherwise
+Nobody hears the same thing twice. A transition alert is not raised again for the same
+certificate in the same state inside `cert-alert.notifications.repeat-after` (a week by
+default) — a nightly sweep and a certificate that stays expiring for a month would otherwise
 mean thirty notifications.
+
+The round-up needs the same guarantee for a different reason, and gets it a different way.
+It reports what is expiring **now**, so it is not an event that happened but a standing
+statement of what somebody has to do, and each person has **one** of them. A run that finds
+the same thing leaves that message exactly as it is — read stays read, and the page does not
+grow a copy of what is already on it. A run that finds something different updates the
+wording and it reads as unread again, because something is expiring that was not before, or
+something has been renewed. When everything it named has been dealt with, it goes: a report
+of the current state that outlives the state sends somebody looking for work that is already
+done.
+
+The email is unchanged by any of that — the round-up is a daily report and goes out daily.
+It is the page that holds one message per person rather than one per run.
 
 **How many days before expiry the round-up writes** is set on the notifications page, not in
 the configuration file. It is the number that gets argued about once a deployment is real -
