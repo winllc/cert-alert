@@ -9,7 +9,11 @@
 # The directory publishes cn=changelog, so the changelog connector can be tried here:
 # set CERT_ALERT_LDAP_CHANGELOG_ENABLED=true in the application's environment.
 #
-# Sign in at http://localhost:8080 as alice / password, then press Sync directory.
+# Sign in at http://localhost:8181 as alice / password, then press Sync directory.
+#
+# Set CERT_ALERT_PORT to publish it somewhere else:
+#
+#   CERT_ALERT_PORT=9090 docker compose up --build
 #
 # To point it at a real directory instead, override the CERT_ALERT_LDAP_* variables - the
 # stand-in keeps running but nothing reads it:
@@ -98,7 +102,11 @@ services:
       # alice is the generated directory's administrator.
       CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS: ${CERT_ALERT_ADMINS:-alice@intelink.ic.gov}
     ports:
-      - "8080:8080"
+      # Host side only. The application still listens on 8080 inside the container, which
+      # is what the image's EXPOSE, its HEALTHCHECK and every probe path assume; what is
+      # configurable is where it surfaces, because 8080 on a developer's machine is
+      # usually already somebody else's.
+      - "${CERT_ALERT_PORT:-8181}:8080"
     # Mounts, all read-only and all commented out so a first run needs no directories.
     #
     # tls: X.509 client certificates need TLS, which needs keystores. Mount them rather
@@ -117,11 +125,16 @@ services:
     networks: [default]
     restart: unless-stopped
 
-# Named rather than left to the implicit default, so the three services are on one network
-# because this file says so - and so `docker network connect` has something to name when you
-# want an ldapsearch container or a second application alongside them.
+# Declared rather than left implicit, so the three services are on one network because this
+# file says so - and so `docker network connect` has something to name when you want an
+# ldapsearch container or a second application alongside them.
+#
+# `default` rather than a name of its own: naming it would rename the network from
+# cert-alert_default, and anything already running on the old one - a directory left up
+# from an earlier run - would be stranded there while the application came up alone on the
+# new one. From inside, that reads UnknownHostException: directory.
 networks:
-  cert-alert:
+  default:
 
 volumes:
   postgres-data:

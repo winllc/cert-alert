@@ -149,7 +149,11 @@ docker compose up --build
 That brings up three services — PostgreSQL, a stand-in 389 Directory Server, and the
 application —
 and waits for the first two to be healthy before starting the third. Sign in at
-<http://localhost:8080> as `alice` / `password` and press **Sync directory**.
+<http://localhost:8181> as `alice` / `password` and press **Sync directory**.
+
+`CERT_ALERT_PORT` publishes it somewhere else — `CERT_ALERT_PORT=9090 docker compose up`.
+Only the host side moves: the application still listens on 8080 inside the container, which
+is what the image's `EXPOSE`, its `HEALTHCHECK` and every probe path assume.
 
 To point it at a real directory instead, override the connection. The stand-in keeps
 running; nothing reads it.
