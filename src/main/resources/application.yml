@@ -373,6 +373,10 @@ cert-alert:
     # request each and a read of the entry to form it. A list signed by some other
     # authority fails its signature check, so a wrong address here cannot read as good news.
     default-crl-url: ${CERT_ALERT_DEFAULT_CRL_URL:}
+    # How many certificates to ask about at once. Only OCSP spends this - a list answers
+    # for a whole authority in one download - and the work is all waiting, so asked one
+    # after another a large directory never finishes. Set to 1 for one at a time.
+    workers: 8
     allow-unverified-crl: true
     crl-cache-ttl: 6h
     max-crl-bytes: 16777216

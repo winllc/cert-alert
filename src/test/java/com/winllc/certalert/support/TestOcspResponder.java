@@ -27,6 +27,11 @@ public final class TestOcspResponder implements AutoCloseable {
     private final TestCa ca;
     private final Map<BigInteger, Instant> revoked = new ConcurrentHashMap<>();
     private final AtomicInteger requests = new AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicInteger concurrent =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicInteger mostAtOnce =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private volatile long delayMillis;
 
     public TestOcspResponder(TestCa ca) {
         this.ca = ca;
@@ -37,6 +42,16 @@ public final class TestOcspResponder implements AutoCloseable {
         }
         server.createContext("/", exchange -> {
             requests.incrementAndGet();
+            mostAtOnce.accumulateAndGet(concurrent.incrementAndGet(), Math::max);
+            try {
+                if (delayMillis > 0) {
+                    Thread.sleep(delayMillis);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                concurrent.decrementAndGet();
+            }
             byte[] answer;
             try {
                 answer = ca.ocspResponse(requestFrom(exchange), Map.copyOf(revoked));
@@ -51,6 +66,13 @@ public final class TestOcspResponder implements AutoCloseable {
                 out.write(answer);
             }
         });
+        // A pool, not the default single thread: a responder that can only answer one at a
+        // time makes any client look serial.
+        server.setExecutor(java.util.concurrent.Executors.newFixedThreadPool(16, runnable -> {
+            Thread thread = new Thread(runnable, "test-ocsp");
+            thread.setDaemon(true);
+            return thread;
+        }));
         server.start();
     }
 
@@ -89,6 +111,16 @@ public final class TestOcspResponder implements AutoCloseable {
             }
         }
         return out.toString();
+    }
+
+    /** Answers this slowly, the way a responder across a network does. */
+    public void takesThisLong(long millis) {
+        this.delayMillis = millis;
+    }
+
+    /** The most requests it was handling at any one moment. */
+    public int mostAtOnce() {
+        return mostAtOnce.get();
     }
 
     /** Says this serial is revoked from now on. */

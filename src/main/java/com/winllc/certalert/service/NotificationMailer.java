@@ -51,6 +51,8 @@ public class NotificationMailer {
     private boolean dryRunThisRun;
     /** What a dry run built, in the order it built it. Empty on a run that really sent. */
     private final List<Rendered> renderedThisRun = new ArrayList<>();
+    /** What could not be built or sent, and why. */
+    private final List<Failure> failuresThisRun = new ArrayList<>();
 
     public NotificationMailer(
             Optional<JavaMailSender> mailSender, TemplateEngine templates, NotificationProperties properties) {
@@ -125,6 +127,7 @@ public class NotificationMailer {
         sentThisRun = 0;
         dryRunThisRun = dryRun || properties.getEmail().isDryRun();
         renderedThisRun.clear();
+        failuresThisRun.clear();
     }
 
     /**
@@ -138,6 +141,11 @@ public class NotificationMailer {
         return sentThisRun;
     }
 
+    /** Whether there is anything to send with, which {@code spring.mail.*} decides. */
+    public boolean hasSender() {
+        return mailSender.isPresent();
+    }
+
     /** Whether messages are being built and thrown away rather than sent. */
     public boolean isDryRun() {
         return dryRunThisRun;
@@ -149,6 +157,17 @@ public class NotificationMailer {
     }
 
     /**
+     * What went wrong, for saying so where it will be read.
+     *
+     * <p>A message that cannot be built used to leave a line in the log and nothing else -
+     * so a deployment with a template of its own that does not compile saw "nothing would be
+     * sent" and no way to find out why. A rehearsal exists to surface exactly that.
+     */
+    public List<Failure> failures() {
+        return List.copyOf(failuresThisRun);
+    }
+
+    /**
      * One message as it would have been sent.
      *
      * @param to the address it was addressed to
@@ -157,6 +176,14 @@ public class NotificationMailer {
      * @param html the HTML body
      */
     public record Rendered(String to, String subject, String text, String html) {}
+
+    /**
+     * One message that could not be built or sent.
+     *
+     * @param to who it was for
+     * @param reason what the failure said, as short as it comes
+     */
+    public record Failure(String to, String reason) {}
 
     private boolean send(NotificationProperties.Email settings, String address, ExpiryDigest digest) {
         String template = digest.getOwnerType() == OwnerType.USER ? USER_TEMPLATE : SERVER_TEMPLATE;
@@ -189,8 +216,25 @@ public class NotificationMailer {
             return true;
         } catch (MessagingException | RuntimeException e) {
             log.error("Could not email the expiry round-up to {}", address, e);
+            failuresThisRun.add(new Failure(address, describe(e)));
             return false;
         }
+    }
+
+    /**
+     * The shortest true thing about a failure.
+     *
+     * <p>The cause where there is one: a template that will not compile arrives wrapped in
+     * a Thymeleaf exception whose own message names the wrapper, and the line underneath is
+     * the one that says which template and which line.
+     */
+    private static String describe(Exception e) {
+        Throwable cause = e.getCause() == null ? e : e.getCause();
+        String message = cause.getMessage();
+        return (message == null || message.isBlank() ? cause.getClass().getSimpleName() : message)
+                .lines()
+                .findFirst()
+                .orElse(cause.getClass().getSimpleName());
     }
 
     private void warnOnce(String message) {

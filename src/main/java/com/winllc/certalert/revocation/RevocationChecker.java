@@ -49,10 +49,29 @@ public class RevocationChecker {
     private final IssuerCertificates issuers;
     private final RevocationProperties properties;
 
+    /**
+     * The platform's OCSP timeout is fifteen seconds and is read from a system property
+     * once, the first time anything asks a responder anything. Left alone, a responder that
+     * is not answering costs fifteen seconds per certificate - which on a directory of any
+     * size is the difference between a job that finishes overnight and one that does not.
+     *
+     * <p>Set from the timeout this application was already configured with, and only where
+     * nobody has set it themselves: an operator who passed {@code -Dcom.sun.security.ocsp
+     * .timeout} meant it.
+     */
+    private static final String OCSP_TIMEOUT_PROPERTY = "com.sun.security.ocsp.timeout";
+
     public RevocationChecker(CrlStore crls, IssuerCertificates issuers, RevocationProperties properties) {
         this.crls = crls;
         this.issuers = issuers;
         this.properties = properties;
+
+        if (System.getProperty(OCSP_TIMEOUT_PROPERTY) == null) {
+            // Seconds, which is what the platform reads it as.
+            long seconds = Math.max(1, properties.getReadTimeout().toSeconds());
+            System.setProperty(OCSP_TIMEOUT_PROPERTY, Long.toString(seconds));
+            log.debug("OCSP requests will time out after {}s", seconds);
+        }
     }
 
     /**

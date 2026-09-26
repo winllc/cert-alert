@@ -925,6 +925,18 @@ out of the directory to form the question. One read per entry, and only for the 
 whose certificates can be answered no other way; a deployment whose certificates name their
 distribution points reads the directory no more than it did before.
 
+All of that is waiting, so it is done several at a time — `cert-alert.revocation.workers`,
+eight by default. Asked one after another at a few hundred milliseconds a round trip, a
+directory of any size does not finish overnight, and against a responder that has stopped
+answering each certificate waits out the timeout before the next one begins. That timeout is
+the platform's fifteen seconds unless told otherwise, so it is set from `read-timeout` at
+startup; an operator who passes `-Dcom.sun.security.ocsp.timeout` keeps theirs.
+
+Only the asking happens off the job's own thread. Recording what came back, telling people
+and writing the audit trail all happen in order on the thread that owns the transaction, and
+a distribution point is still fetched once however many workers want it at the same moment —
+whoever asks first downloads, the rest wait for that answer.
+
 | Status | What it means |
 |---|---|
 | **Revoked** | the authority lists this serial. Whatever the dates say, it should not be in use |
@@ -1331,6 +1343,13 @@ is switched on` is never read as three that went.
 Everything that can go wrong in the building has already happened by the time a dry run
 answers: the templates are rendered, the recipients resolved, the addresses looked up. What
 is left untested is the transport.
+
+**A message that could not be built says so, in red, at the top of the card** — who it was
+for and what the failure said. Templates of a deployment's own are the ordinary way for that
+to happen, since the wording is yours to edit and an expression with a typo in it throws
+where it is rendered. That used to leave a line in the server log and nothing on the page:
+"nothing would be sent", with a note blaming whichever unrelated thing came next down the
+list. Surfacing exactly this is what a rehearsal is for.
 
 A whole deployment can be put into it instead, so the scheduled round-up rehearses nightly
 and sends nothing:

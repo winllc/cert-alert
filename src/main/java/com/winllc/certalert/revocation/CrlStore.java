@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import javax.naming.Context;
 import javax.naming.NamingException;
@@ -51,7 +52,12 @@ public class CrlStore {
 
     private final RevocationProperties properties;
     private final HttpClient http;
-    private final Map<String, Held> held = new ConcurrentHashMap<>();
+    /**
+     * By distribution point. The value is the answer rather than the list, so that a second
+     * caller arriving while the first is still downloading waits for it instead of starting
+     * a download of its own.
+     */
+    private final Map<String, CompletableFuture<Held>> held = new ConcurrentHashMap<>();
 
     public CrlStore(RevocationProperties properties) {
         this.properties = properties;
@@ -88,16 +94,39 @@ public class CrlStore {
         held.clear();
     }
 
+    /**
+     * One download per distribution point, however many ask for it at once.
+     *
+     * <p>Whoever gets there first puts an unfinished answer in the map and goes to fetch;
+     * everybody else finds it and waits on it. Looking, missing and then fetching - which
+     * is the obvious way to write this - means every worker that looks before the first
+     * one finishes goes and fetches the same list, and a handful of downloads for the whole
+     * directory becomes a handful per batch. That is the property this cache exists for.
+     *
+     * <p>A fetch that fails takes its answer back out of the map, so the next certificate
+     * to name that distribution point tries again rather than inheriting the failure.
+     */
     private Optional<Fetched> fetchOne(String url, X509Certificate issuer, Instant now) {
-        Held current = held.get(url);
+        Held current = awaitHeld(url);
         if (current != null && current.usableAt(now)) {
             return Optional.of(verify(current.crl(), url, issuer));
         }
+
+        CompletableFuture<Held> mine = new CompletableFuture<>();
+        CompletableFuture<Held> inFlight = held.putIfAbsent(url, mine);
+        if (inFlight != null && inFlight != mine) {
+            // Somebody else is fetching it, or has. Either way, theirs is the answer.
+            Held theirs = join(inFlight);
+            return theirs == null || !theirs.usableAt(now)
+                    ? Optional.empty()
+                    : Optional.of(verify(theirs.crl(), url, issuer));
+        }
+
         try {
             byte[] bytes = read(url);
             X509CRL crl = (X509CRL) CertificateFactory.getInstance("X.509")
                     .generateCRL(new ByteArrayInputStream(bytes));
-            held.put(url, new Held(crl, keepUntil(crl, now)));
+            mine.complete(new Held(crl, keepUntil(crl, now)));
             log.info("Fetched a CRL from {}: {} entries, next update {}",
                     url,
                     crl.getRevokedCertificates() == null ? 0 : crl.getRevokedCertificates().size(),
@@ -106,8 +135,24 @@ public class CrlStore {
         } catch (IOException | GeneralSecurityException | RuntimeException | NamingException e) {
             // One unreachable distribution point is not the end of the check; the next one
             // in the certificate may answer, and an unanswered question reads as unknown.
+            held.remove(url, mine);
+            mine.complete(null);
             log.info("Could not fetch a CRL from {}: {}", url, describe(e));
             return Optional.empty();
+        }
+    }
+
+    /** What is held for this point, waiting for a fetch already under way. */
+    private Held awaitHeld(String url) {
+        CompletableFuture<Held> holding = held.get(url);
+        return holding == null ? null : join(holding);
+    }
+
+    private Held join(CompletableFuture<Held> holding) {
+        try {
+            return holding.join();
+        } catch (RuntimeException e) {
+            return null;
         }
     }
 

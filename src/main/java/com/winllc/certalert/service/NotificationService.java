@@ -237,7 +237,7 @@ public class NotificationService {
         if (expiring.isEmpty()) {
             log.debug("Expiry digest: nothing expiring in the next {} day(s)", leadDays);
             // Nothing expiring means nobody's round-up still says anything true.
-            if (!dryRun && !mailer.isDryRun()) {
+            if (!dryRun && !properties.getEmail().isDryRun()) {
                 clearRoundUpsExcept(Set.of(), 0);
             }
             return nothing(dryRun, "Nothing is expiring in the next " + leadDays + " day(s)");
@@ -324,15 +324,21 @@ public class NotificationService {
         log.info("Expiry digest{}: {} certificate(s) expiring in the next {} day(s), {} already replaced, "
                         + "{} person(s) told, {} message(s) emailed",
                 rehearsing ? " (dry run)" : "", expiring.size(), leadDays, superseded, told, emailed);
-        String note = emailed > 0
+        List<NotificationMailer.Failure> failures = mailer.failures();
+        String note = emailed > 0 && failures.isEmpty()
                 ? null
-                : whyNothingWasBuilt(expiring.size(), superseded, reported, told, unaddressed, leadDays);
-        if (rehearsing) {
-            List<NotificationMailer.Rendered> built = mailer.rendered();
-            return new DigestResult(reported, told, emailed, true, properties.getEmail().isEnabled(), note,
-                    built.size() > DRY_RUN_PREVIEW_LIMIT ? built.subList(0, DRY_RUN_PREVIEW_LIMIT) : built);
-        }
-        return DigestResult.sent(reported, told, emailed, properties.getEmail().isEnabled(), note);
+                : whyNothingWasBuilt(
+                        expiring.size(), superseded, reported, told, unaddressed, leadDays, failures, rehearsing);
+        List<NotificationMailer.Rendered> built = rehearsing ? mailer.rendered() : List.of();
+        return new DigestResult(
+                reported,
+                told,
+                emailed,
+                rehearsing,
+                properties.getEmail().isEnabled(),
+                note,
+                failures,
+                built.size() > DRY_RUN_PREVIEW_LIMIT ? built.subList(0, DRY_RUN_PREVIEW_LIMIT) : built);
     }
 
     /**
@@ -403,8 +409,21 @@ public class NotificationService {
      * do. So the run says which.
      */
     private String whyNothingWasBuilt(
-            int expiring, int superseded, int reported, int told, int unaddressed, int leadDays) {
+            int expiring,
+            int superseded,
+            int reported,
+            int told,
+            int unaddressed,
+            int leadDays,
+            List<NotificationMailer.Failure> failures,
+            boolean rehearsing) {
 
+        // First, because it is the answer that means somebody has something to fix, and the
+        // only one that used to leave the page saying nothing at all.
+        if (!failures.isEmpty()) {
+            NotificationMailer.Failure first = failures.getFirst();
+            return failures.size() + " message(s) could not be built: " + first.to() + " - " + first.reason();
+        }
         if (reported == 0 && superseded > 0) {
             return "All " + expiring + " certificate(s) expiring in the next " + leadDays
                     + " day(s) have already been published again, so nobody needs telling";
@@ -421,9 +440,16 @@ public class NotificationService {
             return unaddressed + " of the " + told + " to be told publish no address to write to";
         }
         NotificationProperties.Email email = properties.getEmail();
-        if (!email.isEnabled()) {
+        // Only of a run that meant to send. A rehearsal builds its messages whether sending
+        // is on or not - that is the state it is most wanted in - so blaming the setting
+        // would send somebody to switch on the one thing that was not stopping it.
+        if (!rehearsing && !email.isEnabled()) {
             return told + " person/people were told on the page; no email was built because sending is "
                     + "switched off (cert-alert.notifications.email.enabled)";
+        }
+        if (!rehearsing && !mailer.hasSender()) {
+            return "Email is switched on but there is no mail server configured to send with "
+                    + "(spring.mail.host)";
         }
         if (told >= email.getMaxPerRun()) {
             return "Stopped at the " + email.getMaxPerRun() + " message cap for one run "
@@ -521,6 +547,7 @@ public class NotificationService {
      * @param emailEnabled whether email is switched on - a rehearsal builds its messages
      *     either way, and this is what stops "3 would be sent" being read as "and they will"
      * @param note why no messages were built, where none were; null where some were
+     * @param failures messages that could not be built or sent, and what went wrong
      * @param messages on a rehearsal, the messages as they would have gone out
      */
     public record DigestResult(
@@ -530,17 +557,12 @@ public class NotificationService {
             boolean dryRun,
             boolean emailEnabled,
             String note,
+            List<NotificationMailer.Failure> failures,
             List<NotificationMailer.Rendered> messages) {
 
         /** A run with nothing to do, which is still a run of one kind or the other. */
         static DigestResult nothing(boolean dryRun, boolean emailEnabled, String note) {
-            return new DigestResult(0, 0, 0, dryRun, emailEnabled, note, List.of());
-        }
-
-        /** A run that sent: {@code emailsSent} is what went out, and nothing was rendered aside. */
-        static DigestResult sent(
-                int certificates, int peopleTold, int emailsSent, boolean emailEnabled, String note) {
-            return new DigestResult(certificates, peopleTold, emailsSent, false, emailEnabled, note, List.of());
+            return new DigestResult(0, 0, 0, dryRun, emailEnabled, note, List.of(), List.of());
         }
     }
 

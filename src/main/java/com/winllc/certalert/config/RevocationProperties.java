@@ -86,6 +86,20 @@ public class RevocationProperties {
     /** A CRL larger than this is refused rather than read into memory. */
     private int maxCrlBytes = 16 * 1024 * 1024;
 
+    /**
+     * How many certificates to ask about at once.
+     *
+     * <p>Only OCSP spends this: a list is one download that answers for every certificate
+     * an authority issued, and the certificates that need a responder need one request
+     * each. Serially, at a few hundred milliseconds a round trip, a directory of any size
+     * does not finish - and against a responder that is not answering, every one of them
+     * waits out the timeout before the next begins.
+     *
+     * <p>Wide enough to be worth having and narrow enough not to look like an attack on the
+     * responder. Set it to 1 to go back to one at a time.
+     */
+    private int workers = 8;
+
     private Duration connectTimeout = Duration.ofSeconds(10);
 
     private Duration readTimeout = Duration.ofSeconds(30);
@@ -152,6 +166,14 @@ public class RevocationProperties {
 
     public void setMaxCrlBytes(int maxCrlBytes) {
         this.maxCrlBytes = maxCrlBytes;
+    }
+
+    public int getWorkers() {
+        return workers;
+    }
+
+    public void setWorkers(int workers) {
+        this.workers = Math.max(1, workers);
     }
 
     public Duration getConnectTimeout() {

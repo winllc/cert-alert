@@ -154,12 +154,27 @@
         var $card = $('#dry-run-card');
         var $body = $('#dry-run-messages');
 
+        var failures = result.failures || [];
+        // What went wrong comes first and in red, whether or not anything else was built:
+        // a rehearsal exists to surface this, and it is the only outcome somebody has to
+        // act on before the round-up can work at all.
+        var trouble = failures.length
+            ? '<div class="alert alert-danger d-block mb-3"><div class="fw-medium mb-1">'
+                + failures.length + ' message(s) could not be built</div>'
+                + failures.map(function (failure) {
+                    return '<div class="small"><span class="fw-medium">'
+                        + CertAlert.escapeHtml(failure.to) + '</span> — '
+                        + CertAlert.escapeHtml(failure.reason) + '</div>';
+                }).join('')
+                + '</div>'
+            : '';
+
         if (!result.messages || result.messages.length === 0) {
             $card.removeClass('d-none');
             $('#dry-run-summary').text('nothing to send');
             // Why, rather than leaving somebody to guess which of half a dozen reasons it
             // was. The run works it out; this only has to show it.
-            $body.html('<p class="text-secondary mb-0">'
+            $body.html(trouble + '<p class="text-secondary mb-0">'
                 + CertAlert.escapeHtml(result.note || 'Nothing would be sent.')
                 + '</p>');
             return;
@@ -169,7 +184,7 @@
             ? 'the first ' + result.messages.length + ' of ' + result.emailsSent
             : result.messages.length + ' message(s)');
 
-        $body.html(result.messages.map(function (message, index) {
+        $body.html(trouble + result.messages.map(function (message, index) {
             var id = 'dry-run-body-' + index;
             return '<div class="mb-3 pb-3' + (index ? '' : '') + ' border-bottom">'
                 + '<div class="d-flex flex-wrap align-items-baseline gap-2 mb-2">'
