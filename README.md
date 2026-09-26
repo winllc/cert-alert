@@ -81,6 +81,24 @@ java -jar build/libs/cert-alert-0.0.1-SNAPSHOT.jar
 
 ### As a container
 
+Every push builds the image and, once it has been started and answered its health probe,
+publishes it to the GitHub Container Registry:
+
+```bash
+docker pull ghcr.io/winllc/cert-alert:latest          # the default branch
+docker pull ghcr.io/winllc/cert-alert:sha-1a2b3c4     # one commit, forever
+```
+
+Four kinds of tag. `sha-<short>` on every push, which is the one to deploy — it never moves.
+The branch name, which does. `latest`, only from the default branch. And on a `v*` tag, the
+version and its major.minor. Nothing is published from a pull request.
+
+What is published is the image that was tested, not a rebuild of it: the Dockerfile's base
+images default to floating tags, so building twice can pick up two different bases, and the
+one that answered the probe is the one that goes to the registry.
+
+Or build it yourself:
+
 ```bash
 docker build -t cert-alert:latest .
 ```
@@ -232,7 +250,7 @@ when what you want is volume — a hundred thousand people to watch the paged sw
 
 Notes on the image:
 
-- It runs as **uid 1001**, not root. Nothing it does needs privilege.
+- It runs as **uid 185**, not root — the base image's own user. Nothing it does needs privilege.
 - `JAVA_OPTS` defaults to `-XX:MaxRAMPercentage=75.0`, so the heap follows whatever limit
   the orchestrator sets rather than a number baked in at build time.
 - The JVM is PID 1 and receives `SIGTERM` directly, which is what lets Spring shut down
