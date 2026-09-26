@@ -279,6 +279,7 @@
                 })
                 .fail(function (xhr) {
                     if (CertAlert.handleUnauthorized(xhr)) {
+                        $('#notifications-digest-status').text('');
                         return;
                     }
                     $('#notifications-digest-status').text('The dry run failed; see the log.');
@@ -303,6 +304,7 @@
                 })
                 .fail(function (xhr) {
                     if (CertAlert.handleUnauthorized(xhr)) {
+                        $('#notifications-digest-status').text('');
                         return;
                     }
                     $('#notifications-digest-status').text('The round-up failed; see the log.');

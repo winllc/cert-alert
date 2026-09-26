@@ -371,6 +371,9 @@
             })
             .fail(function (xhr) {
                 if (CertAlert.handleUnauthorized(xhr)) {
+                    // It said its piece elsewhere; clear the spinner rather than leaving
+                    // the card asking the authorities for ever.
+                    $('#revocation-result').text('');
                     return;
                 }
                 $('#revocation-result')

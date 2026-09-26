@@ -559,6 +559,55 @@ trigger the first sync.
 authentication; an unauthenticated API call gets a 401 rather than a login page, because a
 table driven by fetch has no use for HTML in the response.
 
+### Demo mode
+
+A running copy anybody can look at and nobody can change — for showing the application to
+people without issuing them a certificate or an account first.
+
+```bash
+./gradlew bootRun --args='--spring.profiles.active=dev,demo'
+```
+
+There is no sign-in page, because there is nothing to sign in to. Every visitor arrives as
+the same administrator, which is the point: the administration page, the sync button, the
+revocation card and the notification controls are all part of what is being shown, and a
+demo that hid them would be a demo of a different application.
+
+Nothing they press changes anything. **Read-only is a rule about the request, not about the
+buttons** — every method that is not a `GET`, `HEAD` or `OPTIONS` is refused before any
+controller sees it, so a demo's safety does not depend on the UI happening not to offer
+something. The buttons stay where they are and pressing one says so:
+
+```
+HTTP/1.1 403
+Content-Type: application/problem+json
+
+{"title":"Read-only demo","status":403,
+ "detail":"This is a read-only demo: nothing here can be changed.","instance":"/api/v1/sync"}
+```
+
+By method rather than by a list of paths, so an endpoint added next month is refused
+without anybody remembering to add it. The three exceptions are the search tables'
+`/api/v1/datatables/**` endpoints, which are `POST`s only because that is how DataTables
+sends its paging and filters, and which write nothing.
+
+Two things the demo does for itself, neither of them a visitor's doing: it sweeps the
+directory once at startup when the cache is empty, because otherwise the tables stay blank
+until the small hours; and the profile switches off pruning, certificate cleanup and
+outbound email, because a visitor cannot start those but the schedules would.
+
+| Setting                        | Default         |                                                     |
+|--------------------------------|-----------------|-----------------------------------------------------|
+| `cert-alert.demo.enabled`      | `false`         | The whole of it. Replaces the ordinary security configuration rather than relaxing it, so the two are never half-applied |
+| `cert-alert.demo.visitor`      | `Demo visitor`  | The name in the corner of the page                  |
+| `cert-alert.demo.signed-in-as` | *(none)*        | An identifier from the sample directory, for the parts of the UI that are about the person reading the page — their servers, their notifications |
+
+> **Never point a demo at a real directory.** Every visitor gets an administrator's view of
+> every entry in it, with no sign-in at all. That is a reasonable thing to do with invented
+> entries on an instance you can throw away, and nothing else. `cert-alert.demo.enabled` is
+> not a way to run this application for real, any more than
+> `cert-alert.security.enabled: false` is.
+
 ## The search tables
 
 Two pages, `/users` and `/servers`, built on the [Tabler](https://tabler.io/admin-template)
@@ -1898,6 +1947,15 @@ Access, under `cert-alert.security`:
 | `ldap.user-search-base`           | `""`    | Where to look the username up                 |
 | `ldap.user-search-filter`         | `(uid={0})` | How to look the username up               |
 | `ldap.user-dn-patterns`           | `[]`    | Bind straight to a DN shape instead           |
+
+A demo, under `cert-alert.demo` — see [Demo mode](#demo-mode), and never against a real
+directory:
+
+| Property        | Default        | Purpose                                                  |
+|-----------------|----------------|----------------------------------------------------------|
+| `enabled`       | `false`        | No sign-in, every read allowed, every write refused       |
+| `visitor`       | `Demo visitor` | The name shown in the corner of the page                  |
+| `signed-in-as`  | `""`           | Who the visitor counts as, for the pages about the reader |
 
 Alert channels, under `cert-alert.alerts`:
 

@@ -61,6 +61,13 @@
                     CertAlert.refreshAll();
                 })
                 .fail(function (xhr) {
+                    // On a demo the same 403 means the demo refusing to be changed, and
+                    // the visitor is an administrator - so the badge below would be a
+                    // plain lie. The refusal has already said what it was.
+                    if (xhr.status === 403 && CertAlert.isDemo()) {
+                        $status.text('');
+                        return;
+                    }
                     if (xhr.status === 403) {
                         $status.html('<span class="badge bg-red-lt">not an administrator</span>');
                         return;

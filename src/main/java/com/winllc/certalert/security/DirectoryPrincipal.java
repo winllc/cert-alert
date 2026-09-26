@@ -42,7 +42,9 @@ public class DirectoryPrincipal implements UserDetails {
         /** A client certificate the directory publishes. */
         X509,
         /** A successful bind to the directory. */
-        LDAP
+        LDAP,
+        /** Nobody signed in: the read-only demo, where everyone arrives as the same visitor. */
+        NONE
     }
 
     @Override

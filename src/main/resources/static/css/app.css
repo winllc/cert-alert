@@ -305,6 +305,56 @@ td.pocs {
     }
 }
 
+/* The strip under the navigation bar on a demo. Part of the dark bar rather than a card
+   of its own, so it reads as a property of the whole application and not as one more thing
+   on the page that can be dismissed or scrolled past. */
+/* navbar-expand-md sets nowrap at desktop widths, so the strip would sit inline and take
+   the room from the navigation. Said with a class rather than :has(), which not every
+   browser on an accredited network is new enough for. */
+.navbar.has-demo-strip {
+    flex-wrap: wrap;
+}
+
+.demo-strip {
+    padding: 0.5rem 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    background: transparent;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 0.8125rem;
+    text-align: center;
+}
+
+/* What a demo says when somebody presses something. Fixed at the bottom so it is the same
+   place whichever button it was, and out of the way of the classification banner at the
+   top. */
+.demo-notice {
+    position: fixed;
+    left: 50%;
+    bottom: 2.5rem;
+    z-index: 1080;
+    transform: translate(-50%, 0.5rem);
+    padding: 0.5rem 1rem;
+    border-radius: 999px;
+    background: var(--tblr-dark);
+    color: #fff;
+    font-size: 0.875rem;
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.25);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.demo-notice.is-shown {
+    opacity: 1;
+    transform: translate(-50%, 0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .demo-notice {
+        transition: none;
+    }
+}
+
 /* An unread notification, which is most of what somebody is looking for on that page. */
 tr.notification-unread td {
     font-weight: 500;

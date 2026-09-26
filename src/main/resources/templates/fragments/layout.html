@@ -11,6 +11,9 @@
     <!-- The tables POST, so every request needs the CSRF token; the scripts read it here. -->
     <meta name="_csrf" th:content="${_csrf != null} ? ${_csrf.token} : ''">
     <meta name="_csrf_header" th:content="${_csrf != null} ? ${_csrf.headerName} : ''">
+    <!-- On a demo, so the scripts know a refusal is the demo refusing rather than a session
+         that has run out - the two look identical over HTTP and want opposite responses. -->
+    <meta th:if="${demo}" name="cert-alert-demo" content="true">
     <!-- Everything is served from the jar rather than a CDN: this runs on networks with no
          route to one. Tabler bundles the Bootstrap it is built on, so it comes first and
          DataTables' Bootstrap 5 integration layers on top. -->
@@ -78,7 +81,8 @@
 <body>
 
 <!--/* The application shell: brand, navigation, and who is signed in. */-->
-<header th:fragment="navbar(active)" class="navbar navbar-expand-md d-print-none" data-bs-theme="dark">
+<header th:fragment="navbar(active)" class="navbar navbar-expand-md d-print-none"
+        th:classappend="${demo} ? 'has-demo-strip'" data-bs-theme="dark">
     <div class="container-xl">
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar-menu"
                 aria-label="Toggle navigation">
@@ -117,7 +121,8 @@
                         <div class="mt-1 small text-secondary">
                             <span th:text="${isAdmin} ? 'Administrator' : 'Reader'">Reader</span>
                             &middot;
-                            <span th:text="'via ' + ${currentUser.method}">via X509</span>
+                            <span th:if="${demo}">read-only demo</span>
+                            <span th:unless="${demo}" th:text="'via ' + ${currentUser.method}">via X509</span>
                         </div>
                     </div>
                 </a>
@@ -126,12 +131,18 @@
                     <div class="dropdown-item-text small text-secondary" th:if="${currentUser.directoryDn != null}"
                          th:text="${currentUser.directoryDn}">dn</div>
                     <div class="dropdown-divider"></div>
-                    <form method="post" th:action="@{/logout}">
+                    <!--/* Nothing to sign out of in a demo, and the form would be refused
+                           like every other write. */-->
+                    <form method="post" th:action="@{/logout}" th:unless="${demo}">
                         <button type="submit" class="dropdown-item">
                             <svg class="icon me-2"><use href="#icon-logout"></use></svg>
                             Sign out
                         </button>
                     </form>
+                    <div class="dropdown-item-text small text-secondary" th:if="${demo}">
+                        Everyone who opens this sees the same thing, as an administrator.
+                        Nothing here can be changed.
+                    </div>
                 </div>
             </div>
         </div>
@@ -181,6 +192,15 @@
                 </li>
             </ul>
         </div>
+    </div>
+
+    <!--/* On every page, because somebody arriving at a link in the middle of the
+           application has to be able to tell what they are looking at without pressing
+           anything to find out. Full width, so it wraps onto its own line under the bar. */-->
+    <div th:if="${demo}" class="demo-strip w-100">
+        <span class="badge bg-azure-lt me-2">Demo</span>
+        Everything here is visible and nothing can be changed. The administration pages and
+        their controls are shown as they are &mdash; pressing one says so.
     </div>
 </header>
 

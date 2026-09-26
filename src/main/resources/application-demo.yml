@@ -1,0 +1,44 @@
+# A demo: a running copy anybody can look at and nobody can change.
+#
+#   ./gradlew bootRun --args='--spring.profiles.active=dev,demo'
+#
+# Turned on beside another profile rather than instead of one: this file says who may do
+# what and nothing about where the data comes from. With dev that is the embedded sample
+# directory, which is a demo that needs nothing else to run. With postgres and a generated
+# directory it is a demo somebody else can reach.
+#
+# What this profile does NOT do is make it safe to point at real data. Every visitor gets
+# the administrator's view of the whole directory with no sign-in at all. That is a
+# reasonable thing to do with invented entries, on an instance you can throw away, and
+# never with somebody's real directory.
+cert-alert:
+  demo:
+    enabled: true
+    # Somebody for the parts of the UI that are about the person reading the page: the
+    # servers they are a point of contact for, their own notifications. They can no more
+    # change anything than any other visitor.
+    signed-in-as: alice@intelink.ic.gov
+
+  # Nothing that reaches out of this process. Read-only is enforced on every request, so a
+  # visitor cannot start any of these - but the schedules would run them unasked, and a
+  # demo that emails real people or deletes certificates out of a directory is not a demo.
+  notifications:
+    email:
+      enabled: false
+      dry-run: true
+  ldap:
+    prune:
+      enabled: false
+    certificate-cleanup:
+      enabled: false
+    # Left on: the sweep is what fills the tables, and it only writes to this application's
+    # own cache. Every certificate it reads was invented by the generator.
+    sync:
+      enabled: true
+  revocation:
+    # Left on, so the administration page's revocation card is live rather than greyed out
+    # saying it is switched off - a demo of an administration page wants its controls to be
+    # the ones a deployment has. It reaches nowhere: the sample's certificates name no
+    # distribution point and no responder, and neither default is set here, so the check
+    # asks nobody anything. Do not set those defaults on a demo.
+    enabled: true

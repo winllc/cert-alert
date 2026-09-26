@@ -2,8 +2,10 @@ package com.winllc.certalert.security;
 
 import java.util.LinkedHashMap;
 import java.util.List;
+import com.winllc.certalert.demo.DemoMode;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
@@ -47,6 +49,9 @@ import org.springframework.security.web.util.matcher.RequestMatcher;
 @Configuration
 @EnableWebSecurity
 @ConditionalOnProperty(prefix = "cert-alert.security", name = "enabled", matchIfMissing = true)
+// The demo has a policy of its own - no sign-in, and nothing writable - and the two are
+// never both in force: see DemoSecurityConfig.
+@Conditional(DemoMode.Off.class)
 public class SecurityConfig {
 
     private static final String[] PUBLIC_PATHS = {
