@@ -11,6 +11,21 @@
 # the administrator's view of the whole directory with no sign-in at all. That is a
 # reasonable thing to do with invented entries, on an instance you can throw away, and
 # never with somebody's real directory.
+
+# Plain HTTP, whatever the environment says. TLS is here to carry X.509 client
+# certificates, and a demo has no use for them: nobody signs in, so there is nothing for a
+# certificate to authenticate. It also needs a keystore, which a demo does not carry and
+# must never have baked into it - so a demo started where CERT_ALERT_TLS_ENABLED happens to
+# be set would fail to start for want of one, rather than doing anything useful with it.
+#
+# Pinned here rather than left to the default in application.yml, which reads that variable.
+# Deliberately putting a demo behind TLS is still possible - SERVER_SSL_ENABLED=true, or
+# --server.ssl.enabled=true, both of which outrank a profile - but it is no longer something
+# that happens to a demo because of the environment it was started in.
+server:
+  ssl:
+    enabled: false
+
 spring:
   # In memory, and gone with the process. A demo that kept its cache in a file would come
   # back tomorrow still holding yesterday's expiry dates, while the directory beside it

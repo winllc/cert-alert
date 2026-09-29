@@ -581,6 +581,13 @@ the same administrator, which is the point: the administration page, the sync bu
 revocation card and the notification controls are all part of what is being shown, and a
 demo that hid them would be a demo of a different application.
 
+It serves plain HTTP, on `http://localhost:8080`, even where `CERT_ALERT_TLS_ENABLED` is
+set. TLS is here to carry X.509 client certificates, and a demo has nothing for one to
+authenticate; it also needs a keystore, which a demo does not carry — so a demo that
+inherited TLS from its environment would fail to start for want of one. Put a demo behind
+TLS deliberately with `SERVER_SSL_ENABLED=true` and the keystore variables, or terminate it
+in front.
+
 Nothing they press changes anything. **Read-only is a rule about the request, not about the
 buttons** — every method that is not a `GET`, `HEAD` or `OPTIONS` is refused before any
 controller sees it, so a demo's safety does not depend on the UI happening not to offer
