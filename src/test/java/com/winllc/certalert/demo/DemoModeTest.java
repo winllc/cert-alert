@@ -47,7 +47,14 @@ import org.springframework.web.context.WebApplicationContext;
  * what makes it safe to leave running; a change that quietly broke either would leave the
  * other looking fine.
  */
-@SpringBootTest(properties = {"cert-alert.demo.enabled=true", "cert-alert.demo.signed-in-as=demo@example.gov"})
+@SpringBootTest(
+        properties = {
+            "cert-alert.demo.enabled=true",
+            "cert-alert.demo.signed-in-as=demo@example.gov",
+            // This class brings its own directory, on its own port. A demo would otherwise
+            // generate one and try to serve it on the same address.
+            "cert-alert.demo.generate-directory=false"
+        })
 @ActiveProfiles("test")
 class DemoModeTest {
 

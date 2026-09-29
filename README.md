@@ -56,6 +56,7 @@ Two details from the spec shape the design:
 | Tables      | [spring-data-jpa-datatables](https://github.com/darrachequesne/spring-data-jpa-datatables) |
 | UI          | [Tabler](https://tabler.io/admin-template) + Thymeleaf + DataTables, all from webjars |
 | Tests       | JUnit 5, in-memory UnboundID directory, MockMvc          |
+| Demo        | UnboundID in-memory directory, generated and served in-process |
 
 ## Running it
 
@@ -266,8 +267,10 @@ Notes on the image:
   own probes.
 - Keystores for X.509 belong in a mounted volume or a secret. `.dockerignore` excludes
   `*.p12`, `*.jks`, `*.pem` and `*.key` so one cannot be baked in by accident.
-- The image cannot run the `dev` profile: its embedded sample directory is a
-  `developmentOnly` dependency and is deliberately not in the jar.
+- The image can serve a directory of its own, because the LDAP SDK ships in the jar for
+  [demo mode](#demo-mode) — `--spring.profiles.active=demo` is a complete instance in one
+  container, with nothing to point it at. That is for showing the application, never for
+  running it: every visitor is an unauthenticated administrator.
 
 Tests are not run during the image build — CI runs them, and they need an in-memory LDAP
 server and a database. Build with `--build-arg RUN_TESTS=true` to run them anyway.
@@ -565,8 +568,13 @@ A running copy anybody can look at and nobody can change — for showing the app
 people without issuing them a certificate or an account first.
 
 ```bash
-./gradlew bootRun --args='--spring.profiles.active=dev,demo'
+./gradlew bootRun --args='--spring.profiles.active=demo'
 ```
+
+That is the whole of it — nothing else has to be running. The demo generates a directory
+of invented people and servers, serves it from memory over LDAP, and then indexes it the
+way it would index anyone's, so what a visitor sees is the application working rather than
+a mock-up of it.
 
 There is no sign-in page, because there is nothing to sign in to. Every visitor arrives as
 the same administrator, which is the point: the administration page, the sync button, the
@@ -591,16 +599,59 @@ without anybody remembering to add it. The three exceptions are the search table
 `/api/v1/datatables/**` endpoints, which are `POST`s only because that is how DataTables
 sends its paging and filters, and which write nothing.
 
-Two things the demo does for itself, neither of them a visitor's doing: it sweeps the
-directory once at startup when the cache is empty, because otherwise the tables stay blank
-until the small hours; and the profile switches off pruning, certificate cleanup and
-outbound email, because a visitor cannot start those but the schedules would.
+#### The directory it shows
 
-| Setting                        | Default         |                                                     |
-|--------------------------------|-----------------|-----------------------------------------------------|
-| `cert-alert.demo.enabled`      | `false`         | The whole of it. Replaces the ordinary security configuration rather than relaxing it, so the two are never half-applied |
-| `cert-alert.demo.visitor`      | `Demo visitor`  | The name in the corner of the page                  |
-| `cert-alert.demo.signed-in-as` | *(none)*        | An identifier from the sample directory, for the parts of the UI that are about the person reading the page — their servers, their notifications |
+Generated at startup, never shipped as a fixture. Certificates are minted there and then,
+with every window measured from the moment the process started, so "expires in nine days"
+still means nine days on an image built last spring — which is the one thing a demo of an
+expiry tracker cannot get wrong. They are real X.509, signed by a throwaway authority that
+goes with the process; nothing trusts it and nothing authenticates against it.
+
+What it holds is chosen to exercise the application rather than to look tidy:
+
+- **A demo administrator**, `demo.admin@intelink.ic.gov`, who the visitor is signed in as.
+  They are a point of contact for several servers and hold credentials expiring shortly,
+  so the pages that are about the person reading them — their servers, their round-up —
+  have something on them.
+- **Certificates in every state**: good for years, inside the warning window, inside the
+  critical one, lapsed weeks ago, and entries publishing none at all. Dealt from a
+  proportioned deck rather than drawn at random, because sixteen servers drawing
+  independently regularly came up with nothing expired — a demo quietly not showing one of
+  the things it exists to show. Most of it is healthy, so it reads as a busy estate rather
+  than a broken fixture.
+- **Pairs**: people hold a signing certificate and an encryption one, and some hold a pair
+  straddling two issuances, which is the ordinary way to end up half expired.
+- **Points of contact written both ways round**, as an address on some servers and as a
+  person's name on others, because the specification defines `serverPOC` as a name and
+  real directories do both.
+- **A wildcard name** on one server, so the risky-name flag has something to flag.
+
+Seeded, so a demo restarted an hour later is the same demo; only the dates move.
+
+Three things the demo does for itself, none of them a visitor's doing. It sweeps the
+directory once at startup, because otherwise the tables stay blank until the small hours.
+It then runs the expiry round-up, because notifications are written when a sweep sees a
+certificate *change* state and on a first sweep nothing has changed — everything is simply
+new — which would leave the notifications page empty beside tables full of things expiring
+this week. And the profile switches off pruning, certificate cleanup and outbound email,
+because a visitor cannot start those but the schedules would.
+
+The database is in-memory and goes with the process, so every start is a fresh directory
+and a fresh index of it. A demo that kept its cache in a file would come back tomorrow
+still holding yesterday's dates while the directory beside it had been generated afresh.
+
+To demonstrate against a directory that is already running instead — the one in the
+compose file, or a generated LDIF loaded into a real server — set
+`cert-alert.demo.generate-directory: false` and point `spring.ldap.urls` at it.
+
+| Setting                                  | Default         |                                           |
+|------------------------------------------|-----------------|-------------------------------------------|
+| `cert-alert.demo.enabled`                | `false`         | The whole of it. Replaces the ordinary security configuration rather than relaxing it, so the two are never half-applied |
+| `cert-alert.demo.visitor`                | `Demo visitor`  | The name in the corner of the page        |
+| `cert-alert.demo.signed-in-as`           | *(none)*        | An identifier from the directory, for the parts of the UI that are about the person reading the page — their servers, their notifications |
+| `cert-alert.demo.generate-directory`     | `true`          | Whether the demo brings a directory of its own. Off to point it at one already running |
+| `cert-alert.demo.people` / `.servers`    | `24` / `16`     | How much to generate                      |
+| `cert-alert.demo.seed`                   | `20260101`      | Fixes the choices, so a restart is the same demo. The dates always move with it |
 
 > **Never point a demo at a real directory.** Every visitor gets an administrator's view of
 > every entry in it, with no sign-in at all. That is a reasonable thing to do with invented
@@ -1951,11 +2002,14 @@ Access, under `cert-alert.security`:
 A demo, under `cert-alert.demo` — see [Demo mode](#demo-mode), and never against a real
 directory:
 
-| Property        | Default        | Purpose                                                  |
-|-----------------|----------------|----------------------------------------------------------|
-| `enabled`       | `false`        | No sign-in, every read allowed, every write refused       |
-| `visitor`       | `Demo visitor` | The name shown in the corner of the page                  |
-| `signed-in-as`  | `""`           | Who the visitor counts as, for the pages about the reader |
+| Property             | Default        | Purpose                                         |
+|----------------------|----------------|-------------------------------------------------|
+| `enabled`            | `false`        | No sign-in, every read allowed, every write refused  |
+| `visitor`            | `Demo visitor` | The name shown in the corner of the page             |
+| `signed-in-as`       | `""`           | Who the visitor counts as, for the pages about the reader |
+| `generate-directory` | `true`         | Bring a directory of its own, generated at startup   |
+| `people` / `servers` | `24` / `16`    | How much to generate                                 |
+| `seed`               | `20260101`     | Fixes the choices; the dates always move with startup |
 
 Alert channels, under `cert-alert.alerts`:
 

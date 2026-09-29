@@ -1,32 +1,75 @@
 # A demo: a running copy anybody can look at and nobody can change.
 #
-#   ./gradlew bootRun --args='--spring.profiles.active=dev,demo'
+#   ./gradlew bootRun --args='--spring.profiles.active=demo'
 #
-# Turned on beside another profile rather than instead of one: this file says who may do
-# what and nothing about where the data comes from. With dev that is the embedded sample
-# directory, which is a demo that needs nothing else to run. With postgres and a generated
-# directory it is a demo somebody else can reach.
+# Stands on its own, and needs nothing else to be running. It generates a directory of
+# invented people and servers, serves it from memory over LDAP, and then indexes it the
+# way it would index anyone's - so what a visitor is shown is the application working,
+# not a mock-up of it.
 #
 # What this profile does NOT do is make it safe to point at real data. Every visitor gets
 # the administrator's view of the whole directory with no sign-in at all. That is a
 # reasonable thing to do with invented entries, on an instance you can throw away, and
 # never with somebody's real directory.
+spring:
+  # In memory, and gone with the process. A demo that kept its cache in a file would come
+  # back tomorrow still holding yesterday's expiry dates, while the directory beside it
+  # had been generated fresh - the tables and the entries they came from disagreeing is a
+  # worse first impression than a few seconds of sweeping at startup.
+  datasource:
+    url: jdbc:h2:mem:cert-alert-demo;DB_CLOSE_DELAY=-1
+
+  # Where the demo's own directory listens. One setting, read by both sides: the
+  # application connects here and DemoDirectoryServer binds whatever port it names.
+  ldap:
+    urls: ldap://localhost:18390
+    base: dc=example,dc=test
+    username: ""
+    password: ""
+
 cert-alert:
   demo:
     enabled: true
-    # Somebody for the parts of the UI that are about the person reading the page: the
-    # servers they are a point of contact for, their own notifications. They can no more
-    # change anything than any other visitor.
-    signed-in-as: alice@intelink.ic.gov
+    # The visitor is this person - an entry the generated directory holds, who is a point
+    # of contact for some of its servers, so the pages about the person reading them have
+    # something on them. They can no more change anything than any other visitor.
+    signed-in-as: demo.admin@intelink.ic.gov
+    visitor: Demo Administrator
+    # Enough to page and filter; small enough to be serving pages seconds after starting.
+    people: 24
+    servers: 16
+
+  security:
+    # The same person, so the administration pages they are shown are ones they hold the
+    # role for. The demo would let them in regardless - what a visitor may do is decided
+    # by the request being a read - but a visitor whose own role said otherwise would see
+    # an administrator's navigation above a reader's pages.
+    admin-identifiers: [demo.admin@intelink.ic.gov]
+    ldap:
+      user-search-base: ou=people
+      user-search-filter: "(uid={0})"
 
   # Nothing that reaches out of this process. Read-only is enforced on every request, so a
   # visitor cannot start any of these - but the schedules would run them unasked, and a
   # demo that emails real people or deletes certificates out of a directory is not a demo.
   notifications:
     email:
+      # Off, so nothing reaches anybody's inbox. That is the setting that stops mail.
       enabled: false
-      dry-run: true
+      # And deliberately NOT dry-run. A rehearsal is defined to write nothing down, so a
+      # demo that left it on would gather the round-up, report what it would have sent,
+      # and then discard it - leaving the notifications page empty beside tables full of
+      # things expiring this week. The Dry run button still rehearses on demand.
+      dry-run: false
   ldap:
+    user:
+      search-base: ou=people
+    server:
+      search-base: ou=servers
+      # The generated directory writes serverPOC both ways round - as an address and as a
+      # person's name - because the specification defines it as a name and real
+      # directories do both. Keeping the names is the point, so this reads it that way.
+      require-email-poc: false
     prune:
       enabled: false
     certificate-cleanup:

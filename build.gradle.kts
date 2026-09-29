@@ -49,15 +49,17 @@ dependencies {
     runtimeOnly("org.webjars.npm:tabler__core:1.5.1")
 
     developmentOnly("org.springframework.boot:spring-boot-devtools")
-    // Backs the dev profile's embedded sample directory. Excluded from the built jar.
-    developmentOnly("com.unboundid:unboundid-ldapsdk")
+    // Backs the dev profile's embedded sample directory and the demo's generated one.
+    // Ships in the jar rather than being developmentOnly, because a demo is something you
+    // run from the image: it stands up its own directory, and cannot do that from a
+    // dependency the build left behind. It also mints the demo's certificates, which is
+    // why there is no separate crypto library here.
+    implementation("com.unboundid:unboundid-ldapsdk")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     // Spring Boot 4 ships test slices as separate modules; this one provides @WebMvcTest.
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
     testImplementation("org.springframework.security:spring-security-test")
-    // In-memory LDAP server, so the sync is tested against a real directory protocol.
-    testImplementation("com.unboundid:unboundid-ldapsdk")
     // Test-only: mints certificates with exact expiry offsets for the sync tests.
     testImplementation("org.bouncycastle:bcpkix-jdk18on:1.86")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

@@ -46,6 +46,68 @@ public class DemoProperties {
      */
     private String signedInAs = "";
 
+    /**
+     * Whether the demo brings a directory of its own.
+     *
+     * <p>On, which is what makes a demo something you can start with nothing else running.
+     * Turn it off to demonstrate against a directory that is already there - the sample
+     * one in the compose file, or a generated one loaded into a real server - in which
+     * case {@code spring.ldap.urls} points at that and nothing here is generated.
+     */
+    private boolean generateDirectory = true;
+
+    public boolean isGenerateDirectory() {
+        return generateDirectory;
+    }
+
+    public void setGenerateDirectory(boolean generateDirectory) {
+        this.generateDirectory = generateDirectory;
+    }
+
+    /**
+     * How many people the generated directory holds, and how many servers.
+     *
+     * <p>Enough that the tables page, the filters have something to narrow and the metrics
+     * have a shape - and small enough that a demo is serving pages a second or two after
+     * it starts.
+     */
+    private int people = 24;
+
+    private int servers = 16;
+
+    /**
+     * Fixes the generated directory, so a demo restarted an hour later is the same demo.
+     *
+     * <p>Only the choices are fixed: the dates are always measured from startup, because a
+     * demo of an expiry tracker showing a directory that expired last spring is worse than
+     * no demo.
+     */
+    private long seed = 20260101L;
+
+    public int getPeople() {
+        return people;
+    }
+
+    public void setPeople(int people) {
+        this.people = people;
+    }
+
+    public int getServers() {
+        return servers;
+    }
+
+    public void setServers(int servers) {
+        this.servers = servers;
+    }
+
+    public long getSeed() {
+        return seed;
+    }
+
+    public void setSeed(long seed) {
+        this.seed = seed;
+    }
+
     public boolean isEnabled() {
         return enabled;
     }

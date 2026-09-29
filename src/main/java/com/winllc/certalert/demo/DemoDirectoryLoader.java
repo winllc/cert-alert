@@ -2,6 +2,7 @@ package com.winllc.certalert.demo;
 
 import com.winllc.certalert.repository.DirectoryUserRepository;
 import com.winllc.certalert.service.DirectorySyncService;
+import com.winllc.certalert.service.NotificationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
@@ -21,6 +22,13 @@ import org.springframework.stereotype.Component;
  * a database that already holds a directory - a demo that has been restarted - it leaves it
  * alone and comes up immediately.
  *
+ * <p>The expiry round-up runs after the sweep for the same reason. Notifications are
+ * written when a sweep sees a certificate change state, and on a first sweep nothing has
+ * changed state - everything is simply new - so the notifications page of a freshly
+ * started demo says there is nothing to report while the tables behind it are full of
+ * things expiring this week. The round-up is what gathers those, and it is the one thing
+ * on that page a visitor cannot press for themselves.
+ *
  * <p>This is the application's own doing rather than a visitor's, which is the line the
  * read-only rule draws: nothing anybody does to a demo changes it.
  */
@@ -31,10 +39,13 @@ public class DemoDirectoryLoader implements ApplicationRunner {
     private static final Logger log = LoggerFactory.getLogger(DemoDirectoryLoader.class);
 
     private final DirectorySyncService syncService;
+    private final NotificationService notifications;
     private final DirectoryUserRepository users;
 
-    public DemoDirectoryLoader(DirectorySyncService syncService, DirectoryUserRepository users) {
+    public DemoDirectoryLoader(
+            DirectorySyncService syncService, NotificationService notifications, DirectoryUserRepository users) {
         this.syncService = syncService;
+        this.notifications = notifications;
         this.users = users;
     }
 
@@ -52,6 +63,16 @@ public class DemoDirectoryLoader implements ApplicationRunner {
             // A demo with empty tables is a poor demo; a demo that will not start is none
             // at all. Whatever is wrong with the directory, the pages still serve.
             log.warn("Demo: could not sweep the directory: {}", e.toString());
+            return;
+        }
+        try {
+            // A real round-up, not a rehearsal: a rehearsal deliberately writes nothing,
+            // and what this is for is the rows. Sending is off in the demo profile, so it
+            // gathers and goes nowhere.
+            log.info("Demo: running the expiry round-up, so the notifications page has something on it");
+            notifications.digest();
+        } catch (RuntimeException e) {
+            log.warn("Demo: could not run the round-up: {}", e.toString());
         }
     }
 }
