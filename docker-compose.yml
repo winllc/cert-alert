@@ -9,11 +9,15 @@
 # The directory publishes cn=changelog, so the changelog connector can be tried here:
 # set CERT_ALERT_LDAP_CHANGELOG_ENABLED=true in the application's environment.
 #
-# Sign in at http://localhost:8181 as alice / password, then press Sync directory.
+# Nothing is published to the host: everything here has a default password and the
+# directory serves plaintext LDAP, so binding any of it to an interface is opt-in. Add the
+# ports overlay to reach the UI from a browser, then sign in as alice / password at
+# http://localhost:8181 and press Sync directory:
 #
-# Set CERT_ALERT_PORT to publish it somewhere else:
+#   docker compose -f docker-compose.yml -f docker-compose.ports.yml up --build
 #
-#   CERT_ALERT_PORT=9090 docker compose up --build
+# Without it, the services still talk to each other over the compose network, and a shell
+# reaches them with `docker compose exec`.
 #
 # To point it at a real directory instead, override the CERT_ALERT_LDAP_* variables - the
 # stand-in keeps running but nothing reads it:
@@ -64,10 +68,10 @@ services:
       # Mount a directory of your own here to load it instead of generating one; the files
       # are loaded in name order.
       # - ./my-directory:/bootstrap:ro
-    ports:
-      # Exposed so you can point ldapsearch at it; the application reaches it over the
-      # compose network and does not need this.
-      - "1389:3389"
+    # Nothing published to the host. The application reaches the directory over the compose
+    # network, and `docker compose exec directory ldapsearch ...` reaches it from a shell -
+    # neither needs a host port, and an unauthenticated plaintext directory with a default
+    # password is not a thing to bind to an interface by default. See docker-compose.ports.yml.
     networks: [default]
     restart: unless-stopped
 
@@ -101,12 +105,9 @@ services:
       # Whoever should be able to trigger jobs; any value the directory knows them by.
       # alice is the generated directory's administrator.
       CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS: ${CERT_ALERT_ADMINS:-alice@intelink.ic.gov}
-    ports:
-      # Host side only. The application still listens on 8080 inside the container, which
-      # is what the image's EXPOSE, its HEALTHCHECK and every probe path assume; what is
-      # configurable is where it surfaces, because 8080 on a developer's machine is
-      # usually already somebody else's.
-      - "${CERT_ALERT_PORT:-8181}:8080"
+    # Nothing published to the host either - see docker-compose.ports.yml to reach the UI
+    # from a browser. The application still listens on 8080 inside the container, which is
+    # what the image's EXPOSE, its HEALTHCHECK and every probe path assume.
     # Mounts, all read-only and all commented out so a first run needs no directories.
     #
     # tls: X.509 client certificates need TLS, which needs keystores. Mount them rather

@@ -1,0 +1,26 @@
+# Publishes the compose services on the host, for when you want to reach them from a
+# browser or an LDAP client rather than from inside the network.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.ports.yml up --build
+#
+# Kept out of docker-compose.yml so that `docker compose up` binds nothing: everything here
+# has a default password, and the directory serves plaintext LDAP, so what gets bound to an
+# interface should be a thing you asked for rather than the default.
+#
+# Both are configurable, because 8181 and 1389 on your machine may already be somebody
+# else's:
+#
+#   CERT_ALERT_PORT=9090 CERT_ALERT_LDAP_PORT=2389 \
+#     docker compose -f docker-compose.yml -f docker-compose.ports.yml up
+#
+# Only the host side moves. Inside the network the application is still on 8080 and the
+# directory still on 3389, which is what the images' EXPOSE, their HEALTHCHECKs and every
+# probe path assume.
+services:
+  directory:
+    ports:
+      - "${CERT_ALERT_LDAP_PORT:-1389}:3389"
+
+  cert-alert:
+    ports:
+      - "${CERT_ALERT_PORT:-8181}:8080"

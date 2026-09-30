@@ -149,10 +149,22 @@ docker compose up --build
 
 That brings up three services — PostgreSQL, a stand-in 389 Directory Server, and the
 application —
-and waits for the first two to be healthy before starting the third. Sign in at
-<http://localhost:8181> as `alice` / `password` and press **Sync directory**.
+and waits for the first two to be healthy before starting the third.
 
-`CERT_ALERT_PORT` publishes it somewhere else — `CERT_ALERT_PORT=9090 docker compose up`.
+**Nothing is published to the host.** Everything in the file has a default password and the
+directory serves plaintext LDAP, so binding any of it to an interface is opt-in rather than
+what happens by default. The services still reach each other over the compose network, and
+`docker compose exec` reaches them from a shell.
+
+To reach the UI from a browser, add the ports overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.ports.yml up --build
+```
+
+Then sign in at <http://localhost:8181> as `alice` / `password` and press **Sync
+directory**. `CERT_ALERT_PORT` and `CERT_ALERT_LDAP_PORT` move the host side —
+`CERT_ALERT_PORT=9090 docker compose -f docker-compose.yml -f docker-compose.ports.yml up`.
 Only the host side moves: the application still listens on 8080 inside the container, which
 is what the image's `EXPOSE`, its `HEALTHCHECK` and every probe path assume.
 
@@ -172,7 +184,8 @@ docker compose up --build
 `docker/389ds/` builds a **389 Directory Server** carrying
 `docker/389ds/schema/99ic-fsd.ldif` — the IC FSD attributes and the `icOrgPerson` and
 `icOrgServer` object classes, with the OIDs the specification publishes. It is a demo, and
-looks like one: plaintext LDAP on port 1389, and a default password on everything.
+looks like one: plaintext LDAP, and a default password on everything — which is why it is
+not published to the host unless you ask for it.
 
 **It publishes `cn=changelog`**, which is why it is 389-ds and not the OpenLDAP stand-in it
 replaced. The retro changelog is switched on at first boot, so
@@ -202,14 +215,17 @@ this was built for. How much is up to you:
 CERT_ALERT_DUMMY_USERS=5000 CERT_ALERT_DUMMY_SERVERS=1500 docker compose up --build
 ```
 
-Or mount an LDIF of your own at `/bootstrap` and it loads that instead. `ldapsearch` works
-against it from the host:
+Or mount an LDIF of your own at `/bootstrap` and it loads that instead. `ldapsearch` is in
+the image, so it works against the directory without publishing anything:
 
 ```bash
-ldapsearch -x -H ldap://localhost:1389 \
+docker compose exec directory ldapsearch -x -H ldap://localhost:3389 \
   -D 'cn=cert-alert,ou=services,dc=example,dc=test' -w cert-alert \
   -b 'dc=example,dc=test' '(objectClass=icOrgServer)' cn serverPOC
 ```
+
+With the ports overlay up you can run the same query from the host against
+`ldap://localhost:1389` instead.
 
 One thing it cannot demonstrate: it serves plain LDAP, so X.509 sign-in still needs
 keystores of your own.
@@ -222,9 +238,15 @@ directory of your own:
 
 ```bash
 ./scripts/generate-directory-data.sh --users 500 --servers 200 > directory.ldif
+# Into the stand-in, which publishes no port: copy it in, then add it from inside.
+docker compose cp directory.ldif directory:/tmp/directory.ldif
 # -c because the LDIF carries ou=people and ou=servers, which a directory may already have
-ldapadd -c -x -H ldap://localhost:1389 -D 'cn=Directory Manager' -w directory-manager -f directory.ldif
+docker compose exec directory ldapadd -c -x -H ldap://localhost:3389 \
+  -D 'cn=Directory Manager' -w directory-manager -f /tmp/directory.ldif
 ```
+
+Against a directory of your own, that is an ordinary `ldapadd -H ldap://your-host` with no
+container involved.
 
 What it produces is deliberate rather than random: the same arguments give the same people
 and servers every time, down to the addresses and who contacts whom. Only the certificates
@@ -2047,6 +2069,7 @@ class SlackAlertNotifier implements AlertNotifier {
 ```
 Dockerfile               three-stage image build
 docker-compose.yml       the application, a PostgreSQL and a stand-in directory
+docker-compose.ports.yml opt-in overlay that publishes them on the host
 docker/389ds/            389 Directory Server carrying the IC FSD schema and a changelog
 scripts/                 the dummy directory generator
 src/main/java/com/winllc/certalert/
