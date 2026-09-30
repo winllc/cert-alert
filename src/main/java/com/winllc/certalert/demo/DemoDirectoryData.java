@@ -28,11 +28,6 @@ import java.util.Random;
  */
 final class DemoDirectoryData {
 
-    /** Who the visitor is taken to be. A point of contact, so their own pages hold something. */
-    static final String ADMIN_UID = "demo.admin";
-    static final String ADMIN_EMAIL = "demo.admin@intelink.ic.gov";
-    static final String ADMIN_NAME = "Demo Administrator";
-
     private static final String[] GIVEN_NAMES = {
         "Alice", "Bob", "Carol", "Dana", "Erin", "Frank", "Grace", "Hector", "Iris", "Jamal",
         "Kira", "Liam", "Maya", "Noor", "Omar", "Priya", "Quinn", "Rosa", "Sam", "Tara",
@@ -102,14 +97,16 @@ final class DemoDirectoryData {
     private final DemoCertificates certificates;
     private final Instant now;
     private final Random random;
+    private final String password;
 
-    DemoDirectoryData(String baseDn, DemoCertificates certificates, Instant now, long seed) {
+    DemoDirectoryData(String baseDn, DemoCertificates certificates, Instant now, long seed, String password) {
         this.baseDn = baseDn;
         this.peopleDn = "ou=people," + baseDn;
         this.serversDn = "ou=servers," + baseDn;
         this.certificates = certificates;
         this.now = now;
         this.random = new Random(seed);
+        this.password = password;
     }
 
     /** Every entry, structure first, in the order a directory would hold them. */
@@ -122,13 +119,29 @@ final class DemoDirectoryData {
         List<String> addresses = new ArrayList<>();
         List<String> names = new ArrayList<>();
 
-        // The administrator first, and always the same, because the demo signs the visitor
-        // in as them: a generated identifier that moved between runs would leave the
-        // visitor resolving to nobody.
-        entries.add(person(ADMIN_UID, "Demo", "Administrator", ADMIN_NAME, ADMIN_EMAIL,
-                "Information Assurance Officer", "Enterprise IT", Health.EXPIRING_SOON, true, false));
-        addresses.add(ADMIN_EMAIL);
-        names.add(ADMIN_NAME);
+        // The accounts a visitor signs in as, first and always the same. Their uids are
+        // printed on the sign-in page and typed by a person, so unlike the generated crowd
+        // below they cannot move with the size of the directory.
+        //
+        // All four are expiring soon, so whichever one a visitor picks, the pages that are
+        // about the person reading them have something on them rather than being empty in
+        // a way that looks like a bug.
+        for (DemoAccounts.Account account : DemoAccounts.ALL) {
+            String[] parts = account.displayName().split(" ", 2);
+            entries.add(person(
+                    account.uid(),
+                    parts[0],
+                    parts.length > 1 ? parts[1] : parts[0],
+                    account.displayName(),
+                    account.email(),
+                    account.role(),
+                    "Enterprise IT",
+                    Health.EXPIRING_SOON,
+                    true,
+                    false));
+            addresses.add(account.email());
+            names.add(account.displayName());
+        }
 
         List<Health> peopleHealth = deal(people);
         for (int i = 0; i < people; i++) {
@@ -177,9 +190,9 @@ final class DemoDirectoryData {
         Entry entry = new Entry("uid=" + uid + "," + peopleDn);
         entry.addAttribute("objectClass", "top", "person", "organizationalPerson", "inetOrgPerson", "icOrgPerson");
         entry.addAttribute("uid", uid);
-        // Everyone carries the same password, and none of it is a secret: a demo has no
-        // sign-in at all, and this is here only so the entry is shaped like a real one.
-        entry.addAttribute("userPassword", "password");
+        // Everyone carries the same password. It is not a secret: these people are
+        // invented and the directory holding them goes with the process.
+        entry.addAttribute("userPassword", password);
         entry.addAttribute("cn", displayName);
         entry.addAttribute("sn", family);
         entry.addAttribute("givenName", given);
@@ -241,17 +254,22 @@ final class DemoDirectoryData {
         entry.addAttribute("o", "Example Agency");
         entry.addAttribute("ou", "servers");
 
-        // The administrator looks after every third one, so the pages about the person
-        // reading them are not empty.
+        // Two of the sign-in accounts are points of contact, and one deliberately is not.
+        // That is the difference the reader account exists to show: the same pages, with
+        // nothing on the ones that are about you. The project administrator is not a
+        // contact either - what they run a project gives them, not a serverPOC.
         List<String> contacts = new ArrayList<>();
         if (index % 3 == 0) {
-            contacts.add(ADMIN_EMAIL);
+            contacts.add(DemoAccounts.ADMINISTRATOR.email());
+        }
+        if (index % 4 == 2) {
+            contacts.add(DemoAccounts.POINT_OF_CONTACT.email());
         }
         // Written both ways round on purpose: an address on some, a person's name on
         // others, and one that names a team nobody in the directory answers to.
-        contacts.add(addresses.get(random.nextInt(addresses.size())));
+        contacts.add(someoneOtherThanTheReader(addresses));
         if (index % 4 == 1) {
-            contacts.add(names.get(random.nextInt(names.size())));
+            contacts.add(someoneOtherThanTheReader(names));
         }
         if (index % 7 == 3) {
             contacts.add("duty-officer@intelink.ic.gov");
@@ -284,6 +302,24 @@ final class DemoDirectoryData {
      * <p>Guarantees the coverage a demo needs at the sizes a demo runs at, and keeps the
      * proportions once it is larger.
      */
+    /**
+     * Anyone from the directory but the reader.
+     *
+     * <p>The reader account is defined by having nothing to answer for, so a random
+     * serverPOC landing on them would quietly turn them into a point of contact and the
+     * sign-in page would be describing a role the demo no longer has.
+     */
+    private String someoneOtherThanTheReader(List<String> candidates) {
+        for (int attempt = 0; attempt < 8; attempt++) {
+            String candidate = candidates.get(random.nextInt(candidates.size()));
+            if (!candidate.equalsIgnoreCase(DemoAccounts.READER.email())
+                    && !candidate.equalsIgnoreCase(DemoAccounts.READER.displayName())) {
+                return candidate;
+            }
+        }
+        return DemoAccounts.ADMINISTRATOR.email();
+    }
+
     private List<Health> deal(int count) {
         List<Health> deck = new ArrayList<>(count);
         if (count >= Health.values().length) {

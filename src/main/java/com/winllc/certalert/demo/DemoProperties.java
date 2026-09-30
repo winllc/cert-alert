@@ -29,22 +29,22 @@ public class DemoProperties {
     private boolean enabled = false;
 
     /**
-     * What to call the visitor in the account menu.
+     * The password every demo account carries, printed on the sign-in page.
      *
-     * <p>Says what they are rather than pretending to be somebody: a demo that greets
-     * everybody as "Alice Archer" invites the question of who else is looking.
+     * <p>One password across all of them, because what a demo is showing is the roles, not
+     * the passwords: four different secrets to mistype would be four ways to fail at the
+     * only step before the thing you came to look at. It is not a credential - the accounts
+     * it opens are invented and the directory holding them goes with the process.
      */
-    private String visitor = "Demo visitor";
+    private String password = "password";
 
-    /**
-     * An identifier the sample directory knows, or empty.
-     *
-     * <p>A few things in the UI are about the person reading the page - the servers they
-     * are a point of contact for, their own notifications - and with nobody signed in they
-     * have nothing to show. Naming one of the sample's people here gives the demo somebody
-     * to be for those, without that person being able to change anything either.
-     */
-    private String signedInAs = "";
+    public String getPassword() {
+        return password;
+    }
+
+    public void setPassword(String password) {
+        this.password = password;
+    }
 
     /**
      * Whether the demo brings a directory of its own.
@@ -116,19 +116,4 @@ public class DemoProperties {
         this.enabled = enabled;
     }
 
-    public String getVisitor() {
-        return visitor;
-    }
-
-    public void setVisitor(String visitor) {
-        this.visitor = visitor;
-    }
-
-    public String getSignedInAs() {
-        return signedInAs;
-    }
-
-    public void setSignedInAs(String signedInAs) {
-        this.signedInAs = signedInAs == null ? "" : signedInAs.trim();
-    }
 }

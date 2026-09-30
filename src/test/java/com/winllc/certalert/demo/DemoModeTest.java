@@ -1,26 +1,26 @@
 package com.winllc.certalert.demo;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestBuilders.formLogin;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.security.test.web.servlet.response.SecurityMockMvcResultMatchers.authenticated;
+import static org.springframework.security.test.web.servlet.response.SecurityMockMvcResultMatchers.unauthenticated;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.forwardedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.winllc.certalert.security.DirectoryPrincipal;
-import com.winllc.certalert.security.DirectoryPrincipalResolver;
 import com.winllc.certalert.security.SecurityConfig;
+import com.winllc.certalert.service.DirectorySyncService;
 import com.winllc.certalert.support.EmbeddedDirectory;
-import jakarta.servlet.FilterChain;
-import jakarta.servlet.ServletRequest;
-import jakarta.servlet.ServletResponse;
-import jakarta.servlet.http.HttpServletRequest;
-import java.security.Principal;
+import com.winllc.certalert.support.TestCertificates;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -29,8 +29,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 import org.springframework.http.MediaType;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.GrantedAuthority;
+import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -40,23 +39,35 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 /**
- * A demo: no sign-in, every page readable, nothing changeable.
+ * A demo: sign in as anybody, change nothing.
  *
- * <p>The two halves are tested separately on purpose. That a visitor can reach the
- * administration pages is the point of the thing, and that they cannot change anything is
- * what makes it safe to leave running; a change that quietly broke either would leave the
- * other looking fine.
+ * <p>The two halves are tested separately on purpose. That signing in as one account shows
+ * something another does not is the point of the thing, and that none of them can change
+ * anything is what makes it safe to leave running; a change that quietly broke either
+ * would leave the other looking fine.
+ *
+ * <p>The administrator's cases matter most. They are the account with the most to see, so
+ * they are the one whose write being refused is easiest to get wrong - a rule written as
+ * "administrators may" would pass every other test here.
  */
 @SpringBootTest(
         properties = {
             "cert-alert.demo.enabled=true",
-            "cert-alert.demo.signed-in-as=demo@example.gov",
             // This class brings its own directory, on its own port. A demo would otherwise
             // generate one and try to serve it on the same address.
             "cert-alert.demo.generate-directory=false"
         })
 @ActiveProfiles("test")
 class DemoModeTest {
+
+    /** The password every entry in the embedded directory carries. */
+    private static final String PASSWORD = "password";
+
+    /** Named in cert-alert.security.admin-identifiers for the test profile. */
+    private static final String ADMIN = "admin";
+
+    /** Signed in, and nothing more. */
+    private static final String READER = "dana";
 
     private static EmbeddedDirectory directory;
 
@@ -66,15 +77,21 @@ class DemoModeTest {
     @Autowired
     private ApplicationContext beans;
 
+    @Autowired
+    private DirectorySyncService syncService;
+
     private MockMvc mockMvc;
+    private MockHttpSession admin;
+    private MockHttpSession reader;
 
     @BeforeAll
     static void startDirectory() {
         directory = new EmbeddedDirectory();
         Instant now = Instant.now();
-        byte[] certificate = com.winllc.certalert.support.TestCertificates.der(
+        byte[] certificate = TestCertificates.der(
                 "dana@example.gov", now.minus(Duration.ofDays(30)), now.plus(Duration.ofDays(20)));
-        directory.addUser("dana", "Dana Day", "dana@example.gov", certificate);
+        directory.addUser(READER, "Dana Day", "dana@example.gov", certificate);
+        directory.addUser(ADMIN, "Ada Admin", "admin@example.gov");
         directory.addServer("web09", "https://web09.example.gov", new String[] {"dana@example.gov"}, certificate);
     }
 
@@ -94,10 +111,13 @@ class DemoModeTest {
     }
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
                 .apply(SecurityMockMvcConfigurers.springSecurity())
                 .build();
+        syncService.syncUsers();
+        admin = signIn(ADMIN);
+        reader = signIn(READER);
     }
 
     // --- one policy or the other, never both -------------------------------------------
@@ -108,23 +128,84 @@ class DemoModeTest {
         assertThat(beans.getBeanNamesForType(DemoSecurityConfig.class)).hasSize(1);
     }
 
-    // --- everything readable, without signing in ---------------------------------------
+    // --- the sign-in page, and its accounts ----------------------------------------------
 
+    /**
+     * The trap this is here for: an anonymous token reports itself authenticated, so a
+     * rule written as "is this authenticated" let a demo serve every page to somebody who
+     * had never been near the form.
+     */
     @Test
-    void everyPageIsServedToSomebodyWhoNeverSignedIn() throws Exception {
-        for (String page : new String[] {"/users", "/servers", "/projects", "/metrics", "/notifications"}) {
-            mockMvc.perform(get(page)).andExpect(status().isOk());
+    void nothingIsServedBeforeSigningIn() throws Exception {
+        for (String page : new String[] {"/users", "/servers", "/projects", "/metrics", "/notifications", "/admin"}) {
+            mockMvc.perform(get(page))
+                    .andExpect(status().is3xxRedirection())
+                    .andExpect(redirectedUrl("/login"));
         }
-        // The front page is the application's own redirect onto the people table. Named
-        // here because the failure worth catching is it pointing at a sign-in page.
-        mockMvc.perform(get("/")).andExpect(redirectedUrl("/users"));
+        mockMvc.perform(get("/login")).andExpect(status().isOk());
     }
 
-    /** The point of a demo of this application: the administration pages are part of it. */
+    /** The accounts, and the password that opens them, are on the page a visitor lands on. */
     @Test
-    void theAdministrationPagesAreOpenToo() throws Exception {
-        mockMvc.perform(get("/admin")).andExpect(status().isOk());
-        mockMvc.perform(get("/api/v1/audit/summary")).andExpect(status().isOk());
+    void theSignInPageListsTheDemoAccounts() throws Exception {
+        String page = mockMvc.perform(get("/login"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        for (DemoAccounts.Account account : DemoAccounts.ALL) {
+            assertThat(page).contains(account.uid());
+            assertThat(page).contains(account.role());
+        }
+        assertThat(page).contains(PASSWORD);
+    }
+
+    /** A password is checked by binding to the directory, exactly as anywhere else. */
+    @Test
+    void aDirectoryPasswordSignsYouIn() throws Exception {
+        mockMvc.perform(formLogin().user(READER).password(PASSWORD)).andExpect(authenticated());
+        mockMvc.perform(formLogin().user(READER).password("wrong")).andExpect(unauthenticated());
+    }
+
+    // --- what each role may read ---------------------------------------------------------
+
+    @Test
+    void theAdministrationPagesAreTheAdministratorsAlone() throws Exception {
+        mockMvc.perform(get("/admin").session(admin)).andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/audit/summary").session(admin)).andExpect(status().isOk());
+
+        mockMvc.perform(get("/admin").session(reader)).andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/audit/summary").session(reader)).andExpect(status().isForbidden());
+    }
+
+    /**
+     * Refused a page, a browser is sent to the error page rather than handed problem
+     * detail to render in the window.
+     *
+     * <p>Asserted as the forward rather than as the rendered page, because MockMvc records
+     * a forward and does not follow it.
+     */
+    @Test
+    void aRefusedPageIsAPageAndNotProblemDetail() throws Exception {
+        mockMvc.perform(get("/admin").session(reader).accept(MediaType.TEXT_HTML))
+                .andExpect(status().isForbidden())
+                .andExpect(forwardedUrl("/error"));
+    }
+
+    /** The same refusal to a script is problem detail, not a page. */
+    @Test
+    void aRefusedApiReadIsProblemDetail() throws Exception {
+        mockMvc.perform(get("/api/v1/audit/summary").session(reader))
+                .andExpect(status().isForbidden())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+    }
+
+    @Test
+    void everyOtherPageIsOpenToAnybodySignedIn() throws Exception {
+        for (String page : new String[] {"/users", "/servers", "/projects", "/metrics", "/notifications"}) {
+            mockMvc.perform(get(page).session(reader)).andExpect(status().isOk());
+        }
     }
 
     /**
@@ -132,97 +213,98 @@ class DemoModeTest {
      * They are named one by one rather than let through as "POSTs that look harmless".
      */
     @Test
-    void theSearchTablesStillAnswer() throws Exception {
-        for (String table : new String[] {"users", "servers", "audit"}) {
+    void theSearchTablesAnswerAnybodySignedIn() throws Exception {
+        for (String table : new String[] {"users", "servers"}) {
             mockMvc.perform(post("/api/v1/datatables/" + table)
+                            .session(reader)
+                            .with(csrf())
                             .contentType(MediaType.APPLICATION_JSON)
-                            .content(
-                                    """
-                                    {"draw":1,"start":0,"length":10,
-                                     "columns":[{"data":"id","name":"","searchable":true,"orderable":true,
-                                                 "search":{"value":"","regex":false}}],
-                                     "order":[{"column":0,"dir":"asc"}],
-                                     "search":{"value":"","regex":false}}"""))
+                            .content(table("id")))
                     .andExpect(status().isOk());
         }
-    }
-
-    /**
-     * Whoever the controllers see has to be a real authentication: a servlet reports no
-     * principal for an anonymous one, so an {@code Authentication} parameter arrives null
-     * and every administrator check quietly answers no.
-     */
-    @Test
-    void theVisitorIsAnAuthenticatedAdministrator() throws Exception {
-        // Asked of the request as it leaves the security chain, because that is where the
-        // answer differs: an anonymous authentication sits in the context perfectly well
-        // and still reports no principal here.
-        AtomicReference<Principal> seen = new AtomicReference<>();
-        MockMvcBuilders.webAppContextSetup(context)
-                .apply(SecurityMockMvcConfigurers.springSecurity())
-                .addFilter((ServletRequest request, ServletResponse response, FilterChain chain) -> {
-                    seen.set(((HttpServletRequest) request).getUserPrincipal());
-                    chain.doFilter(request, response);
-                })
-                .build()
-                .perform(get("/admin"))
+        // The audit table is the whole trail, so it follows the administration page.
+        mockMvc.perform(post("/api/v1/datatables/audit")
+                        .session(admin)
+                        .with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(table("occurredAt")))
                 .andExpect(status().isOk());
-
-        assertThat(seen.get()).isInstanceOf(Authentication.class);
-        Authentication authentication = (Authentication) seen.get();
-        assertThat(authentication.isAuthenticated()).isTrue();
-        assertThat(authentication.getAuthorities().stream().map(GrantedAuthority::getAuthority))
-                .contains(DirectoryPrincipalResolver.ROLE_USER, DirectoryPrincipalResolver.ROLE_ADMIN);
-        assertThat(authentication.getPrincipal()).isInstanceOf(DirectoryPrincipal.class);
-        assertThat(((DirectoryPrincipal) authentication.getPrincipal()).getUsername()).isEqualTo("demo@example.gov");
     }
 
-    // --- nothing changeable -------------------------------------------------------------
+    // --- nothing changeable, for anybody --------------------------------------------------
 
     /**
      * By method rather than by path, so an endpoint added tomorrow is refused without
-     * anybody remembering to add it here.
+     * anybody remembering to add it here - and for the administrator too, who is the
+     * account a rule about roles would have let through.
      */
     @Test
-    void everyUnsafeMethodIsRefused() throws Exception {
-        mockMvc.perform(post("/api/v1/sync")).andExpect(status().isForbidden());
-        mockMvc.perform(post("/api/v1/sync/prune")).andExpect(status().isForbidden());
-        mockMvc.perform(post("/api/v1/revocation/check")).andExpect(status().isForbidden());
-        mockMvc.perform(post("/api/v1/changelog/poll")).andExpect(status().isForbidden());
-        mockMvc.perform(post("/api/v1/notifications/digest")).andExpect(status().isForbidden());
-        mockMvc.perform(post("/api/v1/notifications/digest").param("dryRun", "true"))
-                .andExpect(status().isForbidden());
-        mockMvc.perform(post("/api/v1/notifications/read-all")).andExpect(status().isForbidden());
-        mockMvc.perform(post("/api/v1/projects")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Anything\"}"))
-                .andExpect(status().isForbidden());
-        mockMvc.perform(put("/api/v1/notifications/settings")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"leadTimeDays\":365}"))
-                .andExpect(status().isForbidden());
-        mockMvc.perform(put("/api/v1/servers/1/attributes/ATOStatus")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"values\":[\"x\"]}"))
-                .andExpect(status().isForbidden());
-        mockMvc.perform(delete("/api/v1/projects/1")).andExpect(status().isForbidden());
-        mockMvc.perform(delete("/api/v1/servers/1/contacts/1")).andExpect(status().isForbidden());
+    void everyUnsafeMethodIsRefusedEvenForTheAdministrator() throws Exception {
+        for (MockHttpSession session : new MockHttpSession[] {admin, reader}) {
+            mockMvc.perform(post("/api/v1/sync").session(session).with(csrf()))
+                    .andExpect(status().isForbidden());
+            mockMvc.perform(post("/api/v1/sync/prune").session(session).with(csrf()))
+                    .andExpect(status().isForbidden());
+            mockMvc.perform(post("/api/v1/revocation/check").session(session).with(csrf()))
+                    .andExpect(status().isForbidden());
+            mockMvc.perform(post("/api/v1/notifications/digest").session(session).with(csrf()))
+                    .andExpect(status().isForbidden());
+            mockMvc.perform(post("/api/v1/notifications/digest")
+                            .param("dryRun", "true")
+                            .session(session)
+                            .with(csrf()))
+                    .andExpect(status().isForbidden());
+            mockMvc.perform(post("/api/v1/projects")
+                            .session(session)
+                            .with(csrf())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"name\":\"Anything\"}"))
+                    .andExpect(status().isForbidden());
+            mockMvc.perform(put("/api/v1/notifications/settings")
+                            .session(session)
+                            .with(csrf())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"leadTimeDays\":365}"))
+                    .andExpect(status().isForbidden());
+            mockMvc.perform(delete("/api/v1/projects/1").session(session).with(csrf()))
+                    .andExpect(status().isForbidden());
+        }
     }
 
-    /** No CSRF token is sent by any of these, so the refusal has to be the rule's, not CSRF's. */
     @Test
-    void aRefusalSaysWhyRatherThanLookingBroken() throws Exception {
-        mockMvc.perform(post("/api/v1/sync"))
+    void aRefusedWriteSaysWhyRatherThanLookingBroken() throws Exception {
+        mockMvc.perform(post("/api/v1/sync").session(admin).with(csrf()))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.title").value("Read-only demo"))
                 .andExpect(jsonPath("$.detail").value(DemoSecurityConfig.REFUSAL))
                 .andExpect(jsonPath("$.instance").value("/api/v1/sync"));
     }
 
-    /** There is nothing to sign in to, and nothing to sign out of. */
-    @Test
-    void thereIsNoSignInOrSignOut() throws Exception {
-        mockMvc.perform(post("/login")).andExpect(status().isForbidden());
-        mockMvc.perform(post("/logout")).andExpect(status().isForbidden());
+    // --- helpers ---------------------------------------------------------------------------
+
+    /**
+     * Signs in for real and keeps the session.
+     *
+     * <p>Through the form and the directory bind rather than by handing MockMvc a token,
+     * because the roles are the thing under test: a fabricated authentication would carry
+     * whatever authorities the test felt like giving it, and would pass whether or not the
+     * application resolves an administrator correctly.
+     */
+    private MockHttpSession signIn(String username) throws Exception {
+        return (MockHttpSession) mockMvc.perform(formLogin().user(username).password(PASSWORD))
+                .andExpect(authenticated())
+                .andReturn()
+                .getRequest()
+                .getSession(false);
+    }
+
+    private static String table(String column) {
+        return """
+                {"draw":1,"start":0,"length":10,
+                 "columns":[{"data":"%s","name":"","searchable":true,"orderable":true,
+                             "search":{"value":"","regex":false}}],
+                 "order":[{"column":0,"dir":"asc"}],
+                 "search":{"value":"","regex":false}}"""
+                .formatted(column);
     }
 }

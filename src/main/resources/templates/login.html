@@ -14,7 +14,7 @@
             <div class="card-body">
                 <h2 class="h3 text-center mb-3">Sign in</h2>
 
-                <div class="alert alert-info" role="alert">
+                <div th:unless="${demo}" class="alert alert-info" role="alert">
                     <div class="d-flex">
                         <div><svg class="icon alert-icon"><use href="#icon-key"></use></svg></div>
                         <div>
@@ -54,7 +54,41 @@
                 Your password is checked by binding to the directory. It is never stored here.
             </div>
         </div>
+
+        <!--/* The demo's accounts, and what each of them is for. What this application shows
+               somebody depends on what they have to do with the directory, so being each of
+               these in turn is the demonstration - one account could only show one answer.
+               Never rendered anywhere else: the list is empty unless the demo is on. */-->
+        <div th:if="${demo and !#lists.isEmpty(demoAccounts)}" class="card card-md mt-3 demo-accounts">
+            <div class="card-header d-block">
+                <h3 class="card-title mb-1">
+                    <span class="badge bg-azure-lt me-2">Demo</span>
+                    Sign in as any of these
+                </h3>
+                <p class="text-secondary small mb-0">
+                    Invented people in a directory generated at startup. Every one of them is
+                    read-only &mdash; the roles change what you are shown, never what you can
+                    change. Pick a row to fill the form.
+                </p>
+            </div>
+            <div class="list-group list-group-flush">
+                <button type="button" class="list-group-item list-group-item-action demo-account"
+                        th:each="account : ${demoAccounts}"
+                        th:attr="data-username=${account.uid}, data-password=${demoPassword}">
+                    <div class="d-flex align-items-center mb-1">
+                        <span class="badge bg-blue-lt" th:text="${account.role}">Role</span>
+                        <span class="ms-auto font-monospace small">
+                            <span th:text="${account.uid}">uid</span>
+                            <span class="text-secondary">/</span>
+                            <span th:text="${demoPassword}">password</span>
+                        </span>
+                    </div>
+                    <div class="text-secondary small text-start" th:text="${account.sees}">What they see</div>
+                </button>
+            </div>
+        </div>
     </div>
 </div>
+<script th:if="${demo}" th:src="@{/js/demo-accounts.js}"></script>
 </body>
 </html>

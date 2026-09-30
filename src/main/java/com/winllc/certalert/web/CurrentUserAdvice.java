@@ -1,6 +1,8 @@
 package com.winllc.certalert.web;
 
+import com.winllc.certalert.demo.DemoAccounts;
 import com.winllc.certalert.demo.DemoProperties;
+import java.util.List;
 import com.winllc.certalert.security.DirectoryPrincipal;
 import com.winllc.certalert.security.DirectoryPrincipalResolver;
 import org.springframework.boot.webmvc.autoconfigure.error.BasicErrorController;
@@ -47,6 +49,25 @@ public class CurrentUserAdvice {
     @ModelAttribute("demo")
     public boolean demo() {
         return demoProperties.isEnabled();
+    }
+
+    /**
+     * The accounts a demo offers, for the sign-in page to print, and empty everywhere else.
+     *
+     * <p>Empty rather than absent so the page has one thing to ask about. On a real
+     * deployment there is nothing to list, and a page that printed credentials because a
+     * property was misread is exactly the failure worth making impossible: the list comes
+     * from the demo being on, not from the page deciding to show it.
+     */
+    @ModelAttribute("demoAccounts")
+    public List<DemoAccounts.Account> demoAccounts() {
+        return demoProperties.isEnabled() ? DemoAccounts.ALL : List.of();
+    }
+
+    /** The one password those accounts share, or empty where there are none. */
+    @ModelAttribute("demoPassword")
+    public String demoPassword() {
+        return demoProperties.isEnabled() ? demoProperties.getPassword() : "";
     }
 
     @ModelAttribute("isAdmin")

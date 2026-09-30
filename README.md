@@ -292,7 +292,7 @@ Notes on the image:
 - The image can serve a directory of its own, because the LDAP SDK ships in the jar for
   [demo mode](#demo-mode) — `--spring.profiles.active=demo` is a complete instance in one
   container, with nothing to point it at. That is for showing the application, never for
-  running it: every visitor is an unauthenticated administrator.
+  running it: it publishes working credentials on its own sign-in page.
 
 Tests are not run during the image build — CI runs them, and they need an in-memory LDAP
 server and a database. Build with `--build-arg RUN_TESTS=true` to run them anyway.
@@ -598,10 +598,35 @@ of invented people and servers, serves it from memory over LDAP, and then indexe
 way it would index anyone's, so what a visitor sees is the application working rather than
 a mock-up of it.
 
-There is no sign-in page, because there is nothing to sign in to. Every visitor arrives as
-the same administrator, which is the point: the administration page, the sync button, the
-revocation card and the notification controls are all part of what is being shown, and a
-demo that hid them would be a demo of a different application.
+#### Signing in as each role
+
+**The sign-in page is the demo.** What this application shows somebody depends on what they
+have to do with the directory, so a demo that signed everybody in as one administrator
+could only ever demonstrate one answer. Instead it lists four accounts and what each will
+see, and a visitor is each of them in turn:
+
+| Role | Username | Sees |
+|------|----------|------|
+| Administrator | `demo.admin` | Everything, plus the administration page: the whole audit trail, the managed attributes, the controls that run the jobs |
+| Project administrator | `demo.project` | Runs the Mission Systems project, so they manage the points of contact for every server in it — but not the administration page |
+| Point of contact | `demo.contact` | Answers for a handful of servers: their own notifications, and the contact lists of the servers they are named on |
+| Reader | `demo.reader` | Signed in and nothing more. The tables and the details pages, with none of the controls the others get |
+
+All four carry the same password, `cert-alert.demo.password`, which defaults to `password`
+and is printed beside each account on the page. One password rather than four because what
+is being shown is the roles: four secrets to mistype would be four ways to fail at the only
+step before the thing you came to look at. Picking a row fills the form and signs you in;
+the account menu then offers **Sign out, and be somebody else**.
+
+The passwords are checked the ordinary way, by binding to the directory as the person
+signing in — here the demo's own. Nothing about the authentication is stubbed.
+
+Three of the roles are what the directory makes them: an administrator is named in
+`admin-identifiers`, a point of contact is named in a `serverPOC`, and the reader is
+deliberately neither. Running a project is not something a directory entry can carry —
+projects are this application's own data — so the demo creates one at startup and puts the
+project administrator in charge of it. Without that, signing in as them would show exactly
+what the reader shows and the page would be describing a role the demo does not have.
 
 It serves plain HTTP, on `http://localhost:8080`, even where `CERT_ALERT_TLS_ENABLED` is
 set. TLS is here to carry X.509 client certificates, and a demo has nothing for one to
@@ -610,10 +635,14 @@ inherited TLS from its environment would fail to start for want of one. Put a de
 TLS deliberately with `SERVER_SSL_ENABLED=true` and the keystore variables, or terminate it
 in front.
 
-Nothing they press changes anything. **Read-only is a rule about the request, not about the
-buttons** — every method that is not a `GET`, `HEAD` or `OPTIONS` is refused before any
-controller sees it, so a demo's safety does not depend on the UI happening not to offer
-something. The buttons stay where they are and pressing one says so:
+#### Nothing changes, whoever you are
+
+**Read-only is a rule about the request, not about the buttons** — every method that is not
+a `GET`, `HEAD` or `OPTIONS` is refused before any controller sees it, so a demo's safety
+does not depend on the UI happening not to offer something. That holds for the
+administrator too, which is the case worth stating: a rule written about roles would have
+let the one account with the most to see through. The buttons stay where they are, for
+every role, and pressing one says so:
 
 ```
 HTTP/1.1 403
@@ -628,6 +657,11 @@ without anybody remembering to add it. The three exceptions are the search table
 `/api/v1/datatables/**` endpoints, which are `POST`s only because that is how DataTables
 sends its paging and filters, and which write nothing.
 
+Because every write is refused anyway, what signing in decides is what you may **read** —
+a much shorter list, and the only place the roles differ. Refused a page rather than a
+button, a browser gets the application's own 403 page saying which role it is for; a script
+gets the problem detail above.
+
 #### The directory it shows
 
 Generated at startup, never shipped as a fixture. Certificates are minted there and then,
@@ -638,10 +672,11 @@ goes with the process; nothing trusts it and nothing authenticates against it.
 
 What it holds is chosen to exercise the application rather than to look tidy:
 
-- **A demo administrator**, `demo.admin@intelink.ic.gov`, who the visitor is signed in as.
-  They are a point of contact for several servers and hold credentials expiring shortly,
-  so the pages that are about the person reading them — their servers, their round-up —
-  have something on them.
+- **The four accounts the sign-in page offers**, under fixed uids so what is printed can be
+  typed. All hold credentials expiring shortly, so whichever a visitor picks, the pages
+  that are about the person reading them are not empty in a way that looks like a fault.
+  Two of them are points of contact for several servers each and two deliberately are not,
+  which is the difference the roles describe.
 - **Certificates in every state**: good for years, inside the warning window, inside the
   critical one, lapsed weeks ago, and entries publishing none at all. Dealt from a
   proportioned deck rather than drawn at random, because sixteen servers drawing
@@ -676,17 +711,16 @@ compose file, or a generated LDIF loaded into a real server — set
 | Setting                                  | Default         |                                           |
 |------------------------------------------|-----------------|-------------------------------------------|
 | `cert-alert.demo.enabled`                | `false`         | The whole of it. Replaces the ordinary security configuration rather than relaxing it, so the two are never half-applied |
-| `cert-alert.demo.visitor`                | `Demo visitor`  | The name in the corner of the page        |
-| `cert-alert.demo.signed-in-as`           | *(none)*        | An identifier from the directory, for the parts of the UI that are about the person reading the page — their servers, their notifications |
+| `cert-alert.demo.password`               | `password`      | What every demo account carries, printed beside it on the sign-in page |
 | `cert-alert.demo.generate-directory`     | `true`          | Whether the demo brings a directory of its own. Off to point it at one already running |
 | `cert-alert.demo.people` / `.servers`    | `24` / `16`     | How much to generate                      |
 | `cert-alert.demo.seed`                   | `20260101`      | Fixes the choices, so a restart is the same demo. The dates always move with it |
 
-> **Never point a demo at a real directory.** Every visitor gets an administrator's view of
-> every entry in it, with no sign-in at all. That is a reasonable thing to do with invented
-> entries on an instance you can throw away, and nothing else. `cert-alert.demo.enabled` is
-> not a way to run this application for real, any more than
-> `cert-alert.security.enabled: false` is.
+> **Never point a demo at a real directory.** It prints working credentials on its front
+> page, and the account they open reads every entry the directory holds. That is a
+> reasonable thing to do with invented entries on an instance you can throw away, and
+> nothing else. `cert-alert.demo.enabled` is not a way to run this application for real,
+> any more than `cert-alert.security.enabled: false` is.
 
 ## The search tables
 
@@ -2033,9 +2067,8 @@ directory:
 
 | Property             | Default        | Purpose                                         |
 |----------------------|----------------|-------------------------------------------------|
-| `enabled`            | `false`        | No sign-in, every read allowed, every write refused  |
-| `visitor`            | `Demo visitor` | The name shown in the corner of the page             |
-| `signed-in-as`       | `""`           | Who the visitor counts as, for the pages about the reader |
+| `enabled`            | `false`        | Sign in as any listed account, every write refused   |
+| `password`           | `password`     | What every demo account carries, printed on the sign-in page |
 | `generate-directory` | `true`         | Bring a directory of its own, generated at startup   |
 | `people` / `servers` | `24` / `16`    | How much to generate                                 |
 | `seed`               | `20260101`     | Fixes the choices; the dates always move with startup |

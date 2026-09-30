@@ -424,3 +424,19 @@ tr.notification-unread td:first-child {
     height: 3rem;
 }
 
+
+/*
+ * The demo's sign-in accounts. A list of buttons rather than a table, because each row is
+ * one thing to press and a table of credentials invites reading rather than choosing.
+ */
+.demo-accounts .list-group-item-action {
+    cursor: pointer;
+}
+
+.demo-accounts .list-group-item-action.active {
+    /* Tabler's `active` is a solid fill that swallows the badges and the description, so
+       this marks the chosen row without taking the text with it. */
+    background-color: var(--tblr-active-bg, rgba(32, 107, 196, 0.06));
+    color: inherit;
+    border-color: var(--tblr-border-color);
+}

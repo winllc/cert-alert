@@ -45,22 +45,23 @@ spring:
 cert-alert:
   demo:
     enabled: true
-    # The visitor is this person - an entry the generated directory holds, who is a point
-    # of contact for some of its servers, so the pages about the person reading them have
-    # something on them. They can no more change anything than any other visitor.
-    signed-in-as: demo.admin@intelink.ic.gov
-    visitor: Demo Administrator
+    # The password every generated account carries, printed on the sign-in page beside the
+    # accounts it opens. Not a credential: the people are invented and the directory
+    # holding them goes with the process.
+    password: password
     # Enough to page and filter; small enough to be serving pages seconds after starting.
     people: 24
     servers: 16
 
   security:
-    # The same person, so the administration pages they are shown are ones they hold the
-    # role for. The demo would let them in regardless - what a visitor may do is decided
-    # by the request being a read - but a visitor whose own role said otherwise would see
-    # an administrator's navigation above a reader's pages.
+    # Only the administrator account. The other three on the sign-in page are deliberately
+    # not here: an administrator who was the only account anybody could be would make the
+    # roles the sign-in page offers indistinguishable.
     admin-identifiers: [demo.admin@intelink.ic.gov]
     ldap:
+      # A demo signs people in by binding to its own directory, exactly as a deployment
+      # binds to a real one. The generated entries are all under ou=people and are found
+      # by uid, which is what the sign-in page prints.
       user-search-base: ou=people
       user-search-filter: "(uid={0})"
 

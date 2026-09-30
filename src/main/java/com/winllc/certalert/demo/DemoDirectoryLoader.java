@@ -29,6 +29,12 @@ import org.springframework.stereotype.Component;
  * things expiring this week. The round-up is what gathers those, and it is the one thing
  * on that page a visitor cannot press for themselves.
  *
+ * <p>It also creates the one project the demo needs. Running a project is a role the
+ * sign-in page offers, and unlike the other three it is not something a directory entry
+ * can carry: projects are this application's own data, granted by an administrator. With
+ * no project, signing in as the project administrator would show the same pages as the
+ * reader and the page would be describing a role that does not exist here.
+ *
  * <p>This is the application's own doing rather than a visitor's, which is the line the
  * read-only rule draws: nothing anybody does to a demo changes it.
  */
@@ -41,12 +47,17 @@ public class DemoDirectoryLoader implements ApplicationRunner {
     private final DirectorySyncService syncService;
     private final NotificationService notifications;
     private final DirectoryUserRepository users;
+    private final DemoProject demoProject;
 
     public DemoDirectoryLoader(
-            DirectorySyncService syncService, NotificationService notifications, DirectoryUserRepository users) {
+            DirectorySyncService syncService,
+            NotificationService notifications,
+            DirectoryUserRepository users,
+            DemoProject demoProject) {
         this.syncService = syncService;
         this.notifications = notifications;
         this.users = users;
+        this.demoProject = demoProject;
     }
 
     @Override
@@ -66,6 +77,11 @@ public class DemoDirectoryLoader implements ApplicationRunner {
             return;
         }
         try {
+            demoProject.seed();
+        } catch (RuntimeException e) {
+            log.warn("Demo: could not create the project: {}", e.toString());
+        }
+        try {
             // A real round-up, not a rehearsal: a rehearsal deliberately writes nothing,
             // and what this is for is the rows. Sending is off in the demo profile, so it
             // gathers and goes nowhere.
@@ -75,4 +91,5 @@ public class DemoDirectoryLoader implements ApplicationRunner {
             log.warn("Demo: could not run the round-up: {}", e.toString());
         }
     }
+
 }

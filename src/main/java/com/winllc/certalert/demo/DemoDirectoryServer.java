@@ -59,8 +59,8 @@ public class DemoDirectoryServer implements DisposableBean {
             this.server = new InMemoryDirectoryServer(config);
             this.server.startListening();
 
-            DemoDirectoryData data =
-                    new DemoDirectoryData(baseDn, new DemoCertificates(), Instant.now(), demo.getSeed());
+            DemoDirectoryData data = new DemoDirectoryData(
+                    baseDn, new DemoCertificates(), Instant.now(), demo.getSeed(), demo.getPassword());
             List<Entry> entries = data.entries(demo.getPeople(), demo.getServers());
             for (Entry entry : entries) {
                 server.add(entry);

@@ -121,8 +121,7 @@
                         <div class="mt-1 small text-secondary">
                             <span th:text="${isAdmin} ? 'Administrator' : 'Reader'">Reader</span>
                             &middot;
-                            <span th:if="${demo}">read-only demo</span>
-                            <span th:unless="${demo}" th:text="'via ' + ${currentUser.method}">via X509</span>
+                            <span th:text="'via ' + ${currentUser.method}">via X509</span>
                         </div>
                     </div>
                 </a>
@@ -131,18 +130,13 @@
                     <div class="dropdown-item-text small text-secondary" th:if="${currentUser.directoryDn != null}"
                          th:text="${currentUser.directoryDn}">dn</div>
                     <div class="dropdown-divider"></div>
-                    <!--/* Nothing to sign out of in a demo, and the form would be refused
-                           like every other write. */-->
-                    <form method="post" th:action="@{/logout}" th:unless="${demo}">
+                    <form method="post" th:action="@{/logout}">
                         <button type="submit" class="dropdown-item">
                             <svg class="icon me-2"><use href="#icon-logout"></use></svg>
-                            Sign out
+                            <span th:if="${demo}">Sign out, and be somebody else</span>
+                            <span th:unless="${demo}">Sign out</span>
                         </button>
                     </form>
-                    <div class="dropdown-item-text small text-secondary" th:if="${demo}">
-                        Everyone who opens this sees the same thing, as an administrator.
-                        Nothing here can be changed.
-                    </div>
                 </div>
             </div>
         </div>
@@ -199,8 +193,8 @@
            anything to find out. Full width, so it wraps onto its own line under the bar. */-->
     <div th:if="${demo}" class="demo-strip w-100">
         <span class="badge bg-azure-lt me-2">Demo</span>
-        Everything here is visible and nothing can be changed. The administration pages and
-        their controls are shown as they are &mdash; pressing one says so.
+        Nothing here can be changed, whoever you signed in as &mdash; the controls are shown
+        as they are, and pressing one says so. Sign out to be another role.
     </div>
 </header>
 

@@ -36,37 +36,55 @@ class DemoDirectoryDataTest {
     @BeforeAll
     static void generate() {
         now = Instant.now();
-        entries = new DemoDirectoryData(BASE_DN, new DemoCertificates(), now, 20260101L).entries(24, 16);
+        entries = new DemoDirectoryData(BASE_DN, new DemoCertificates(), now, 20260101L, "password").entries(24, 16);
     }
 
     @Test
     void holdsTheSuffixItsContainersAndEverythingAsked() {
         assertThat(dnsOf(entries)).contains(BASE_DN, "ou=people," + BASE_DN, "ou=servers," + BASE_DN);
-        assertThat(people()).hasSize(25); // the twenty-four asked for, and the administrator
+        // The twenty-four asked for, and the four the sign-in page offers.
+        assertThat(people()).hasSize(24 + DemoAccounts.ALL.size());
         assertThat(servers()).hasSize(16);
     }
 
     /**
-     * The visitor is signed in as this person, so the entry has to be there under exactly
-     * this name - and be a point of contact, or every page about the person reading it is
-     * empty.
+     * The sign-in page prints these uids for somebody to type, so every one of them has to
+     * be in the directory under exactly that name, carrying the password printed beside it.
      */
     @Test
-    void theAdministratorIsInTheDirectoryAndLooksAfterSomething() {
-        Entry admin = entries.stream()
-                .filter(entry -> entry.getDN().startsWith("uid=" + DemoDirectoryData.ADMIN_UID + ","))
-                .findFirst()
-                .orElseThrow();
+    void everyAccountTheSignInPageOffersIsInTheDirectory() {
+        for (DemoAccounts.Account account : DemoAccounts.ALL) {
+            Entry entry = people().stream()
+                    .filter(person -> person.getDN().startsWith("uid=" + account.uid() + ","))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("No entry for " + account.uid()));
 
-        assertThat(admin.getAttributeValue("icEmail")).isEqualTo(DemoDirectoryData.ADMIN_EMAIL);
-        assertThat(admin.getAttributeValue("displayName")).isEqualTo(DemoDirectoryData.ADMIN_NAME);
+            assertThat(entry.getAttributeValue("icEmail")).isEqualTo(account.email());
+            assertThat(entry.getAttributeValue("displayName")).isEqualTo(account.displayName());
+            assertThat(entry.getAttributeValue("userPassword")).isEqualTo("password");
+        }
+    }
 
-        long lookedAfter = servers().stream()
+    /**
+     * Two of them answer for servers and two deliberately do not - which is the difference
+     * the sign-in page describes, and the reason the reader account exists.
+     */
+    @Test
+    void theRolesTheSignInPageDescribesAreRealInTheDirectory() {
+        assertThat(serversContacting(DemoAccounts.ADMINISTRATOR.email())).isGreaterThan(1);
+        assertThat(serversContacting(DemoAccounts.POINT_OF_CONTACT.email())).isGreaterThan(1);
+
+        // The reader answers for nothing; that is the whole of the role.
+        assertThat(serversContacting(DemoAccounts.READER.email())).isZero();
+        assertThat(serversContacting(DemoAccounts.READER.displayName())).isZero();
+    }
+
+    private static long serversContacting(String identifier) {
+        return servers().stream()
                 .filter(server -> server.getAttributeValues("serverPOC") != null
-                        && Arrays.asList(server.getAttributeValues("serverPOC"))
-                                .contains(DemoDirectoryData.ADMIN_EMAIL))
+                        && Arrays.stream(server.getAttributeValues("serverPOC"))
+                                .anyMatch(identifier::equalsIgnoreCase))
                 .count();
-        assertThat(lookedAfter).isGreaterThan(1);
     }
 
     /**
@@ -160,7 +178,7 @@ class DemoDirectoryDataTest {
     @Test
     void theSameSeedGeneratesTheSameDirectory() {
         List<Entry> again =
-                new DemoDirectoryData(BASE_DN, new DemoCertificates(), now, 20260101L).entries(24, 16);
+                new DemoDirectoryData(BASE_DN, new DemoCertificates(), now, 20260101L, "password").entries(24, 16);
         assertThat(dnsOf(again)).isEqualTo(dnsOf(entries));
     }
 
