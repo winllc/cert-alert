@@ -16,6 +16,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.authentication.AuthenticationProvider;
+import com.winllc.certalert.security.SignedInDirectoryUser;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.authorization.AuthorizationDecision;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -62,6 +63,15 @@ public class DemoSecurityConfig {
         "/login", "/css/**", "/js/**", "/img/**", "/webjars/**", "/favicon.ico", "/error"
     };
 
+    /**
+     * The round-up, which is a write unless it is asked to rehearse.
+     *
+     * <p>Named on its own rather than added to {@link #READ_ONLY_POSTS}, because whether it
+     * writes depends on how it is called: without {@code dryRun=true} this is the real
+     * round-up, and it stays refused like everything else.
+     */
+    private static final String DIGEST = "/api/v1/notifications/digest";
+
     /** Reads that arrive as POSTs, because that is how DataTables asks. */
     private static final String[] READ_ONLY_POSTS = {
         "/api/v1/datatables/users", "/api/v1/datatables/servers", "/api/v1/datatables/audit"
@@ -106,6 +116,16 @@ public class DemoSecurityConfig {
                         // The search tables, which ask by POST and write nothing.
                         .requestMatchers(HttpMethod.POST, READ_ONLY_POSTS)
                         .authenticated()
+                        // A rehearsal of the round-up: the other POST that writes nothing.
+                        // It builds every message, reports what would have been sent, saves
+                        // no notification and sends no mail - which is exactly what a demo
+                        // of the round-up wants, and the only way to show it without
+                        // writing to anybody. Administrators only, as in the ordinary
+                        // configuration: who would be written to is their business.
+                        .requestMatchers(HttpMethod.POST, DIGEST)
+                        .access((authentication, context) -> new AuthorizationDecision(
+                                isRehearsal(context.getRequest())
+                                        && SignedInDirectoryUser.isAdmin(authentication.get())))
                         // Everything else: signed in, and only looking.
                         .anyRequest()
                         .access((authentication, context) -> new AuthorizationDecision(
@@ -196,6 +216,18 @@ public class DemoSecurityConfig {
         return authentication != null
                 && authentication.isAuthenticated()
                 && !(authentication instanceof AnonymousAuthenticationToken);
+    }
+
+    /**
+     * Whether this round-up is a rehearsal.
+     *
+     * <p>Read from the query string, which is where the page puts it and where the
+     * controller reads it from. Anything other than an explicit {@code true} - the
+     * parameter missing, empty, or any other value - is the real round-up, so the default
+     * on an unreadable request is to refuse.
+     */
+    private static boolean isRehearsal(HttpServletRequest request) {
+        return Boolean.parseBoolean(request.getParameter("dryRun"));
     }
 
     /**

@@ -653,9 +653,13 @@ Content-Type: application/problem+json
 ```
 
 By method rather than by a list of paths, so an endpoint added next month is refused
-without anybody remembering to add it. The three exceptions are the search tables'
-`/api/v1/datatables/**` endpoints, which are `POST`s only because that is how DataTables
-sends its paging and filters, and which write nothing.
+without anybody remembering to add it. Two things are exempt, and both write nothing: the
+search tables' `/api/v1/datatables/**` endpoints, which are `POST`s only because that is
+how DataTables sends its paging and filters; and **Dry run**, which builds every message
+the round-up would send, reports what would have gone out, and saves none of it. The real
+round-up beside it stays refused, so whether that endpoint is allowed depends on
+`dryRun=true` being on the request rather than on its path. The rehearsal is an
+administrator's, as it is anywhere else — who would be written to is their business.
 
 Because every write is refused anyway, what signing in decides is what you may **read** —
 a much shorter list, and the only place the roles differ. Refused a page rather than a

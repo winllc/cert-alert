@@ -249,11 +249,6 @@ class DemoModeTest {
                     .andExpect(status().isForbidden());
             mockMvc.perform(post("/api/v1/notifications/digest").session(session).with(csrf()))
                     .andExpect(status().isForbidden());
-            mockMvc.perform(post("/api/v1/notifications/digest")
-                            .param("dryRun", "true")
-                            .session(session)
-                            .with(csrf()))
-                    .andExpect(status().isForbidden());
             mockMvc.perform(post("/api/v1/projects")
                             .session(session)
                             .with(csrf())
@@ -269,6 +264,53 @@ class DemoModeTest {
             mockMvc.perform(delete("/api/v1/projects/1").session(session).with(csrf()))
                     .andExpect(status().isForbidden());
         }
+    }
+
+    /**
+     * The one POST that is a read: it builds every message, says what would have gone out,
+     * and saves nothing. Refusing it left a demo unable to show the round-up at all, since
+     * the real one is - rightly - refused like every other write.
+     */
+    @Test
+    void theAdministratorMayRehearseTheRoundUp() throws Exception {
+        mockMvc.perform(post("/api/v1/notifications/digest")
+                        .param("dryRun", "true")
+                        .session(admin)
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.dryRun").value(true));
+    }
+
+    /**
+     * And only when it is asked to rehearse. Whether this endpoint writes depends on how it
+     * is called, so the demo has to read the parameter rather than the path - and anything
+     * that is not an explicit true is the real round-up.
+     */
+    @Test
+    void theRealRoundUpIsStillRefused() throws Exception {
+        mockMvc.perform(post("/api/v1/notifications/digest").session(admin).with(csrf()))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/notifications/digest")
+                        .param("dryRun", "false")
+                        .session(admin)
+                        .with(csrf()))
+                .andExpect(status().isForbidden());
+        // Not the name the controller binds, so the controller would call this a real run.
+        mockMvc.perform(post("/api/v1/notifications/digest")
+                        .param("dryrun", "true")
+                        .session(admin)
+                        .with(csrf()))
+                .andExpect(status().isForbidden());
+    }
+
+    /** Who would be written to is an administrator's business, as it is anywhere else. */
+    @Test
+    void aReaderMayNotRehearseTheRoundUp() throws Exception {
+        mockMvc.perform(post("/api/v1/notifications/digest")
+                        .param("dryRun", "true")
+                        .session(reader)
+                        .with(csrf()))
+                .andExpect(status().isForbidden());
     }
 
     @Test
