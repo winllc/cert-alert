@@ -15,12 +15,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.unboundid.ldap.sdk.Entry;
 import com.winllc.certalert.security.SecurityConfig;
 import com.winllc.certalert.service.DirectorySyncService;
 import com.winllc.certalert.support.EmbeddedDirectory;
 import com.winllc.certalert.support.TestCertificates;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -70,6 +72,7 @@ class DemoModeTest {
     private static final String READER = "dana";
 
     private static EmbeddedDirectory directory;
+    private static List<Entry> seeded;
 
     @Autowired
     private WebApplicationContext context;
@@ -92,6 +95,10 @@ class DemoModeTest {
                 "dana@example.gov", now.minus(Duration.ofDays(30)), now.plus(Duration.ofDays(20)));
         directory.addUser(READER, "Dana Day", "dana@example.gov", certificate);
         directory.addUser(ADMIN, "Ada Admin", "admin@example.gov");
+        // The demo's own accounts, loaded from the seed exactly as a generated directory
+        // would carry them - this class supplies its own directory, so it seeds it itself.
+        seeded = DemoAccountSeed.read(EmbeddedDirectory.BASE_DN, PASSWORD);
+        seeded.forEach(directory::add);
         directory.addServer("web09", "https://web09.example.gov", new String[] {"dana@example.gov"}, certificate);
     }
 
@@ -145,18 +152,24 @@ class DemoModeTest {
         mockMvc.perform(get("/login")).andExpect(status().isOk());
     }
 
-    /** The accounts, and the password that opens them, are on the page a visitor lands on. */
+    /**
+     * The accounts, and the password that opens them, are on the page a visitor lands on -
+     * and they come from the directory, not from a list in the code. This is the whole
+     * path: the seed goes into a directory, and the sign-in page reads it back out.
+     */
     @Test
-    void theSignInPageListsTheDemoAccounts() throws Exception {
+    void theSignInPageListsTheAccountsTheDirectoryHolds() throws Exception {
         String page = mockMvc.perform(get("/login"))
                 .andExpect(status().isOk())
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
 
-        for (DemoAccounts.Account account : DemoAccounts.ALL) {
-            assertThat(page).contains(account.uid());
-            assertThat(page).contains(account.role());
+        assertThat(seeded).isNotEmpty();
+        for (Entry account : seeded) {
+            assertThat(page).contains(account.getAttributeValue("uid"));
+            assertThat(page).contains(account.getAttributeValue(DemoAccounts.ROLE));
+            assertThat(page).contains(account.getAttributeValue("displayName"));
         }
         assertThat(page).contains(PASSWORD);
     }

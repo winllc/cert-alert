@@ -37,35 +37,53 @@ public class DemoProject {
 
     private static final Logger log = LoggerFactory.getLogger(DemoProject.class);
 
+    /**
+     * The project the demo creates, named in the seed's description of the account that
+     * runs it.
+     *
+     * <p>Here rather than in the seed because a project is this application's own data, not
+     * the directory's: no directory entry can say that somebody runs one.
+     */
+    public static final String NAME = "Mission Systems";
+
+    /** The role, as the seed spells it, of the account that runs it. */
+    private static final String RUNS_IT = "Project administrator";
+
     /** One server in three, so the project is a slice of the estate rather than all of it. */
     private static final int EVERY = 3;
 
     private final DirectoryUserRepository users;
     private final DirectoryServerRepository servers;
     private final ProjectRepository projects;
+    private final DemoAccounts accounts;
 
     public DemoProject(
-            DirectoryUserRepository users, DirectoryServerRepository servers, ProjectRepository projects) {
+            DirectoryUserRepository users,
+            DirectoryServerRepository servers,
+            ProjectRepository projects,
+            DemoAccounts accounts) {
         this.users = users;
         this.servers = servers;
         this.projects = projects;
+        this.accounts = accounts;
     }
 
     /** Creates it if it is not already there. */
     @Transactional
     public void seed() {
-        if (projects.existsByNameIgnoreCase(DemoAccounts.PROJECT_NAME)) {
+        if (projects.existsByNameIgnoreCase(NAME)) {
             return;
         }
-        DirectoryUser administrator = findBy(DemoAccounts.PROJECT_ADMINISTRATOR.email());
+        String runsIt = uidOf(RUNS_IT);
+        DirectoryUser administrator = runsIt == null ? null : findBy(runsIt);
         if (administrator == null) {
-            log.warn("Demo: no entry for {}, so there is nobody to run the project",
-                    DemoAccounts.PROJECT_ADMINISTRATOR.email());
+            log.warn("Demo: the directory holds no account with the role '{}', so there is nobody "
+                    + "to run the {} project", RUNS_IT, NAME);
             return;
         }
 
         Project project = new Project(
-                DemoAccounts.PROJECT_NAME,
+                NAME,
                 "The servers this project is responsible for, and the people who run it.",
                 "demo",
                 Instant.now());
@@ -81,16 +99,24 @@ public class DemoProject {
 
         // Somebody in it who does not run it, which is the distinction the access policy
         // turns on: membership is a grouping, running it is the authority.
-        DirectoryUser member = findBy(DemoAccounts.POINT_OF_CONTACT.email());
+        String contact = uidOf("Point of contact");
+        DirectoryUser member = contact == null ? null : findBy(contact);
         if (member != null) {
             project.add(member);
         }
 
         projects.save(project);
         log.info("Demo: created the {} project over {} server(s), run by {}",
-                DemoAccounts.PROJECT_NAME,
-                (all.size() + EVERY - 1) / EVERY,
-                DemoAccounts.PROJECT_ADMINISTRATOR.uid());
+                NAME, (all.size() + EVERY - 1) / EVERY, runsIt);
+    }
+
+    /** The uid of the seeded account carrying this role, or null where there is none. */
+    private String uidOf(String role) {
+        return accounts.all().stream()
+                .filter(account -> role.equalsIgnoreCase(account.role()))
+                .map(DemoAccounts.Account::uid)
+                .findFirst()
+                .orElse(null);
     }
 
     private DirectoryUser findBy(String identifier) {

@@ -59,13 +59,16 @@ public class DemoDirectoryServer implements DisposableBean {
             this.server = new InMemoryDirectoryServer(config);
             this.server.startListening();
 
+            // The sign-in accounts come from the seed; the crowd around them is generated.
+            List<Entry> seeded = DemoAccountSeed.read(baseDn, demo.getPassword());
             DemoDirectoryData data = new DemoDirectoryData(
-                    baseDn, new DemoCertificates(), Instant.now(), demo.getSeed(), demo.getPassword());
+                    baseDn, new DemoCertificates(), Instant.now(), demo.getSeed(), demo.getPassword(), seeded);
             List<Entry> entries = data.entries(demo.getPeople(), demo.getServers());
             for (Entry entry : entries) {
                 server.add(entry);
             }
-            log.info("Demo: serving {} generated entries on port {}", entries.size(), port);
+            log.info("Demo: serving {} entries on port {}, {} of them sign-in accounts from {}",
+                    entries.size(), port, seeded.size(), DemoAccounts.LDIF);
         } catch (LDAPException e) {
             throw new IllegalStateException(
                     "Could not start the demo's directory on " + urls.getFirst()

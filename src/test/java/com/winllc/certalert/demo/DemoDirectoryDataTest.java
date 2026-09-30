@@ -32,51 +32,84 @@ class DemoDirectoryDataTest {
 
     private static Instant now;
     private static List<Entry> entries;
+    private static List<Entry> seeded;
 
     @BeforeAll
     static void generate() {
         now = Instant.now();
-        entries = new DemoDirectoryData(BASE_DN, new DemoCertificates(), now, 20260101L, "password").entries(24, 16);
+        seeded = DemoAccountSeed.read(BASE_DN, "password");
+        entries = new DemoDirectoryData(BASE_DN, new DemoCertificates(), now, 20260101L, "password", seeded)
+                .entries(24, 16);
     }
 
     @Test
     void holdsTheSuffixItsContainersAndEverythingAsked() {
         assertThat(dnsOf(entries)).contains(BASE_DN, "ou=people," + BASE_DN, "ou=servers," + BASE_DN);
-        // The twenty-four asked for, and the four the sign-in page offers.
-        assertThat(people()).hasSize(24 + DemoAccounts.ALL.size());
+        // The twenty-four asked for, and everyone the seed defines.
+        assertThat(seeded).isNotEmpty();
+        assertThat(people()).hasSize(24 + seeded.size());
         assertThat(servers()).hasSize(16);
     }
 
     /**
-     * The sign-in page prints these uids for somebody to type, so every one of them has to
-     * be in the directory under exactly that name, carrying the password printed beside it.
+     * The seed defines the accounts, and every one of them reaches the directory with what
+     * the sign-in page needs to print - and with credentials, which the seed cannot carry
+     * because they have to be dated from now.
      */
     @Test
-    void everyAccountTheSignInPageOffersIsInTheDirectory() {
-        for (DemoAccounts.Account account : DemoAccounts.ALL) {
+    void everyAccountTheSeedDefinesIsInTheDirectory() {
+        for (Entry account : seeded) {
             Entry entry = people().stream()
-                    .filter(person -> person.getDN().startsWith("uid=" + account.uid() + ","))
+                    .filter(person -> person.getDN().equals(account.getDN()))
                     .findFirst()
-                    .orElseThrow(() -> new AssertionError("No entry for " + account.uid()));
+                    .orElseThrow(() -> new AssertionError("No entry for " + account.getDN()));
 
-            assertThat(entry.getAttributeValue("icEmail")).isEqualTo(account.email());
-            assertThat(entry.getAttributeValue("displayName")).isEqualTo(account.displayName());
+            assertThat(entry.getAttributeValue(DemoAccounts.ROLE)).isNotBlank();
+            assertThat(entry.getAttributeValue(DemoAccounts.SUMMARY)).isNotBlank();
+            assertThat(entry.getAttributeValue("displayName")).isNotBlank();
             assertThat(entry.getAttributeValue("userPassword")).isEqualTo("password");
+            assertThat(entry.getAttribute("userCertificate;binary")).isNotNull();
         }
     }
 
+    /** The substitutions the seed leaves for the demo to fill in are actually filled in. */
+    @Test
+    void theSeedIsHungUnderTheConfiguredSuffixWithTheConfiguredPassword() {
+        List<Entry> elsewhere = DemoAccountSeed.read("dc=other,dc=test", "hunter2");
+        assertThat(elsewhere).isNotEmpty();
+        assertThat(elsewhere).allSatisfy(entry -> {
+            assertThat(entry.getDN()).endsWith("dc=other,dc=test");
+            assertThat(entry.getAttributeValue("userPassword")).isEqualTo("hunter2");
+        });
+    }
+
     /**
-     * Two of them answer for servers and two deliberately do not - which is the difference
+     * Two of them answer for servers and one deliberately does not - which is the difference
      * the sign-in page describes, and the reason the reader account exists.
      */
     @Test
-    void theRolesTheSignInPageDescribesAreRealInTheDirectory() {
-        assertThat(serversContacting(DemoAccounts.ADMINISTRATOR.email())).isGreaterThan(1);
-        assertThat(serversContacting(DemoAccounts.POINT_OF_CONTACT.email())).isGreaterThan(1);
+    void theRolesTheSeedDescribesAreRealInTheDirectory() {
+        assertThat(serversContacting(emailOf("Administrator"))).isGreaterThan(1);
+        assertThat(serversContacting(emailOf("Point of contact"))).isGreaterThan(1);
 
         // The reader answers for nothing; that is the whole of the role.
-        assertThat(serversContacting(DemoAccounts.READER.email())).isZero();
-        assertThat(serversContacting(DemoAccounts.READER.displayName())).isZero();
+        assertThat(serversContacting(emailOf("Reader"))).isZero();
+        assertThat(serversContacting(displayNameOf("Reader"))).isZero();
+    }
+
+    private static String emailOf(String role) {
+        return withRole(role).getAttributeValue("icEmail");
+    }
+
+    private static String displayNameOf(String role) {
+        return withRole(role).getAttributeValue("displayName");
+    }
+
+    private static Entry withRole(String role) {
+        return seeded.stream()
+                .filter(entry -> role.equalsIgnoreCase(entry.getAttributeValue(DemoAccounts.ROLE)))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("The seed defines no " + role));
     }
 
     private static long serversContacting(String identifier) {
@@ -178,7 +211,8 @@ class DemoDirectoryDataTest {
     @Test
     void theSameSeedGeneratesTheSameDirectory() {
         List<Entry> again =
-                new DemoDirectoryData(BASE_DN, new DemoCertificates(), now, 20260101L, "password").entries(24, 16);
+                new DemoDirectoryData(BASE_DN, new DemoCertificates(), now, 20260101L, "password", seeded)
+                        .entries(24, 16);
         assertThat(dnsOf(again)).isEqualTo(dnsOf(entries));
     }
 

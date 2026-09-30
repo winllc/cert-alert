@@ -59,19 +59,30 @@
                somebody depends on what they have to do with the directory, so being each of
                these in turn is the demonstration - one account could only show one answer.
                Never rendered anywhere else: the list is empty unless the demo is on. */-->
-        <div th:if="${demo and !#lists.isEmpty(demoAccounts)}" class="card card-md mt-3 demo-accounts">
+        <div th:if="${demo}" class="card card-md mt-3 demo-accounts">
             <div class="card-header d-block">
                 <h3 class="card-title mb-1">
                     <span class="badge bg-azure-lt me-2">Demo</span>
                     Sign in as any of these
                 </h3>
-                <p class="text-secondary small mb-0">
-                    Invented people in a directory generated at startup. Every one of them is
-                    read-only &mdash; the roles change what you are shown, never what you can
-                    change. Pick a row to fill the form.
+                <p class="text-secondary small mb-0" th:unless="${#lists.isEmpty(demoAccounts)}">
+                    Invented people, read out of the directory this demo is showing. Every one
+                    of them is read-only &mdash; the roles change what you are shown, never what
+                    you can change. Pick a row to fill the form.
+                </p>
+                <!--/* Said rather than left blank. A tile that simply vanished when the
+                       directory held no accounts is how a missing one goes undiagnosed:
+                       nothing on the page distinguishes "not configured" from "not
+                       deployed". */-->
+                <p class="text-secondary small mb-0" th:if="${#lists.isEmpty(demoAccounts)}">
+                    This directory holds no demo accounts, so there is nobody to offer. They
+                    come from the seed the demo loads into its own directory; a demo pointed at
+                    a directory that was already running
+                    (<span class="font-monospace">generate-directory: false</span>) has to carry
+                    them itself. Sign in with an account that directory knows.
                 </p>
             </div>
-            <div class="list-group list-group-flush">
+            <div class="list-group list-group-flush" th:unless="${#lists.isEmpty(demoAccounts)}">
                 <button type="button" class="list-group-item list-group-item-action demo-account"
                         th:each="account : ${demoAccounts}"
                         th:attr="data-username=${account.uid}, data-password=${demoPassword}">
@@ -83,7 +94,10 @@
                             <span th:text="${demoPassword}">password</span>
                         </span>
                     </div>
-                    <div class="text-secondary small text-start" th:text="${account.sees}">What they see</div>
+                    <div class="text-secondary small">
+                        <span class="text-body" th:text="${account.displayName}">Name</span>
+                        <span th:text="'— ' + ${account.summary}">what they see</span>
+                    </div>
                 </button>
             </div>
         </div>

@@ -1,0 +1,123 @@
+# The accounts a demo offers on its sign-in page.
+#
+# Directory data, not a list in the code, because that is what they are: a visitor signs in
+# by binding to the directory as one of them, so the directory is the thing that decides
+# whether an account exists. A Java constant saying otherwise is a second source of truth
+# that goes stale the moment somebody edits one of them - and a sign-in page printing a
+# username the directory has never heard of is worse than printing nothing.
+#
+# Loaded into the demo's own generated directory at startup. The suffix is substituted, so
+# this file says ou=people and the demo puts it under whatever base it was configured with.
+#
+# Three attributes are this application's own, and carry what the sign-in page prints:
+#
+#   demoRole      what to call the account, and the order it is listed in
+#   demoSummary   one line on what this role gets that the others do not
+#   demoOrder     where it sits in the list, most to least
+#
+# They exist only here. A demo pointed at a real directory finds no entry carrying them and
+# offers no accounts, which is the right answer: those people are not in it.
+#
+# Every one of them carries the password the demo is configured with, substituted in below.
+# It is not a credential - these people are invented and the directory holding them goes
+# with the process.
+
+dn: uid=demo.admin,ou=people,{base}
+objectClass: top
+objectClass: person
+objectClass: organizationalPerson
+objectClass: inetOrgPerson
+objectClass: icOrgPerson
+uid: demo.admin
+userPassword: {password}
+cn: Dana Okafor
+sn: Okafor
+givenName: Dana
+displayName: Dana Okafor
+icEmail: demo.admin@intelink.ic.gov
+internetEmail: demo.admin@ugov.gov
+title: Information Assurance Officer
+employeeType: Civilian
+countryOfAffiliation: USA
+dutyOrganization: Example Agency
+dutySubOrganization: Enterprise IT
+isICMember: TRUE
+demoRole: Administrator
+demoOrder: 1
+demoSummary: Everything, plus the administration page: the whole audit trail, the managed
+  attributes, and the controls that run the jobs.
+
+dn: uid=demo.project,ou=people,{base}
+objectClass: top
+objectClass: person
+objectClass: organizationalPerson
+objectClass: inetOrgPerson
+objectClass: icOrgPerson
+uid: demo.project
+userPassword: {password}
+cn: Priya Raman
+sn: Raman
+givenName: Priya
+displayName: Priya Raman
+icEmail: demo.project@intelink.ic.gov
+internetEmail: demo.project@ugov.gov
+title: Programme Manager
+employeeType: Civilian
+countryOfAffiliation: USA
+dutyOrganization: Example Agency
+dutySubOrganization: Mission Systems
+isICMember: TRUE
+demoRole: Project administrator
+demoOrder: 2
+demoSummary: Runs the Mission Systems project, so they manage the points of contact for
+  every server in it - but not the administration page.
+
+dn: uid=demo.contact,ou=people,{base}
+objectClass: top
+objectClass: person
+objectClass: organizationalPerson
+objectClass: inetOrgPerson
+objectClass: icOrgPerson
+uid: demo.contact
+userPassword: {password}
+cn: Marcus Bell
+sn: Bell
+givenName: Marcus
+displayName: Marcus Bell
+icEmail: demo.contact@intelink.ic.gov
+internetEmail: demo.contact@ugov.gov
+title: Site Reliability Engineer
+employeeType: Civilian
+countryOfAffiliation: USA
+dutyOrganization: Example Agency
+dutySubOrganization: Enterprise IT
+isICMember: TRUE
+demoRole: Point of contact
+demoOrder: 3
+demoSummary: Answers for a handful of servers: their own notifications, and the contact
+  lists of the servers they are named on.
+
+dn: uid=demo.reader,ou=people,{base}
+objectClass: top
+objectClass: person
+objectClass: organizationalPerson
+objectClass: inetOrgPerson
+objectClass: icOrgPerson
+uid: demo.reader
+userPassword: {password}
+cn: Sam Whitfield
+sn: Whitfield
+givenName: Sam
+displayName: Sam Whitfield
+icEmail: demo.reader@intelink.ic.gov
+internetEmail: demo.reader@ugov.gov
+title: Security Analyst
+employeeType: Civilian
+countryOfAffiliation: USA
+dutyOrganization: Example Agency
+dutySubOrganization: Field Support
+isICMember: TRUE
+demoRole: Reader
+demoOrder: 4
+demoSummary: Signed in and nothing more. The tables and the details pages, with none of
+  the controls the others get.

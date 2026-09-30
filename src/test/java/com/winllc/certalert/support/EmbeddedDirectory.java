@@ -303,7 +303,8 @@ public final class EmbeddedDirectory implements AutoCloseable {
         }
     }
 
-    private void add(Entry entry) {
+    /** Adds an entry as written - for a fixture that brings its own, such as a demo seed. */
+    public void add(Entry entry) {
         try {
             server.add(entry);
         } catch (LDAPException e) {

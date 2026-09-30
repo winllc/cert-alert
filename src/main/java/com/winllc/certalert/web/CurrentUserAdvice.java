@@ -3,6 +3,7 @@ package com.winllc.certalert.web;
 import com.winllc.certalert.demo.DemoAccounts;
 import com.winllc.certalert.demo.DemoProperties;
 import java.util.List;
+import org.springframework.beans.factory.ObjectProvider;
 import com.winllc.certalert.security.DirectoryPrincipal;
 import com.winllc.certalert.security.DirectoryPrincipalResolver;
 import org.springframework.boot.webmvc.autoconfigure.error.BasicErrorController;
@@ -26,8 +27,12 @@ public class CurrentUserAdvice {
 
     private final DemoProperties demoProperties;
 
-    public CurrentUserAdvice(DemoProperties demoProperties) {
+    /** Absent unless this is a demo, which is the only thing that offers accounts. */
+    private final ObjectProvider<DemoAccounts> demoAccounts;
+
+    public CurrentUserAdvice(DemoProperties demoProperties, ObjectProvider<DemoAccounts> demoAccounts) {
         this.demoProperties = demoProperties;
+        this.demoAccounts = demoAccounts;
     }
 
     @ModelAttribute("currentUser")
@@ -61,7 +66,8 @@ public class CurrentUserAdvice {
      */
     @ModelAttribute("demoAccounts")
     public List<DemoAccounts.Account> demoAccounts() {
-        return demoProperties.isEnabled() ? DemoAccounts.ALL : List.of();
+        DemoAccounts accounts = demoAccounts.getIfAvailable();
+        return accounts == null ? List.of() : accounts.all();
     }
 
     /** The one password those accounts share, or empty where there are none. */

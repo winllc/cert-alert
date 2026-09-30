@@ -98,8 +98,15 @@ final class DemoDirectoryData {
     private final Instant now;
     private final Random random;
     private final String password;
+    private final List<Entry> seededAccounts;
 
-    DemoDirectoryData(String baseDn, DemoCertificates certificates, Instant now, long seed, String password) {
+    DemoDirectoryData(
+            String baseDn,
+            DemoCertificates certificates,
+            Instant now,
+            long seed,
+            String password,
+            List<Entry> seededAccounts) {
         this.baseDn = baseDn;
         this.peopleDn = "ou=people," + baseDn;
         this.serversDn = "ou=servers," + baseDn;
@@ -107,6 +114,7 @@ final class DemoDirectoryData {
         this.now = now;
         this.random = new Random(seed);
         this.password = password;
+        this.seededAccounts = seededAccounts;
     }
 
     /** Every entry, structure first, in the order a directory would hold them. */
@@ -119,28 +127,17 @@ final class DemoDirectoryData {
         List<String> addresses = new ArrayList<>();
         List<String> names = new ArrayList<>();
 
-        // The accounts a visitor signs in as, first and always the same. Their uids are
-        // printed on the sign-in page and typed by a person, so unlike the generated crowd
-        // below they cannot move with the size of the directory.
+        // The accounts a visitor signs in as come from the seed rather than from here:
+        // they are directory data, and what they carry is what the sign-in page prints.
+        // Certificates are minted for them here, because those have to be dated from now.
         //
-        // All four are expiring soon, so whichever one a visitor picks, the pages that are
-        // about the person reading them have something on them rather than being empty in
-        // a way that looks like a bug.
-        for (DemoAccounts.Account account : DemoAccounts.ALL) {
-            String[] parts = account.displayName().split(" ", 2);
-            entries.add(person(
-                    account.uid(),
-                    parts[0],
-                    parts.length > 1 ? parts[1] : parts[0],
-                    account.displayName(),
-                    account.email(),
-                    account.role(),
-                    "Enterprise IT",
-                    Health.EXPIRING_SOON,
-                    true,
-                    false));
-            addresses.add(account.email());
-            names.add(account.displayName());
+        // All of them are given something expiring soon, so whichever one a visitor picks,
+        // the pages that are about the person reading them have something on them rather
+        // than being empty in a way that looks like a fault.
+        for (Entry seeded : seededAccounts) {
+            entries.add(withCredentials(seeded));
+            addresses.add(seeded.getAttributeValue("icEmail"));
+            names.add(seeded.getAttributeValue("displayName"));
         }
 
         List<Health> peopleHealth = deal(people);
@@ -161,10 +158,37 @@ final class DemoDirectoryData {
         }
 
         List<Health> serverHealth = deal(servers);
+        // The wildcard goes on the first server that actually publishes something. Pinned
+        // to a fixed index it landed, often enough, on one the deal had given no
+        // certificate at all - and the risky-name flag, which is the whole reason a
+        // wildcard is here, then had nothing to flag.
+        int wildcard = serverHealth.indexOf(
+                serverHealth.stream().filter(health -> health != Health.NONE).findFirst().orElse(null));
         for (int i = 0; i < servers; i++) {
-            entries.add(server(i, serverHealth.get(i), addresses, names));
+            entries.add(server(i, serverHealth.get(i), i == wildcard, addresses, names));
         }
         return entries;
+    }
+
+    /**
+     * A seeded account, with certificates minted for it.
+     *
+     * <p>The entry arrives from the seed carrying everything about the person; what it
+     * cannot carry is a certificate, because those have to be dated from the moment this
+     * demo started rather than from whenever the seed was written.
+     */
+    private Entry withCredentials(Entry seeded) {
+        Entry entry = seeded.duplicate();
+        String subject = "CN=%s,OU=People,O=Example Agency,C=US".formatted(entry.getAttributeValue("displayName"));
+        String email = entry.getAttributeValue("icEmail");
+        Instant notBefore = notBefore(Health.EXPIRING_SOON);
+        Instant notAfter = notAfter(Health.EXPIRING_SOON);
+
+        entry.addAttribute("userCertificate;binary", certificates.issue(
+                subject, notBefore, notAfter, DemoCertificates.Use.SIGNING, List.of(email)));
+        entry.addAttribute("userCertificate;binary", certificates.issue(
+                subject, notBefore, notAfter, DemoCertificates.Use.ENCRYPTION, List.of(email)));
+        return entry;
     }
 
     /**
@@ -227,8 +251,13 @@ final class DemoDirectoryData {
         return entry;
     }
 
-    /** A server, its points of contact, and the certificate it serves. */
-    private Entry server(int index, Health health, List<String> addresses, List<String> names) {
+    /**
+     * A server, its points of contact, and the certificate it serves.
+     *
+     * @param wildcard whether this is the one that also answers to {@code *.example.ic.gov}
+     */
+    private Entry server(
+            int index, Health health, boolean wildcard, List<String> addresses, List<String> names) {
         String role = SERVER_ROLES[index % SERVER_ROLES.length];
         String host = "%s%02d".formatted(shortNameOf(role), (index / SERVER_ROLES.length) + 1);
         String fqdn = host + ".example.ic.gov";
@@ -259,11 +288,11 @@ final class DemoDirectoryData {
         // nothing on the ones that are about you. The project administrator is not a
         // contact either - what they run a project gives them, not a serverPOC.
         List<String> contacts = new ArrayList<>();
-        if (index % 3 == 0) {
-            contacts.add(DemoAccounts.ADMINISTRATOR.email());
+        if (index % 3 == 0 && seededEmail("Administrator") != null) {
+            contacts.add(seededEmail("Administrator"));
         }
-        if (index % 4 == 2) {
-            contacts.add(DemoAccounts.POINT_OF_CONTACT.email());
+        if (index % 4 == 2 && seededEmail("Point of contact") != null) {
+            contacts.add(seededEmail("Point of contact"));
         }
         // Written both ways round on purpose: an address on some, a person's name on
         // others, and one that names a team nobody in the directory answers to.
@@ -277,10 +306,8 @@ final class DemoDirectoryData {
         contacts.stream().distinct().forEach(contact -> entry.addAttribute("serverPOC", contact));
 
         if (health != Health.NONE) {
-            // A handful carry a wildcard as well, which is what the risky-name flag reads.
-            List<String> sans = index % 11 == 5
-                    ? List.of(fqdn, "*.example.ic.gov")
-                    : List.of(fqdn);
+            // One carries a wildcard as well, which is what the risky-name flag reads.
+            List<String> sans = wildcard ? List.of(fqdn, "*.example.ic.gov") : List.of(fqdn);
             entry.addAttribute("userCertificate;binary", certificates.issue(
                     "CN=%s,O=Example Agency,C=US".formatted(fqdn),
                     notBefore(health), notAfter(health), DemoCertificates.Use.SERVER, sans));
@@ -312,12 +339,35 @@ final class DemoDirectoryData {
     private String someoneOtherThanTheReader(List<String> candidates) {
         for (int attempt = 0; attempt < 8; attempt++) {
             String candidate = candidates.get(random.nextInt(candidates.size()));
-            if (!candidate.equalsIgnoreCase(DemoAccounts.READER.email())
-                    && !candidate.equalsIgnoreCase(DemoAccounts.READER.displayName())) {
+            if (!isTheReader(candidate)) {
                 return candidate;
             }
         }
-        return DemoAccounts.ADMINISTRATOR.email();
+        String administrator = seededEmail("Administrator");
+        return administrator != null ? administrator : candidates.getFirst();
+    }
+
+    /** Whether this names the account the seed marks as answering for nothing. */
+    private boolean isTheReader(String candidate) {
+        Entry reader = seededWithRole("Reader");
+        if (reader == null) {
+            return false;
+        }
+        return candidate.equalsIgnoreCase(reader.getAttributeValue("icEmail"))
+                || candidate.equalsIgnoreCase(reader.getAttributeValue("displayName"));
+    }
+
+    /** The address of the seeded account carrying this role, or null where there is none. */
+    private String seededEmail(String role) {
+        Entry entry = seededWithRole(role);
+        return entry == null ? null : entry.getAttributeValue("icEmail");
+    }
+
+    private Entry seededWithRole(String role) {
+        return seededAccounts.stream()
+                .filter(entry -> role.equalsIgnoreCase(entry.getAttributeValue(DemoAccounts.ROLE)))
+                .findFirst()
+                .orElse(null);
     }
 
     private List<Health> deal(int count) {

@@ -602,8 +602,8 @@ a mock-up of it.
 
 **The sign-in page is the demo.** What this application shows somebody depends on what they
 have to do with the directory, so a demo that signed everybody in as one administrator
-could only ever demonstrate one answer. Instead it lists four accounts and what each will
-see, and a visitor is each of them in turn:
+could only ever demonstrate one answer. Instead it lists the accounts the directory holds
+and what each will see, and a visitor is each of them in turn:
 
 | Role | Username | Sees |
 |------|----------|------|
@@ -620,6 +620,19 @@ the account menu then offers **Sign out, and be somebody else**.
 
 The passwords are checked the ordinary way, by binding to the directory as the person
 signing in — here the demo's own. Nothing about the authentication is stubbed.
+
+**The accounts are directory data, not a list in the code.** They live in
+`src/main/resources/demo-accounts.ldif`, which the demo loads into its directory at
+startup; the sign-in page then reads them back out of that directory by the attributes the
+seed gives them — `demoRole`, `demoSummary` and `demoOrder`. Editing who the demo offers is
+editing that one file. The reason is that a visitor signs in by *binding* as one of these
+people, so the directory is what decides whether an account exists at all: a list in the
+code saying otherwise would print usernames the directory has never heard of.
+
+It follows that a demo pointed at a directory that was already running
+(`generate-directory: false`) finds no accounts to offer, because those people are not in
+it. The page says so rather than quietly dropping the tile — a tile that simply vanishes is
+indistinguishable from one that was never deployed.
 
 Three of the roles are what the directory makes them: an administrator is named in
 `admin-identifiers`, a point of contact is named in a `serverPOC`, and the reader is
@@ -676,11 +689,13 @@ goes with the process; nothing trusts it and nothing authenticates against it.
 
 What it holds is chosen to exercise the application rather than to look tidy:
 
-- **The four accounts the sign-in page offers**, under fixed uids so what is printed can be
-  typed. All hold credentials expiring shortly, so whichever a visitor picks, the pages
-  that are about the person reading them are not empty in a way that looks like a fault.
-  Two of them are points of contact for several servers each and two deliberately are not,
-  which is the difference the roles describe.
+- **The accounts the seed defines**, loaded from `demo-accounts.ldif` rather than
+  generated, under fixed uids so what the sign-in page prints can be typed. All hold
+  credentials expiring shortly, so whichever a visitor picks, the pages that are about the
+  person reading them are not empty in a way that looks like a fault. Two of them are
+  points of contact for several servers each and two deliberately are not, which is the
+  difference the roles describe. Certificates are minted for them at startup like everybody
+  else's, because those are the one thing a seed cannot carry.
 - **Certificates in every state**: good for years, inside the warning window, inside the
   critical one, lapsed weeks ago, and entries publishing none at all. Dealt from a
   proportioned deck rather than drawn at random, because sixteen servers drawing
@@ -2124,7 +2139,8 @@ src/main/resources/
 ├── static/{css,js}/       a thin layer over Tabler, and the table wiring
 ├── templates/             Thymeleaf pages, Tabler layout and the icon sprite
 │                          two search pages, two details pages, login
-└── dev-directory.ldif     sample directory for the dev profile
+├── dev-directory.ldif     sample directory for the dev profile
+└── demo-accounts.ldif     the accounts the demo's sign-in page offers
 ```
 
 ## Next steps
