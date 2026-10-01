@@ -86,7 +86,7 @@ services:
       directory:
         condition: service_healthy
     environment:
-      SPRING_PROFILES_ACTIVE: postgres
+     # SPRING_PROFILES_ACTIVE: postgres
       CERT_ALERT_DB_URL: jdbc:postgresql://postgres:5432/certalert
       CERT_ALERT_DB_USER: certalert
       CERT_ALERT_DB_PASSWORD: ${CERT_ALERT_DB_PASSWORD:-certalert}
