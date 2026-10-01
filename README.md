@@ -290,9 +290,15 @@ Notes on the image:
 - Keystores for X.509 belong in a mounted volume or a secret. `.dockerignore` excludes
   `*.p12`, `*.jks`, `*.pem` and `*.key` so one cannot be baked in by accident.
 - The image can serve a directory of its own, because the LDAP SDK ships in the jar for
-  [demo mode](#demo-mode) — `--spring.profiles.active=demo` is a complete instance in one
-  container, with nothing to point it at. That is for showing the application, never for
-  running it: it publishes working credentials on its own sign-in page.
+  [demo mode](#demo-mode) — a complete instance in one container, with nothing to point it
+  at:
+
+  ```bash
+  docker run --rm -p 8080:8080 cert-alert:latest --spring.profiles.active=demo
+  ```
+
+  That is for showing the application, never for running it: it publishes working
+  credentials on its own sign-in page.
 
 Tests are not run during the image build — CI runs them, and they need an in-memory LDAP
 server and a database. Build with `--build-arg RUN_TESTS=true` to run them anyway.

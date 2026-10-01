@@ -152,4 +152,12 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
 #
 # These images set an ENTRYPOINT of their own for source-to-image builds; this replaces it,
 # because what is being run here is a jar that was built somewhere else.
-ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar /app/app.jar"]
+#
+# "$@" and the trailing -- are what pass a container's arguments on to the application:
+#
+#   docker run cert-alert --spring.profiles.active=demo
+#
+# Without them `sh -c` takes those arguments as its own positional parameters and drops
+# them, so every such argument was accepted in silence and did nothing. The -- becomes the
+# shell's $0, leaving the real arguments as "$@".
+ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar /app/app.jar \"$@\"", "--"]
