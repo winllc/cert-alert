@@ -440,3 +440,22 @@ tr.notification-unread td:first-child {
     color: inherit;
     border-color: var(--tblr-border-color);
 }
+
+/*
+ * The sign-in page, on a screen shorter than its contents.
+ *
+ * Tabler centres this page with `justify-content: center`, which is fine until the content
+ * is taller than the viewport: the overflow then spills off BOTH ends, and the top half
+ * cannot be scrolled to because scroll position cannot go below zero. On a 375x667 phone
+ * the demo's account tile pushed the page to 905px, and the logo and the username field
+ * ended up 214px and 53px above the top of a page already scrolled to the top - invisible
+ * and unreachable.
+ *
+ * `safe` says: centre it, unless that would overflow, in which case align to the start.
+ * The plain `flex-start` before it is the fallback for a browser that does not know `safe`
+ * - top-aligned rather than centred, which is the right way to be wrong.
+ */
+.page.page-center {
+    justify-content: flex-start;
+    justify-content: safe center;
+}
