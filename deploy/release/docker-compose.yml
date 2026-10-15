@@ -1,0 +1,101 @@
+# cert-alert - production deployment.
+#
+# Two services: the application and its PostgreSQL. The LDAP directory it scrapes and the
+# mail server it sends through are your own, outside this file, and configured in .env.
+#
+#   ./install.sh                  first install
+#   ./upgrade.sh --from <old dir> moving to a new release
+#   docker compose ps | logs -f | down     day to day (`down -v` also deletes the database)
+#
+# The image tags below are the exact ones this release was tested and published with; the
+# images themselves ship in images/ so nothing here needs a registry. Settings go in .env
+# (made from env.template by install.sh), not in this file, so an upgrade can replace this
+# file without losing anything of yours.
+
+# Fixed, so the database volume is the same one whichever directory a release is unpacked
+# into - an upgrade unpacks next to the old release and finds its data. Override with
+# COMPOSE_PROJECT_NAME in .env to run a second instance on one host.
+name: cert-alert
+
+services:
+  postgres:
+    image: @POSTGRES_IMAGE@
+    environment:
+      POSTGRES_DB: ${CERT_ALERT_DB_NAME:-certalert}
+      POSTGRES_USER: ${CERT_ALERT_DB_USER:-certalert}
+      # Read once, when the volume is first initialised. Changing it afterwards means
+      # changing it in the database too (ALTER ROLE), not only here.
+      POSTGRES_PASSWORD: ${CERT_ALERT_DB_PASSWORD:?set CERT_ALERT_DB_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    # Only on the internal network: nothing outside this file reaches the database, and it
+    # reaches nothing outside either.
+    networks: [backend]
+    restart: unless-stopped
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  cert-alert:
+    image: @CERT_ALERT_IMAGE@
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Everything set in .env reaches the application, so any setting from the
+    # documentation can be added there as its environment variable (cert-alert.ldap.page-size
+    # is CERT_ALERT_LDAP_PAGE_SIZE) without editing this file. A setting left commented out in
+    # .env is not passed at all, and the application's default applies.
+    env_file: .env
+    # The ones this file decides, and the ones a deployment cannot start without.
+    environment:
+      SPRING_PROFILES_ACTIVE: postgres
+      CERT_ALERT_DB_URL: jdbc:postgresql://postgres:5432/${CERT_ALERT_DB_NAME:-certalert}
+      CERT_ALERT_DB_USER: ${CERT_ALERT_DB_USER:-certalert}
+      CERT_ALERT_DB_PASSWORD: ${CERT_ALERT_DB_PASSWORD:?set CERT_ALERT_DB_PASSWORD in .env}
+      CERT_ALERT_LDAP_URL: ${CERT_ALERT_LDAP_URL:?set CERT_ALERT_LDAP_URL in .env}
+      CERT_ALERT_LDAP_BASE: ${CERT_ALERT_LDAP_BASE:?set CERT_ALERT_LDAP_BASE in .env}
+      ENS_LICENSE_FILE: /etc/ens/license/license.lic
+    ports:
+      # 8080 inside whichever way it is served: plain HTTP, or HTTPS once
+      # CERT_ALERT_TLS_ENABLED=true. Only the host side moves.
+      - "${CERT_ALERT_BIND_ADDRESS:-0.0.0.0}:${CERT_ALERT_PORT:-8080}:8080"
+    volumes:
+      # The ENS Solutions license: ./license/license.lic. Without one the application runs
+      # its core features only; a license dropped in while it runs is picked up within about
+      # 30 seconds.
+      - ./license:/etc/ens/license:ro
+      # Keystore and truststore for TLS / X.509 client certificates, when enabled in .env.
+      # Empty is fine while TLS is off.
+      - ./tls:/etc/cert-alert/tls:ro
+      # Email templates of your own, used only when
+      # CERT_ALERT_NOTIFICATIONS_EMAIL_TEMPLATE_DIRECTORY=/etc/cert-alert/templates is set.
+      - ./email-templates:/etc/cert-alert/templates:ro
+    healthcheck:
+      # Liveness rather than the aggregate: the aggregate turns DOWN when the directory is
+      # unreachable, which is not a reason to call a process serving cached data unhealthy.
+      # Plain HTTP first, then HTTPS for when TLS is on (self-signed is fine for this).
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health/liveness || curl -fsSk https://localhost:8080/actuator/health/liveness"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+    # backend for the database; default for everything outside - the directory, the mail
+    # server, CRL and OCSP responders, and the published port.
+    networks: [default, backend]
+    restart: unless-stopped
+    logging: *logging
+
+networks:
+  default:
+  backend:
+    internal: true
+
+volumes:
+  postgres-data:
