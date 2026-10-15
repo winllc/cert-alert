@@ -52,7 +52,7 @@
 
                 <!--/* Revocation is the one fact about a certificate the certificate does not
                        carry, so it is asked for on a schedule. This is the same run, now. */-->
-                <div class="card mb-3" id="revocation-admin">
+                <div class="card mb-3" id="revocation-admin" th:if="${@licenseService.isEnabled('revocation')}">
                     <div class="card-header">
                         <h3 class="card-title">Revocation</h3>
                         <div class="card-actions text-secondary small" id="revocation-status">&ndash;</div>
@@ -228,6 +228,20 @@
                     project joined or left, an alert delivered or refused. A sweep that finds the directory
                     exactly as it left it writes nothing here. Records outlive what they describe: an entry
                     pruned from the directory leaves its history behind, named by the DN it had.
+                </p>
+
+                <!--/* What the license covers, in one line: for the administrator who is
+                       wondering why a menu item is missing. GET /api/v1/license has the rest. */-->
+                <p class="text-secondary small" id="license-status" th:if="${license != null}">
+                    <th:block th:if="${license.licensed}"
+                              th:text="'Licensed to ' + ${license.licensee}
+                                       + (${license.expires} != null ? ' until ' + ${license.expires} : ', with no expiry date')
+                                       + (${license.features.contains('*')} ? ' · all features'
+                                          : ' · ' + ${#strings.setJoin(license.features, ', ')})">Licensed to X until Y</th:block>
+                    <th:block th:unless="${license.licensed}"
+                              th:text="'Unlicensed: core features only ('
+                                       + (${license.problem} ?: 'no license file at ' + ${license.file}) + ')'">
+                        Unlicensed: core features only</th:block>
                 </p>
             </div>
         </div>

@@ -1,5 +1,6 @@
 package com.winllc.certalert.web;
 
+import com.winllc.certalert.license.LicenseService;
 import com.winllc.certalert.security.DirectoryPrincipal;
 import com.winllc.certalert.security.DirectoryPrincipalResolver;
 import org.springframework.boot.webmvc.autoconfigure.error.BasicErrorController;
@@ -17,9 +18,18 @@ import org.springframework.web.bind.annotation.ModelAttribute;
  * page served after something went wrong still carries the account menu. The exception
  * handlers call these methods directly: model attributes from an advice are not applied
  * when one runs, so nothing here would reach those pages otherwise.
+ *
+ * <p>The license status rides along for the same reason: the bar hides what the license
+ * does not cover, and the administration page says what it does.
  */
 @ControllerAdvice(assignableTypes = {ViewController.class, BasicErrorController.class})
 public class CurrentUserAdvice {
+
+    private final LicenseService licenseService;
+
+    public CurrentUserAdvice(LicenseService licenseService) {
+        this.licenseService = licenseService;
+    }
 
     @ModelAttribute("currentUser")
     public DirectoryPrincipal currentUser() {
@@ -36,5 +46,10 @@ public class CurrentUserAdvice {
         return authentication != null
                 && authentication.getAuthorities().stream()
                         .anyMatch(authority -> DirectoryPrincipalResolver.ROLE_ADMIN.equals(authority.getAuthority()));
+    }
+
+    @ModelAttribute("license")
+    public LicenseService.Status license() {
+        return licenseService.status();
     }
 }

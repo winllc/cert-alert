@@ -3,6 +3,8 @@ package com.winllc.certalert.scheduling;
 import com.winllc.certalert.domain.SyncJob;
 import com.winllc.certalert.ldap.LdapProperties;
 import com.winllc.certalert.config.NotificationProperties;
+import com.winllc.certalert.license.LicenseService;
+import com.winllc.certalert.license.LicensedFeature;
 import com.winllc.certalert.service.AuditService;
 import com.winllc.certalert.service.CertificateCleanupService;
 import com.winllc.certalert.service.CertificateRefreshService;
@@ -12,6 +14,8 @@ import com.winllc.certalert.service.NotificationService;
 import com.winllc.certalert.service.RevocationService;
 import java.util.EnumMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,6 +52,10 @@ import org.springframework.stereotype.Component;
  * <p>Every job is guarded against overlapping itself. A sweep of a directory with 100,000+
  * entries can outlast its own interval, and two concurrent sweeps would fight over the
  * same rows to no benefit. A job that finds itself already running logs and stands down.
+ *
+ * <p>Revocation, certificate cleanup, prune and the expiry digest are licensed features (see
+ * {@link LicensedFeature}). Their schedules stay wired either way; a firing the license does
+ * not cover returns without doing anything, so installing a license needs no restart.
  */
 @Component
 @EnableScheduling
@@ -65,6 +73,10 @@ public class DirectoryJobScheduler {
     private final RevocationService revocationService;
     private final CertificateCleanupService cleanupService;
     private final LdapProperties properties;
+    private final LicenseService licenseService;
+
+    /** Jobs that have already said they are standing down for want of a license. */
+    private final Set<String> skipped = ConcurrentHashMap.newKeySet();
 
     private final Map<SyncJob, AtomicBoolean> running = new EnumMap<>(SyncJob.class);
 
@@ -77,7 +89,8 @@ public class DirectoryJobScheduler {
             NotificationProperties notificationProperties,
             RevocationService revocationService,
             CertificateCleanupService cleanupService,
-            LdapProperties properties) {
+            LdapProperties properties,
+            LicenseService licenseService) {
         this.syncService = syncService;
         this.refreshService = refreshService;
         this.pruneService = pruneService;
@@ -87,6 +100,7 @@ public class DirectoryJobScheduler {
         this.revocationService = revocationService;
         this.cleanupService = cleanupService;
         this.properties = properties;
+        this.licenseService = licenseService;
         for (SyncJob job : SyncJob.values()) {
             running.put(job, new AtomicBoolean(false));
         }
@@ -118,7 +132,10 @@ public class DirectoryJobScheduler {
             return;
         }
         try {
-            notificationService.digest();
+            if (licensed(LicensedFeature.EMAIL_NOTIFICATIONS, "expiry digest")) {
+                notificationService.digest();
+            }
+            // Trimming old notifications is housekeeping for the in-app ones, which are core.
             notificationService.trim();
         } catch (RuntimeException e) {
             log.error("The expiry digest failed", e);
@@ -146,6 +163,9 @@ public class DirectoryJobScheduler {
      */
     @Scheduled(cron = "${cert-alert.revocation.cron}", zone = "UTC")
     public void checkRevocation() {
+        if (!licensed(LicensedFeature.REVOCATION, "revocation")) {
+            return;
+        }
         runOnce(SyncJob.REVOCATION, revocationService::checkAll);
     }
 
@@ -156,7 +176,8 @@ public class DirectoryJobScheduler {
      */
     @Scheduled(cron = "${cert-alert.ldap.certificate-cleanup.cron}", zone = "UTC")
     public void cleanUpCertificates() {
-        if (!properties.getCertificateCleanup().isEnabled()) {
+        if (!properties.getCertificateCleanup().isEnabled()
+                || !licensed(LicensedFeature.DIRECTORY_CLEANUP, "certificate cleanup")) {
             return;
         }
         runOnce(SyncJob.CERTIFICATE_CLEANUP, cleanupService::run);
@@ -164,10 +185,25 @@ public class DirectoryJobScheduler {
 
     @Scheduled(cron = "${cert-alert.ldap.prune.cron}", zone = "UTC")
     public void prune() {
-        if (!properties.getPrune().isEnabled()) {
+        if (!properties.getPrune().isEnabled() || !licensed(LicensedFeature.DIRECTORY_CLEANUP, "prune")) {
             return;
         }
         runOnce(SyncJob.PRUNE, pruneService::prune);
+    }
+
+    /**
+     * Whether the license covers the job's feature. Says so once when it does not, and
+     * again after a license that did has lapsed, rather than once per firing.
+     */
+    private boolean licensed(LicensedFeature feature, String job) {
+        if (licenseService.isEnabled(feature.id())) {
+            skipped.remove(job);
+            return true;
+        }
+        if (skipped.add(job)) {
+            log.info("Skipping the scheduled {} job: {} is not covered by the license", job, feature.label());
+        }
+        return false;
     }
 
     /** Runs the job unless it is already running, and never lets it escape as an exception. */

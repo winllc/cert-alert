@@ -1,5 +1,6 @@
 package com.winllc.certalert.web;
 
+import com.winllc.certalert.license.LicenseRequiredException;
 import com.winllc.certalert.service.AlreadyExistsException;
 import com.winllc.certalert.service.ProbeUnavailableException;
 import com.winllc.certalert.service.ResourceNotFoundException;
@@ -98,6 +99,27 @@ public class GlobalExceptionHandler {
         return respond(request, HttpStatus.FORBIDDEN, "Not allowed", e.getMessage());
     }
 
+    /**
+     * A licensed feature this deployment's license does not cover. Forbidden rather than
+     * not found: the address is real, and saying what it needs is the useful answer. The
+     * problem detail carries the feature's id, so a script can tell this from a missing
+     * permission.
+     */
+    @ExceptionHandler(LicenseRequiredException.class)
+    public Object handleUnlicensed(LicenseRequiredException e, HttpServletRequest request) {
+        if (wantsHtml(request)) {
+            ModelAndView page = page("license-required", HttpStatus.FORBIDDEN, e.getMessage(), request);
+            page.addObject("feature", e.getFeature().label());
+            return page;
+        }
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, e.getMessage());
+        problem.setTitle("License required");
+        problem.setProperty("error", "license_required");
+        problem.setProperty("feature", e.getFeature().id());
+        problem.setProperty("message", e.getMessage());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(problem);
+    }
+
     /** A rejected request body, answered with the fields that were wrong. */
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public Object handleValidation(MethodArgumentNotValidException e, HttpServletRequest request) {
@@ -171,6 +193,7 @@ public class GlobalExceptionHandler {
         modelAndView.addObject("timestamp", Instant.now(clock).truncatedTo(ChronoUnit.SECONDS));
         modelAndView.addObject("currentUser", currentUser.currentUser());
         modelAndView.addObject("isAdmin", currentUser.isAdmin());
+        modelAndView.addObject("license", currentUser.license());
         return modelAndView;
     }
 

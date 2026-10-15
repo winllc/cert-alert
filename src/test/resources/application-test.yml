@@ -21,6 +21,13 @@ cert-alert:
       # Tests drive the jobs explicitly; nothing should fire on a timer.
       enabled: false
 
+# A test license covering every feature, signed with the test key that
+# src/test/resources/license/ens-license-public.pem overrides the real one with. Relative to
+# the module directory, which is where Gradle runs the tests.
+ens:
+  license:
+    file: src/test/resources/license/test.lic
+
 logging:
   level:
     com.winllc.certalert: DEBUG
