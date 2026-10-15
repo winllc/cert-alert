@@ -107,7 +107,14 @@ services:
       # configurable is where it surfaces, because 8080 on a developer's machine is
       # usually already somebody else's.
       - "${CERT_ALERT_PORT:-8181}:8080"
-    # Mounts, all read-only and all commented out so a first run needs no directories.
+    # The ENS Solutions license: put it at ./license/license.lic. Without one - including
+    # when ./license does not exist, which Docker then creates empty - the application runs
+    # its core features only. A license dropped in while it runs is picked up within about
+    # 30 seconds.
+    volumes:
+      - ./license:/etc/ens/license:ro
+    # Further mounts, all read-only and all commented out so a first run needs no
+    # directories - add them under volumes above.
     #
     # tls: X.509 client certificates need TLS, which needs keystores. Mount them rather
     # than baking them into the image, and set CERT_ALERT_TLS_ENABLED=true plus the
@@ -117,7 +124,6 @@ services:
     # CERT_ALERT_NOTIFICATIONS_EMAIL_TEMPLATE_DIRECTORY below. The files go in an `email`
     # subdirectory of what is mounted, and only what is there is used: the rest still come
     # from the jar.
-    # volumes:
     #   - ./tls:/etc/cert-alert/tls:ro
     #   - ./email-templates:/etc/cert-alert/templates:ro
     # environment, alongside the rest:

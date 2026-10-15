@@ -1,5 +1,7 @@
 package com.winllc.certalert.alert;
 
+import com.winllc.certalert.license.LicenseService;
+import com.winllc.certalert.license.LicensedFeature;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -10,6 +12,8 @@ import org.springframework.stereotype.Component;
 /**
  * Sends alerts by email. Disabled by default; enable with
  * {@code cert-alert.alerts.email.enabled=true} once {@code spring.mail.*} is configured.
+ * Email delivery is a licensed feature: without a license covering it the channel stands
+ * aside and the other channels still deliver.
  */
 @Component
 @ConditionalOnProperty(prefix = "cert-alert.alerts.email", name = "enabled", havingValue = "true")
@@ -19,10 +23,18 @@ public class EmailAlertNotifier implements AlertNotifier {
 
     private final JavaMailSender mailSender;
     private final EmailAlertProperties properties;
+    private final LicenseService licenseService;
 
-    public EmailAlertNotifier(JavaMailSender mailSender, EmailAlertProperties properties) {
+    public EmailAlertNotifier(
+            JavaMailSender mailSender, EmailAlertProperties properties, LicenseService licenseService) {
         this.mailSender = mailSender;
         this.properties = properties;
+        this.licenseService = licenseService;
+    }
+
+    @Override
+    public boolean isActive() {
+        return licenseService.isEnabled(LicensedFeature.EMAIL_NOTIFICATIONS.id());
     }
 
     @Override

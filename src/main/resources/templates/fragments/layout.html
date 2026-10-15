@@ -154,7 +154,10 @@
                         <span class="nav-link-title">Servers</span>
                     </a>
                 </li>
-                <li class="nav-item" th:classappend="${active == 'projects'} ? 'active'">
+                <!--/* Projects and metrics are licensed features; what the license does not
+                       cover is left off the bar rather than offered and refused. */-->
+                <li class="nav-item" th:classappend="${active == 'projects'} ? 'active'"
+                    th:if="${@licenseService.isEnabled('projects')}">
                     <a class="nav-link" th:href="@{/projects}">
                         <span class="nav-link-icon d-md-none d-lg-inline-block">
                             <svg class="icon"><use href="#icon-folder"></use></svg>
@@ -162,7 +165,8 @@
                         <span class="nav-link-title">Projects</span>
                     </a>
                 </li>
-                <li class="nav-item" th:classappend="${active == 'metrics'} ? 'active'">
+                <li class="nav-item" th:classappend="${active == 'metrics'} ? 'active'"
+                    th:if="${@licenseService.isEnabled('metrics')}">
                     <a class="nav-link" th:href="@{/metrics}">
                         <span class="nav-link-icon d-md-none d-lg-inline-block">
                             <svg class="icon"><use href="#icon-chart"></use></svg>
@@ -196,7 +200,8 @@
             <div class="col-auto ms-auto d-print-none">
                 <div class="btn-list align-items-center">
                     <!-- Only appears when the changelog connector is enabled. -->
-                    <span id="changelog-status" class="d-none"></span>
+                    <span id="changelog-status" class="d-none"
+                          th:if="${@licenseService.isEnabled('changelog')}"></span>
                     <span id="sync-status" class="text-secondary small"></span>
                     <button type="button" id="sync-now" class="btn btn-primary" th:if="${isAdmin}">
                         <svg class="icon"><use href="#icon-refresh"></use></svg>

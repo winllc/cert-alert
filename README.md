@@ -57,6 +57,63 @@ Two details from the spec shape the design:
 | UI          | [Tabler](https://tabler.io/admin-template) + Thymeleaf + DataTables, all from webjars |
 | Tests       | JUnit 5, in-memory UnboundID directory, MockMvc          |
 
+## Licensing
+
+cert-alert runs without a license. What a license adds is a set of **licensed features**;
+everything else is **core** and works the same with or without one.
+
+| | Feature (license id) | What it covers |
+|---|---|---|
+| Core | — | Directory sync and expiry refresh, the People and Servers tables and pages, expiry status, signing in, in-app notifications, the logging alert channel, the classification banner, the audit trail and administration page, server attributes, points of contact |
+| Licensed | Revocation checking (`revocation`) | `/api/v1/revocation/**` and the scheduled revocation job |
+| Licensed | TLS endpoint probing (`tls-probe`) | `POST /api/v1/servers/{id}/probe` and the probe card on a server's page |
+| Licensed | Real-time changelog sync (`changelog`) | `/api/v1/changelog/**` and the changelog connector's polling |
+| Licensed | Directory cleanup (`directory-cleanup`) | `/api/v1/sync/prune/**`, `/api/v1/sync/certificate-cleanup/**` and their scheduled jobs |
+| Licensed | Email notifications (`email-notifications`) | The expiry digest (`POST /api/v1/notifications/digest` and its job), the email alert channel and digest email |
+| Licensed | Projects (`projects`) | `/projects`, `/api/v1/projects/**`, the Projects menu item and project filters |
+| Licensed | Metrics (`metrics`) | `/metrics`, `/api/v1/metrics` and the Metrics menu item |
+
+The split is written down once, in `license/LicensedFeature.java`.
+
+A license is a signed text file issued by ENS Solutions for the `cert-alert` product. It
+lists the features it covers (`features=*` is all of them) and when it expires. The
+application checks its signature against a public key built into the jar, so it cannot be
+edited: changing any line invalidates it.
+
+**Where it goes.** The application reads the file named by `ens.license.file`, or the
+environment variable `ENS_LICENSE_FILE`; the default is `license.lic` in the working
+directory. The container image sets `ENS_LICENSE_FILE=/etc/ens/license/license.lic`. A
+license is never built into the image — `.dockerignore` excludes `*.lic` — it is mounted:
+
+```bash
+docker build -t cert-alert:latest .
+
+docker run -d -p 8080:8080 \
+  -v /path/to/license.lic:/etc/ens/license/license.lic:ro \
+  cert-alert:latest
+# or a directory holding license.lic:   -v /path/to/license-dir:/etc/ens/license:ro
+# or a Docker/Kubernetes secret, with ENS_LICENSE_FILE pointing at wherever it is mounted
+```
+
+`docker compose up` mounts `./license` there: put the file at `./license/license.lic`.
+
+**Checking it.** The log says what was found at startup — `License: licensed to …` or
+`License: no license file at …; running with core features only`. Signed in, `GET
+/api/v1/license` returns the state (`LICENSED`, `MISSING`, `INVALID` or `EXPIRED`), the
+licensee, expiry and features, and what is wrong with a file that was rejected;
+administrators also see the path it was read from. The administration page carries the
+same in one line at the bottom.
+
+**What happens without one.** Licensed pages answer `403` with a page saying what they
+need, and the API answers `403` with problem detail carrying
+`"error": "license_required"` and the feature's id. Their menu items and buttons are not
+shown, and their scheduled jobs do nothing. Nothing else changes.
+
+**Expiry and renewal.** A license is good through the end of its expiry date (UTC). After
+that the application falls back to core features — it does not stop. The file is checked
+for changes at most every 30 seconds, whenever a feature is next asked about, so dropping a
+renewed license in place takes effect within about 30 seconds and without a restart.
+
 ## Running it
 
 ```bash
@@ -265,7 +322,10 @@ Notes on the image:
   image's own `HEALTHCHECK` is for plain `docker run`; Kubernetes ignores it and wants its
   own probes.
 - Keystores for X.509 belong in a mounted volume or a secret. `.dockerignore` excludes
-  `*.p12`, `*.jks`, `*.pem` and `*.key` so one cannot be baked in by accident.
+  `*.p12`, `*.jks`, `*.pem` and `*.key` so one cannot be baked in by accident — bar the
+  license public key under `src/main/resources/license`, which belongs in the jar.
+- The license is mounted at `/etc/ens/license/license.lic` (see [Licensing](#licensing));
+  `.dockerignore` excludes `*.lic` so one cannot be baked in either.
 - The image cannot run the `dev` profile: its embedded sample directory is a
   `developmentOnly` dependency and is deliberately not in the jar.
 
@@ -1935,6 +1995,7 @@ src/main/java/com/winllc/certalert/
 ├── config/      expiry thresholds, clock, DataTables repository factory
 ├── domain/      DirectoryUser, DirectoryServer, CachedCertificate, ServerContact, AuditEvent
 ├── ldap/        attribute mapping, paged streaming directory client
+├── license/     the ENS license check, the licensed-feature list and the request gate
 ├── repository/  DataTables repositories and the filter specifications
 ├── security/    X.509 and directory-password authentication, roles
 ├── scheduling/  the four cron jobs
@@ -1942,6 +2003,7 @@ src/main/java/com/winllc/certalert/
 └── web/         DataTables endpoints, REST API, page controllers
 src/main/resources/
 ├── db/migration/          Flyway migrations
+├── license/               the public key licenses are checked against
 ├── static/{css,js}/       a thin layer over Tabler, and the table wiring
 ├── templates/             Thymeleaf pages, Tabler layout and the icon sprite
 │                          two search pages, two details pages, login
