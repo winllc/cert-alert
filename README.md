@@ -640,9 +640,19 @@ It follows that a demo pointed at a directory that was already running
 it. The page says so rather than quietly dropping the tile — a tile that simply vanishes is
 indistinguishable from one that was never deployed.
 
-Three of the roles are what the directory makes them: an administrator is named in
-`admin-identifiers`, a point of contact is named in a `serverPOC`, and the reader is
-deliberately neither. Running a project is not something a directory entry can carry —
+Three of the roles are what the directory makes them: the administrator is the account
+the seed marks `demoRole: Administrator`, a point of contact is named in a `serverPOC`,
+and the reader is deliberately neither.
+
+**The seeded administrator is an administrator whatever `admin-identifiers` says.** That
+setting is read from the environment, and a deployment carrying a value meant for a
+different directory — the compose file names the generated 389ds directory's `alice` —
+was silently demoting the demo's administrator to a reader: the sign-in page still called
+them an administrator, and the administration page, the audit trail and the dry run all
+refused them with no word as to why. So in demo mode the seed decides, as a union with
+`admin-identifiers` rather than instead of it: anybody that setting names is still an
+administrator, it just cannot take the role away from the seeded account. The startup log
+says which it was. Running a project is not something a directory entry can carry —
 projects are this application's own data — so the demo creates one at startup and puts the
 project administrator in charge of it. Without that, signing in as them would show exactly
 what the reader shows and the page would be describing a role the demo does not have.

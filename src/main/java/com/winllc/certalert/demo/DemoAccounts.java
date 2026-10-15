@@ -1,6 +1,10 @@
 package com.winllc.certalert.demo;
 
+import com.winllc.certalert.security.SecurityProperties;
+import java.util.Collection;
 import java.util.List;
+import java.util.Locale;
+import java.util.Optional;
 import javax.naming.directory.Attributes;
 import javax.naming.directory.SearchControls;
 import org.slf4j.Logger;
@@ -49,18 +53,50 @@ public class DemoAccounts {
     /** Where it sits in the list, most to least. */
     public static final String ORDER = "demoOrder";
 
-    /** Everything the sign-in page prints about one account. */
-    public record Account(String role, String uid, String displayName, String summary, int order) {}
+    /** The role, as the seed spells it, of the one account that is an administrator. */
+    public static final String ADMINISTRATOR_ROLE = "Administrator";
+
+    /** Everything the sign-in page prints about one account, and what names them elsewhere. */
+    public record Account(String role, String uid, String email, String displayName, String summary, int order) {
+
+        /** Whether this is the account the seed marks as the administrator. */
+        public boolean isAdministrator() {
+            return ADMINISTRATOR_ROLE.equalsIgnoreCase(role);
+        }
+
+        /** Whether any of these identifiers - a uid, an address, a name - is this account. */
+        boolean isNamedBy(Collection<String> identifiers) {
+            for (String identifier : identifiers) {
+                if (identifier == null) {
+                    continue;
+                }
+                String candidate = identifier.trim().toLowerCase(Locale.ROOT);
+                if (candidate.equals(lower(uid)) || candidate.equals(lower(email))) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private static String lower(String value) {
+            return value == null ? null : value.trim().toLowerCase(Locale.ROOT);
+        }
+    }
 
     private final LdapTemplate template;
     private final String peopleBase;
+    private final SecurityProperties security;
 
     /** Read on first use rather than at startup, so nothing depends on bean ordering. */
     private volatile List<Account> accounts;
 
-    public DemoAccounts(BaseLdapPathContextSource contextSource, com.winllc.certalert.ldap.LdapProperties ldap) {
+    public DemoAccounts(
+            BaseLdapPathContextSource contextSource,
+            com.winllc.certalert.ldap.LdapProperties ldap,
+            SecurityProperties security) {
         this.template = new LdapTemplate(contextSource);
         this.peopleBase = ldap.getUser().getSearchBase();
+        this.security = security;
     }
 
     /** In the order the sign-in page lists them, or empty where the directory holds none. */
@@ -77,11 +113,31 @@ public class DemoAccounts {
         return known;
     }
 
+    /** The account the seed marks as the administrator, if the directory holds one. */
+    public Optional<Account> administrator() {
+        return all().stream().filter(Account::isAdministrator).findFirst();
+    }
+
+    /**
+     * Whether whoever these identifiers name is the seeded administrator.
+     *
+     * <p>Asked at sign-in, so that the demo's administrator is an administrator because
+     * the seed says so, and not because {@code cert-alert.security.admin-identifiers}
+     * happens to agree. That setting is read from the environment, and a deployment that
+     * sets it for a real directory - the compose file names its own generated
+     * administrator - silently demotes the demo's: the sign-in page still calls them an
+     * administrator, and every page that needs one refuses them with no word as to why.
+     */
+    public boolean isSeededAdministrator(Collection<String> identifiers) {
+        return administrator().map(account -> account.isNamedBy(identifiers)).orElse(false);
+    }
+
     private List<Account> read() {
         try {
             SearchControls controls = new SearchControls();
             controls.setSearchScope(SearchControls.SUBTREE_SCOPE);
-            controls.setReturningAttributes(new String[] {"uid", "displayName", "cn", ROLE, SUMMARY, ORDER});
+            controls.setReturningAttributes(
+                    new String[] {"uid", "icEmail", "mail", "displayName", "cn", ROLE, SUMMARY, ORDER});
 
             List<Account> found = template.search(
                     peopleBase, "(%s=*)".formatted(ROLE), controls, (AttributesMapper<Account>) this::toAccount);
@@ -97,6 +153,7 @@ public class DemoAccounts {
             } else {
                 log.info("Demo: offering {} account(s) on the sign-in page: {}",
                         ordered.size(), ordered.stream().map(Account::uid).toList());
+                ordered.stream().filter(Account::isAdministrator).findFirst().ifPresent(this::sayWhoIsAdministrator);
             }
             return ordered;
         } catch (RuntimeException e) {
@@ -107,10 +164,30 @@ public class DemoAccounts {
         }
     }
 
+    /**
+     * Says, once, who the administrator is and where that comes from - so a deployment
+     * whose environment names somebody else can see at startup that the seed still wins.
+     */
+    private void sayWhoIsAdministrator(Account administrator) {
+        List<String> configured = security.getAdminIdentifiers();
+        boolean alsoConfigured = administrator.isNamedBy(configured);
+        if (alsoConfigured) {
+            log.info("Demo: {} is the administrator, by the seed and by cert-alert.security.admin-identifiers alike",
+                    administrator.uid());
+        } else {
+            log.info("Demo: {} is the administrator because the seed says so. "
+                            + "cert-alert.security.admin-identifiers names {} instead, which still counts, "
+                            + "but cannot demote the seeded account.",
+                    administrator.uid(), configured.isEmpty() ? "nobody" : configured);
+        }
+    }
+
     private Account toAccount(Attributes attributes) throws javax.naming.NamingException {
+        String email = value(attributes, "icEmail");
         return new Account(
                 value(attributes, ROLE),
                 value(attributes, "uid"),
+                email != null ? email : value(attributes, "mail"),
                 displayNameOf(attributes),
                 value(attributes, SUMMARY),
                 order(value(attributes, ORDER)));

@@ -83,6 +83,9 @@ class DemoModeTest {
     @Autowired
     private DirectorySyncService syncService;
 
+    @Autowired
+    private com.winllc.certalert.security.SecurityProperties properties;
+
     private MockMvc mockMvc;
     private MockHttpSession admin;
     private MockHttpSession reader;
@@ -284,6 +287,37 @@ class DemoModeTest {
      * and saves nothing. Refusing it left a demo unable to show the round-up at all, since
      * the real one is - rightly - refused like every other write.
      */
+    /**
+     * The deployed failure, exactly. This profile's admin-identifiers names admin@example.gov
+     * and nobody else - as a deployment's environment did, carrying a value meant for a
+     * different directory - and the seeded administrator was signing in as a reader: no
+     * administration page, no audit trail, and a rehearsal refused as a write, with the
+     * sign-in page still calling them an administrator.
+     */
+    @Test
+    void theSeededAdministratorIsOneWhateverAdminIdentifiersSays() throws Exception {
+        assertThat(properties.getAdminIdentifiers()).doesNotContain("demo.admin", "demo.admin@intelink.ic.gov");
+
+        MockHttpSession seededAdministrator = signIn("demo.admin");
+        mockMvc.perform(get("/admin").session(seededAdministrator)).andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/audit/summary").session(seededAdministrator)).andExpect(status().isOk());
+        mockMvc.perform(post("/api/v1/notifications/digest")
+                        .param("dryRun", "true")
+                        .session(seededAdministrator)
+                        .with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.dryRun").value(true));
+    }
+
+    /** And only that account: the seed's other three are not quietly promoted with it. */
+    @Test
+    void theOtherSeededAccountsAreNotAdministrators() throws Exception {
+        for (String uid : new String[] {"demo.project", "demo.contact", "demo.reader"}) {
+            MockHttpSession session = signIn(uid);
+            mockMvc.perform(get("/admin").session(session)).andExpect(status().isForbidden());
+        }
+    }
+
     @Test
     void theAdministratorMayRehearseTheRoundUp() throws Exception {
         mockMvc.perform(post("/api/v1/notifications/digest")
