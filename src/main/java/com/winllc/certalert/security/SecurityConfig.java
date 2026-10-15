@@ -2,21 +2,19 @@ package com.winllc.certalert.security;
 
 import java.util.LinkedHashMap;
 import java.util.List;
+import com.winllc.certalert.demo.DemoMode;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
-import org.springframework.ldap.core.support.BaseLdapPathContextSource;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authorization.AuthenticatedAuthorizationManager;
 import org.springframework.security.authorization.AuthorityAuthorizationManager;
 import org.springframework.security.authorization.AuthorizationManager;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.ldap.authentication.BindAuthenticator;
-import org.springframework.security.ldap.authentication.LdapAuthenticationProvider;
-import org.springframework.security.ldap.search.FilterBasedLdapUserSearch;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.authentication.DelegatingAuthenticationEntryPoint;
@@ -47,6 +45,9 @@ import org.springframework.security.web.util.matcher.RequestMatcher;
 @Configuration
 @EnableWebSecurity
 @ConditionalOnProperty(prefix = "cert-alert.security", name = "enabled", matchIfMissing = true)
+// The demo has a policy of its own - no sign-in, and nothing writable - and the two are
+// never both in force: see DemoSecurityConfig.
+@Conditional(DemoMode.Off.class)
 public class SecurityConfig {
 
     private static final String[] PUBLIC_PATHS = {
@@ -177,32 +178,4 @@ public class SecurityConfig {
         return entryPoint;
     }
 
-    /**
-     * Password authentication by binding to the directory as the person signing in.
-     *
-     * <p>Only registered when it is enabled, so a deployment that wants certificates and
-     * nothing else can say so and be certain there is no password path at all.
-     */
-    @Bean
-    @ConditionalOnProperty(prefix = "cert-alert.security.ldap", name = "enabled", matchIfMissing = true)
-    public AuthenticationProvider ldapAuthenticationProvider(
-            BaseLdapPathContextSource contextSource,
-            SecurityProperties properties,
-            DirectoryUserDetailsContextMapper contextMapper) {
-
-        SecurityProperties.Ldap ldap = properties.getLdap();
-        BindAuthenticator authenticator = new BindAuthenticator(contextSource);
-        if (!ldap.getUserDnPatterns().isEmpty()) {
-            // Bind straight to a known DN shape, for directories that allow no search
-            // before authenticating.
-            authenticator.setUserDnPatterns(ldap.getUserDnPatterns().toArray(String[]::new));
-        } else {
-            authenticator.setUserSearch(
-                    new FilterBasedLdapUserSearch(ldap.getUserSearchBase(), ldap.getUserSearchFilter(), contextSource));
-        }
-
-        LdapAuthenticationProvider provider = new LdapAuthenticationProvider(authenticator);
-        provider.setUserDetailsContextMapper(contextMapper);
-        return provider;
-    }
 }

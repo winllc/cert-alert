@@ -1,8 +1,12 @@
 package com.winllc.certalert.web;
 
+import com.winllc.certalert.demo.DemoAccounts;
+import com.winllc.certalert.demo.DemoProperties;
 import com.winllc.certalert.license.LicenseService;
 import com.winllc.certalert.security.DirectoryPrincipal;
 import com.winllc.certalert.security.DirectoryPrincipalResolver;
+import java.util.List;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.webmvc.autoconfigure.error.BasicErrorController;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -26,9 +30,17 @@ import org.springframework.web.bind.annotation.ModelAttribute;
 public class CurrentUserAdvice {
 
     private final LicenseService licenseService;
+    private final DemoProperties demoProperties;
+    /** Absent unless this is a demo, which is the only thing that offers accounts. */
+    private final ObjectProvider<DemoAccounts> demoAccounts;
 
-    public CurrentUserAdvice(LicenseService licenseService) {
+    public CurrentUserAdvice(
+            LicenseService licenseService,
+            DemoProperties demoProperties,
+            ObjectProvider<DemoAccounts> demoAccounts) {
         this.licenseService = licenseService;
+        this.demoProperties = demoProperties;
+        this.demoAccounts = demoAccounts;
     }
 
     @ModelAttribute("currentUser")
@@ -38,6 +50,38 @@ public class CurrentUserAdvice {
             return principal;
         }
         return null;
+    }
+
+    /**
+     * Whether this copy is a demo, so the pages can say so.
+     *
+     * <p>Every page: somebody arriving at a link in the middle of the application has to
+     * be able to tell that what they are looking at cannot be changed, without having
+     * pressed anything to find out.
+     */
+    @ModelAttribute("demo")
+    public boolean demo() {
+        return demoProperties.isEnabled();
+    }
+
+    /**
+     * The accounts a demo offers, for the sign-in page to print, and empty everywhere else.
+     *
+     * <p>Empty rather than absent so the page has one thing to ask about. On a real
+     * deployment there is nothing to list, and a page that printed credentials because a
+     * property was misread is exactly the failure worth making impossible: the list comes
+     * from the demo being on, not from the page deciding to show it.
+     */
+    @ModelAttribute("demoAccounts")
+    public List<DemoAccounts.Account> demoAccounts() {
+        DemoAccounts accounts = demoAccounts.getIfAvailable();
+        return accounts == null ? List.of() : accounts.all();
+    }
+
+    /** The one password those accounts share, or empty where there are none. */
+    @ModelAttribute("demoPassword")
+    public String demoPassword() {
+        return demoProperties.isEnabled() ? demoProperties.getPassword() : "";
     }
 
     @ModelAttribute("isAdmin")

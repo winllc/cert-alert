@@ -1,5 +1,6 @@
 package com.winllc.certalert.security;
 
+import com.winllc.certalert.demo.DemoAccounts;
 import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.repository.DirectoryUserRepository;
 import java.util.Collection;
@@ -10,6 +11,7 @@ import java.util.Optional;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.stereotype.Service;
@@ -33,9 +35,20 @@ public class DirectoryPrincipalResolver {
     private final DirectoryUserRepository userRepository;
     private final SecurityProperties properties;
 
-    public DirectoryPrincipalResolver(DirectoryUserRepository userRepository, SecurityProperties properties) {
+    /**
+     * Present only on a demo. There, the account the seed marks as the administrator is
+     * one whatever the configuration says; everywhere else this is empty and roles come
+     * from {@code admin-identifiers} alone.
+     */
+    private final ObjectProvider<DemoAccounts> demoAccounts;
+
+    public DirectoryPrincipalResolver(
+            DirectoryUserRepository userRepository,
+            SecurityProperties properties,
+            ObjectProvider<DemoAccounts> demoAccounts) {
         this.userRepository = userRepository;
         this.properties = properties;
+        this.demoAccounts = demoAccounts;
     }
 
     /** The first person the directory knows by any of these values. */
@@ -95,10 +108,27 @@ public class DirectoryPrincipalResolver {
                 .map(DirectoryPrincipalResolver::normalise)
                 .collect(java.util.stream.Collectors.toSet());
         boolean admin = identifiers.stream().map(DirectoryPrincipalResolver::normalise).anyMatch(admins::contains);
-        if (admin) {
+        if (admin || isTheDemoAdministrator(identifiers)) {
             authorities.add(new SimpleGrantedAuthority(ROLE_ADMIN));
         }
         return authorities;
+    }
+
+    /**
+     * Whether this is the account a demo's seed marks as the administrator.
+     *
+     * <p>A union with {@code admin-identifiers}, never a replacement: anybody that setting
+     * names is still an administrator. What this adds is that the setting cannot take the
+     * role away from the seeded account. It is read from the environment, and a deployment
+     * carrying a value meant for a real directory - the compose file names its own
+     * generated administrator - was quietly demoting the demo's, leaving a sign-in page
+     * that called them an administrator above pages that refused them as a reader.
+     *
+     * <p>No effect outside a demo: the bean does not exist there.
+     */
+    private boolean isTheDemoAdministrator(Collection<String> identifiers) {
+        DemoAccounts accounts = demoAccounts.getIfAvailable();
+        return accounts != null && accounts.isSeededAdministrator(identifiers);
     }
 
     private static String normalise(String value) {

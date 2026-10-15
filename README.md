@@ -56,6 +56,7 @@ Two details from the spec shape the design:
 | Tables      | [spring-data-jpa-datatables](https://github.com/darrachequesne/spring-data-jpa-datatables) |
 | UI          | [Tabler](https://tabler.io/admin-template) + Thymeleaf + DataTables, all from webjars |
 | Tests       | JUnit 5, in-memory UnboundID directory, MockMvc          |
+| Demo        | UnboundID in-memory directory, generated and served in-process |
 
 ## Licensing
 
@@ -205,10 +206,22 @@ docker compose up --build
 
 That brings up three services — PostgreSQL, a stand-in 389 Directory Server, and the
 application —
-and waits for the first two to be healthy before starting the third. Sign in at
-<http://localhost:8181> as `alice` / `password` and press **Sync directory**.
+and waits for the first two to be healthy before starting the third.
 
-`CERT_ALERT_PORT` publishes it somewhere else — `CERT_ALERT_PORT=9090 docker compose up`.
+**Nothing is published to the host.** Everything in the file has a default password and the
+directory serves plaintext LDAP, so binding any of it to an interface is opt-in rather than
+what happens by default. The services still reach each other over the compose network, and
+`docker compose exec` reaches them from a shell.
+
+To reach the UI from a browser, add the ports overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.ports.yml up --build
+```
+
+Then sign in at <http://localhost:8181> as `alice` / `password` and press **Sync
+directory**. `CERT_ALERT_PORT` and `CERT_ALERT_LDAP_PORT` move the host side —
+`CERT_ALERT_PORT=9090 docker compose -f docker-compose.yml -f docker-compose.ports.yml up`.
 Only the host side moves: the application still listens on 8080 inside the container, which
 is what the image's `EXPOSE`, its `HEALTHCHECK` and every probe path assume.
 
@@ -228,7 +241,8 @@ docker compose up --build
 `docker/389ds/` builds a **389 Directory Server** carrying
 `docker/389ds/schema/99ic-fsd.ldif` — the IC FSD attributes and the `icOrgPerson` and
 `icOrgServer` object classes, with the OIDs the specification publishes. It is a demo, and
-looks like one: plaintext LDAP on port 1389, and a default password on everything.
+looks like one: plaintext LDAP, and a default password on everything — which is why it is
+not published to the host unless you ask for it.
 
 **It publishes `cn=changelog`**, which is why it is 389-ds and not the OpenLDAP stand-in it
 replaced. The retro changelog is switched on at first boot, so
@@ -258,14 +272,17 @@ this was built for. How much is up to you:
 CERT_ALERT_DUMMY_USERS=5000 CERT_ALERT_DUMMY_SERVERS=1500 docker compose up --build
 ```
 
-Or mount an LDIF of your own at `/bootstrap` and it loads that instead. `ldapsearch` works
-against it from the host:
+Or mount an LDIF of your own at `/bootstrap` and it loads that instead. `ldapsearch` is in
+the image, so it works against the directory without publishing anything:
 
 ```bash
-ldapsearch -x -H ldap://localhost:1389 \
+docker compose exec directory ldapsearch -x -H ldap://localhost:3389 \
   -D 'cn=cert-alert,ou=services,dc=example,dc=test' -w cert-alert \
   -b 'dc=example,dc=test' '(objectClass=icOrgServer)' cn serverPOC
 ```
+
+With the ports overlay up you can run the same query from the host against
+`ldap://localhost:1389` instead.
 
 One thing it cannot demonstrate: it serves plain LDAP, so X.509 sign-in still needs
 keystores of your own.
@@ -278,9 +295,15 @@ directory of your own:
 
 ```bash
 ./scripts/generate-directory-data.sh --users 500 --servers 200 > directory.ldif
+# Into the stand-in, which publishes no port: copy it in, then add it from inside.
+docker compose cp directory.ldif directory:/tmp/directory.ldif
 # -c because the LDIF carries ou=people and ou=servers, which a directory may already have
-ldapadd -c -x -H ldap://localhost:1389 -D 'cn=Directory Manager' -w directory-manager -f directory.ldif
+docker compose exec directory ldapadd -c -x -H ldap://localhost:3389 \
+  -D 'cn=Directory Manager' -w directory-manager -f /tmp/directory.ldif
 ```
+
+Against a directory of your own, that is an ordinary `ldapadd -H ldap://your-host` with no
+container involved.
 
 What it produces is deliberate rather than random: the same arguments give the same people
 and servers every time, down to the addresses and who contacts whom. Only the certificates
@@ -326,8 +349,16 @@ Notes on the image:
   license public key under `src/main/resources/license`, which belongs in the jar.
 - The license is mounted at `/etc/ens/license/license.lic` (see [Licensing](#licensing));
   `.dockerignore` excludes `*.lic` so one cannot be baked in either.
-- The image cannot run the `dev` profile: its embedded sample directory is a
-  `developmentOnly` dependency and is deliberately not in the jar.
+- The image can serve a directory of its own, because the LDAP SDK ships in the jar for
+  [demo mode](#demo-mode) — a complete instance in one container, with nothing to point it
+  at:
+
+  ```bash
+  docker run --rm -p 8080:8080 cert-alert:latest --spring.profiles.active=demo
+  ```
+
+  That is for showing the application, never for running it: it publishes working
+  credentials on its own sign-in page.
 
 Tests are not run during the image build — CI runs them, and they need an in-memory LDAP
 server and a database. Build with `--build-arg RUN_TESTS=true` to run them anyway.
@@ -618,6 +649,173 @@ trigger the first sync.
 `/actuator/health` stays open so the thing can be monitored. Everything else requires
 authentication; an unauthenticated API call gets a 401 rather than a login page, because a
 table driven by fetch has no use for HTML in the response.
+
+### Demo mode
+
+A running copy anybody can look at and nobody can change — for showing the application to
+people without issuing them a certificate or an account first.
+
+```bash
+./gradlew bootRun --args='--spring.profiles.active=demo'
+```
+
+That is the whole of it — nothing else has to be running. The demo generates a directory
+of invented people and servers, serves it from memory over LDAP, and then indexes it the
+way it would index anyone's, so what a visitor sees is the application working rather than
+a mock-up of it.
+
+#### Signing in as each role
+
+**The sign-in page is the demo.** What this application shows somebody depends on what they
+have to do with the directory, so a demo that signed everybody in as one administrator
+could only ever demonstrate one answer. Instead it lists the accounts the directory holds
+and what each will see, and a visitor is each of them in turn:
+
+| Role | Username | Sees |
+|------|----------|------|
+| Administrator | `demo.admin` | Everything, plus the administration page: the whole audit trail, the managed attributes, the controls that run the jobs |
+| Project administrator | `demo.project` | Runs the Mission Systems project, so they manage the points of contact for every server in it — but not the administration page |
+| Point of contact | `demo.contact` | Answers for a handful of servers: their own notifications, and the contact lists of the servers they are named on |
+| Reader | `demo.reader` | Signed in and nothing more. The tables and the details pages, with none of the controls the others get |
+
+All four carry the same password, `cert-alert.demo.password`, which defaults to `password`
+and is printed beside each account on the page. One password rather than four because what
+is being shown is the roles: four secrets to mistype would be four ways to fail at the only
+step before the thing you came to look at. Picking a row fills the form and signs you in;
+the account menu then offers **Sign out, and be somebody else**.
+
+The passwords are checked the ordinary way, by binding to the directory as the person
+signing in — here the demo's own. Nothing about the authentication is stubbed.
+
+**The accounts are directory data, not a list in the code.** They live in
+`src/main/resources/demo-accounts.ldif`, which the demo loads into its directory at
+startup; the sign-in page then reads them back out of that directory by the attributes the
+seed gives them — `demoRole`, `demoSummary` and `demoOrder`. Editing who the demo offers is
+editing that one file. The reason is that a visitor signs in by *binding* as one of these
+people, so the directory is what decides whether an account exists at all: a list in the
+code saying otherwise would print usernames the directory has never heard of.
+
+It follows that a demo pointed at a directory that was already running
+(`generate-directory: false`) finds no accounts to offer, because those people are not in
+it. The page says so rather than quietly dropping the tile — a tile that simply vanishes is
+indistinguishable from one that was never deployed.
+
+Three of the roles are what the directory makes them: the administrator is the account
+the seed marks `demoRole: Administrator`, a point of contact is named in a `serverPOC`,
+and the reader is deliberately neither.
+
+**The seeded administrator is an administrator whatever `admin-identifiers` says.** That
+setting is read from the environment, and a deployment carrying a value meant for a
+different directory — the compose file names the generated 389ds directory's `alice` —
+was silently demoting the demo's administrator to a reader: the sign-in page still called
+them an administrator, and the administration page, the audit trail and the dry run all
+refused them with no word as to why. So in demo mode the seed decides, as a union with
+`admin-identifiers` rather than instead of it: anybody that setting names is still an
+administrator, it just cannot take the role away from the seeded account. The startup log
+says which it was. Running a project is not something a directory entry can carry —
+projects are this application's own data — so the demo creates one at startup and puts the
+project administrator in charge of it. Without that, signing in as them would show exactly
+what the reader shows and the page would be describing a role the demo does not have.
+
+It serves plain HTTP, on `http://localhost:8080`, even where `CERT_ALERT_TLS_ENABLED` is
+set. TLS is here to carry X.509 client certificates, and a demo has nothing for one to
+authenticate; it also needs a keystore, which a demo does not carry — so a demo that
+inherited TLS from its environment would fail to start for want of one. Put a demo behind
+TLS deliberately with `SERVER_SSL_ENABLED=true` and the keystore variables, or terminate it
+in front.
+
+#### Nothing changes, whoever you are
+
+**Read-only is a rule about the request, not about the buttons** — every method that is not
+a `GET`, `HEAD` or `OPTIONS` is refused before any controller sees it, so a demo's safety
+does not depend on the UI happening not to offer something. That holds for the
+administrator too, which is the case worth stating: a rule written about roles would have
+let the one account with the most to see through. The buttons stay where they are, for
+every role, and pressing one says so:
+
+```
+HTTP/1.1 403
+Content-Type: application/problem+json
+
+{"title":"Read-only demo","status":403,
+ "detail":"This is a read-only demo: nothing here can be changed.","instance":"/api/v1/sync"}
+```
+
+By method rather than by a list of paths, so an endpoint added next month is refused
+without anybody remembering to add it. Two things are exempt, and both write nothing: the
+search tables' `/api/v1/datatables/**` endpoints, which are `POST`s only because that is
+how DataTables sends its paging and filters; and **Dry run**, which builds every message
+the round-up would send, reports what would have gone out, and saves none of it. The real
+round-up beside it stays refused, so whether that endpoint is allowed depends on
+`dryRun=true` being on the request rather than on its path. The rehearsal is an
+administrator's, as it is anywhere else — who would be written to is their business.
+
+Because every write is refused anyway, what signing in decides is what you may **read** —
+a much shorter list, and the only place the roles differ. Refused a page rather than a
+button, a browser gets the application's own 403 page saying which role it is for; a script
+gets the problem detail above.
+
+#### The directory it shows
+
+Generated at startup, never shipped as a fixture. Certificates are minted there and then,
+with every window measured from the moment the process started, so "expires in nine days"
+still means nine days on an image built last spring — which is the one thing a demo of an
+expiry tracker cannot get wrong. They are real X.509, signed by a throwaway authority that
+goes with the process; nothing trusts it and nothing authenticates against it.
+
+What it holds is chosen to exercise the application rather than to look tidy:
+
+- **The accounts the seed defines**, loaded from `demo-accounts.ldif` rather than
+  generated, under fixed uids so what the sign-in page prints can be typed. All hold
+  credentials expiring shortly, so whichever a visitor picks, the pages that are about the
+  person reading them are not empty in a way that looks like a fault. Two of them are
+  points of contact for several servers each and two deliberately are not, which is the
+  difference the roles describe. Certificates are minted for them at startup like everybody
+  else's, because those are the one thing a seed cannot carry.
+- **Certificates in every state**: good for years, inside the warning window, inside the
+  critical one, lapsed weeks ago, and entries publishing none at all. Dealt from a
+  proportioned deck rather than drawn at random, because sixteen servers drawing
+  independently regularly came up with nothing expired — a demo quietly not showing one of
+  the things it exists to show. Most of it is healthy, so it reads as a busy estate rather
+  than a broken fixture.
+- **Pairs**: people hold a signing certificate and an encryption one, and some hold a pair
+  straddling two issuances, which is the ordinary way to end up half expired.
+- **Points of contact written both ways round**, as an address on some servers and as a
+  person's name on others, because the specification defines `serverPOC` as a name and
+  real directories do both.
+- **A wildcard name** on one server, so the risky-name flag has something to flag.
+
+Seeded, so a demo restarted an hour later is the same demo; only the dates move.
+
+Three things the demo does for itself, none of them a visitor's doing. It sweeps the
+directory once at startup, because otherwise the tables stay blank until the small hours.
+It then runs the expiry round-up, because notifications are written when a sweep sees a
+certificate *change* state and on a first sweep nothing has changed — everything is simply
+new — which would leave the notifications page empty beside tables full of things expiring
+this week. And the profile switches off pruning, certificate cleanup and outbound email,
+because a visitor cannot start those but the schedules would.
+
+The database is in-memory and goes with the process, so every start is a fresh directory
+and a fresh index of it. A demo that kept its cache in a file would come back tomorrow
+still holding yesterday's dates while the directory beside it had been generated afresh.
+
+To demonstrate against a directory that is already running instead — the one in the
+compose file, or a generated LDIF loaded into a real server — set
+`cert-alert.demo.generate-directory: false` and point `spring.ldap.urls` at it.
+
+| Setting                                  | Default         |                                           |
+|------------------------------------------|-----------------|-------------------------------------------|
+| `cert-alert.demo.enabled`                | `false`         | The whole of it. Replaces the ordinary security configuration rather than relaxing it, so the two are never half-applied |
+| `cert-alert.demo.password`               | `password`      | What every demo account carries, printed beside it on the sign-in page |
+| `cert-alert.demo.generate-directory`     | `true`          | Whether the demo brings a directory of its own. Off to point it at one already running |
+| `cert-alert.demo.people` / `.servers`    | `24` / `16`     | How much to generate                      |
+| `cert-alert.demo.seed`                   | `20260101`      | Fixes the choices, so a restart is the same demo. The dates always move with it |
+
+> **Never point a demo at a real directory.** It prints working credentials on its front
+> page, and the account they open reads every entry the directory holds. That is a
+> reasonable thing to do with invented entries on an instance you can throw away, and
+> nothing else. `cert-alert.demo.enabled` is not a way to run this application for real,
+> any more than `cert-alert.security.enabled: false` is.
 
 ## The search tables
 
@@ -1959,6 +2157,17 @@ Access, under `cert-alert.security`:
 | `ldap.user-search-filter`         | `(uid={0})` | How to look the username up               |
 | `ldap.user-dn-patterns`           | `[]`    | Bind straight to a DN shape instead           |
 
+A demo, under `cert-alert.demo` — see [Demo mode](#demo-mode), and never against a real
+directory:
+
+| Property             | Default        | Purpose                                         |
+|----------------------|----------------|-------------------------------------------------|
+| `enabled`            | `false`        | Sign in as any listed account, every write refused   |
+| `password`           | `password`     | What every demo account carries, printed on the sign-in page |
+| `generate-directory` | `true`         | Bring a directory of its own, generated at startup   |
+| `people` / `servers` | `24` / `16`    | How much to generate                                 |
+| `seed`               | `20260101`     | Fixes the choices; the dates always move with startup |
+
 Alert channels, under `cert-alert.alerts`:
 
 | Property         | Default | Purpose                              |
@@ -1988,6 +2197,7 @@ class SlackAlertNotifier implements AlertNotifier {
 ```
 Dockerfile               three-stage image build
 docker-compose.yml       the application, a PostgreSQL and a stand-in directory
+docker-compose.ports.yml opt-in overlay that publishes them on the host
 docker/389ds/            389 Directory Server carrying the IC FSD schema and a changelog
 scripts/                 the dummy directory generator
 src/main/java/com/winllc/certalert/
@@ -2007,7 +2217,8 @@ src/main/resources/
 ├── static/{css,js}/       a thin layer over Tabler, and the table wiring
 ├── templates/             Thymeleaf pages, Tabler layout and the icon sprite
 │                          two search pages, two details pages, login
-└── dev-directory.ldif     sample directory for the dev profile
+├── dev-directory.ldif     sample directory for the dev profile
+└── demo-accounts.ldif     the accounts the demo's sign-in page offers
 ```
 
 ## Next steps

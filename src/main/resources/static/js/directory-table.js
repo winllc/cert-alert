@@ -46,16 +46,80 @@
         }
     });
 
+    /** Whether this copy is a demo, where a refusal means something else entirely. */
+    var demo = document.querySelector('meta[name="cert-alert-demo"]') !== null;
+
     /**
-     * A 401 means the session lapsed while the page stayed open. Sending them to the login
-     * form beats leaving a table that silently stops updating.
+     * A refusal, and what to do about it.
+     *
+     * <p>Ordinarily a 401 or a 403 means the session lapsed while the page stayed open,
+     * and the place to go is the sign-in page: better than a table that silently stops
+     * updating. On a demo it means the demo refusing to be changed - there is no
+     * sign-in page to go to, and bouncing somebody to one they cannot use is the worst
+     * possible answer to a button they were invited to press. So it says what happened and
+     * leaves them where they are.
      */
     function handleUnauthorized(xhr) {
+        if (demo && xhr.status === 403) {
+            sayItIsADemo(xhr);
+            return true;
+        }
         if (xhr.status === 401 || xhr.status === 403) {
             window.location.href = '/login';
             return true;
         }
         return false;
+    }
+
+    // Every refusal, wherever it came from. Each page's own handler says something
+    // sensible for the deployment it was written for - "only an administrator can change
+    // this" - and on a demo all of those are wrong in the same way: the visitor is an
+    // administrator, and it is the demo that refused. One hook catches the lot, including
+    // whatever is written next.
+    if (demo) {
+        $(document).ajaxError(function (event, xhr) {
+            if (xhr.status === 403) {
+                sayItIsADemo(xhr);
+            }
+        });
+    }
+
+    var demoNoticeTimer = null;
+    var DEMO_REFUSAL = 'This is a read-only demo \u2014 nothing here can be changed.';
+
+    /**
+     * One notice at a time, wherever on the page the button was.
+     *
+     * <p>Prefers what the refusal itself said. The rule lives in the security
+     * configuration, and a copy of its wording here is a copy that goes stale; the literal
+     * is only for a refusal that arrived without one.
+     */
+    function sayItIsADemo(xhr) {
+        var said = null;
+        try {
+            if (xhr && xhr.responseJSON) {
+                said = xhr.responseJSON.detail;
+            } else if (xhr && xhr.responseText) {
+                said = JSON.parse(xhr.responseText).detail;
+            }
+        } catch (ignored) {
+            // Not problem detail. The literal below says the same thing.
+            said = null;
+        }
+        var notice = document.getElementById('demo-notice');
+        if (!notice) {
+            notice = document.createElement('div');
+            notice.id = 'demo-notice';
+            notice.className = 'demo-notice';
+            notice.setAttribute('role', 'status');
+            document.body.appendChild(notice);
+        }
+        notice.textContent = said || DEMO_REFUSAL;
+        notice.classList.add('is-shown');
+        window.clearTimeout(demoNoticeTimer);
+        demoNoticeTimer = window.setTimeout(function () {
+            notice.classList.remove('is-shown');
+        }, 4000);
     }
 
     function escapeHtml(value) {
@@ -425,6 +489,9 @@
         loadStats: loadStats,
         escapeHtml: escapeHtml,
         handleUnauthorized: handleUnauthorized,
+        isDemo: function () {
+            return demo;
+        },
         text: text,
         icon: icon,
         formatDate: formatDate,

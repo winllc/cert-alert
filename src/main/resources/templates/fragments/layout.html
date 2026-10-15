@@ -11,6 +11,9 @@
     <!-- The tables POST, so every request needs the CSRF token; the scripts read it here. -->
     <meta name="_csrf" th:content="${_csrf != null} ? ${_csrf.token} : ''">
     <meta name="_csrf_header" th:content="${_csrf != null} ? ${_csrf.headerName} : ''">
+    <!-- On a demo, so the scripts know a refusal is the demo refusing rather than a session
+         that has run out - the two look identical over HTTP and want opposite responses. -->
+    <meta th:if="${demo}" name="cert-alert-demo" content="true">
     <!-- Everything is served from the jar rather than a CDN: this runs on networks with no
          route to one. Tabler bundles the Bootstrap it is built on, so it comes first and
          DataTables' Bootstrap 5 integration layers on top. -->
@@ -78,7 +81,8 @@
 <body>
 
 <!--/* The application shell: brand, navigation, and who is signed in. */-->
-<header th:fragment="navbar(active)" class="navbar navbar-expand-md d-print-none" data-bs-theme="dark">
+<header th:fragment="navbar(active)" class="navbar navbar-expand-md d-print-none"
+        th:classappend="${demo} ? 'has-demo-strip'" data-bs-theme="dark">
     <div class="container-xl">
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar-menu"
                 aria-label="Toggle navigation">
@@ -129,7 +133,8 @@
                     <form method="post" th:action="@{/logout}">
                         <button type="submit" class="dropdown-item">
                             <svg class="icon me-2"><use href="#icon-logout"></use></svg>
-                            Sign out
+                            <span th:if="${demo}">Sign out, and be somebody else</span>
+                            <span th:unless="${demo}">Sign out</span>
                         </button>
                     </form>
                 </div>
@@ -185,6 +190,15 @@
                 </li>
             </ul>
         </div>
+    </div>
+
+    <!--/* On every page, because somebody arriving at a link in the middle of the
+           application has to be able to tell what they are looking at without pressing
+           anything to find out. Full width, so it wraps onto its own line under the bar. */-->
+    <div th:if="${demo}" class="demo-strip w-100">
+        <span class="badge bg-azure-lt me-2">Demo</span>
+        Nothing here can be changed, whoever you signed in as &mdash; the controls are shown
+        as they are, and pressing one says so. Sign out to be another role.
     </div>
 </header>
 
