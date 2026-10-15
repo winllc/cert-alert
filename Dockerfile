@@ -101,7 +101,8 @@ LABEL org.opencontainers.image.title="cert-alert" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}" \
       org.opencontainers.image.licenses="MIT" \
-      org.opencontainers.image.base.name="${UBI_JRE_IMAGE}"
+      org.opencontainers.image.base.name="${UBI_JRE_IMAGE}" \
+      com.enssolutions.license.path="/etc/ens/license/license.lic"
 
 # curl is for the health check below. The minimal UBI these images are built on ships
 # curl-minimal, which provides it - so this asks whether it is there rather than
@@ -126,13 +127,27 @@ COPY --from=extract --chown=185:0 /extract/extracted/spring-boot-loader/ ./
 COPY --from=extract --chown=185:0 /extract/extracted/snapshot-dependencies/ ./
 COPY --from=extract --chown=185:0 /extract/extracted/application/ ./
 
-# Only needed by the default H2 profile, which is for trying the thing out rather than for
-# running it; a real deployment uses the postgres profile and writes nothing here.
+# /app/data is only needed by the default H2 profile, which is for trying the thing out
+# rather than for running it; a real deployment uses the postgres profile and writes nothing
+# there. /etc/ens/license is where the license is mounted (see below): created so a mount
+# has somewhere to land, root-owned and only readable by the application.
 RUN mkdir -p /app/data \
     && chown -R 185:0 /app \
-    && chmod -R g=u /app
+    && chmod -R g=u /app \
+    && mkdir -p /etc/ens/license \
+    && chmod 0755 /etc/ens/license
 
 USER 185
+
+# The ENS Solutions license. Never part of the image: the build context excludes *.lic, and
+# the file is mounted at run time. Without one - or with one that is invalid or has expired -
+# the application still starts and runs its core features; the log says which it found.
+# A license that is replaced or renewed is picked up within about 30 seconds, no restart.
+#
+# Mount the license read-only:  -v /path/to/license.lic:/etc/ens/license/license.lic:ro
+#   or a directory:             -v /path/to/license-dir:/etc/ens/license:ro
+#   or a Docker/K8s secret, with ENS_LICENSE_FILE pointing at it.
+ENV ENS_LICENSE_FILE=/etc/ens/license/license.lic
 
 # 8080 plain, 8443 when TLS is switched on for X.509 client certificates.
 EXPOSE 8080 8443

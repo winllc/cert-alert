@@ -15,11 +15,27 @@ logs/
 .vscode/
 *.iml
 
-# Keys and certificates belong in a mounted volume or a secret, never baked in.
+# Keys and certificates belong in a mounted volume or a secret, never baked in. At any
+# depth: a bare *.pem here matches the top of the context only.
 *.p12
 *.jks
 *.pem
 *.key
+**/*.p12
+**/*.jks
+**/*.pem
+**/*.key
+# A license is mounted at run time and never baked into an image.
+*.lic
+**/*.lic
+license/
+
+# Except the public key licenses are checked against, which is part of the application and
+# has to be in the jar - and the test tree's key and license, which only the tests accept
+# and which never leave the build stage, so that RUN_TESTS=true still has them.
+!src/main/resources/license/ens-license-public.pem
+!src/test/resources/license/
+!src/test/resources/license/*
 
 README.md
 Dockerfile
