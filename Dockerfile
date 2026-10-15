@@ -130,7 +130,7 @@ COPY --from=extract --chown=185:0 /extract/extracted/application/ ./
 # /app/data is only needed by the default H2 profile, which is for trying the thing out
 # rather than for running it; a real deployment uses the postgres profile and writes nothing
 # there. /etc/ens/license is where the license is mounted (see below): created so a mount
-# has somewhere to land, root-owned and only readable by the application.
+# has somewhere to land. The mounted file needs to be readable by uid 185 or group 0.
 RUN mkdir -p /app/data \
     && chown -R 185:0 /app \
     && chmod -R g=u /app \
