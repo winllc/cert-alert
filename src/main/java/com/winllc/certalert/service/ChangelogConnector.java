@@ -5,6 +5,8 @@ import com.winllc.certalert.ldap.ChangelogBounds;
 import com.winllc.certalert.ldap.ChangelogEntry;
 import com.winllc.certalert.ldap.ChangelogProperties;
 import com.winllc.certalert.ldap.LdapChangelogClient;
+import com.winllc.certalert.license.LicenseService;
+import com.winllc.certalert.license.LicensedFeature;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -59,6 +61,7 @@ public class ChangelogConnector implements SmartLifecycle {
     private final ChangelogCursorStore cursorStore;
     private final DirectorySyncService syncService;
     private final ChangelogProperties properties;
+    private final LicenseService licenseService;
     private final Clock clock;
 
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -70,12 +73,14 @@ public class ChangelogConnector implements SmartLifecycle {
             ChangelogCursorStore cursorStore,
             DirectorySyncService syncService,
             ChangelogProperties properties,
+            LicenseService licenseService,
             Clock clock) {
         this.changelogClient = changelogClient;
         this.applier = applier;
         this.cursorStore = cursorStore;
         this.syncService = syncService;
         this.properties = properties;
+        this.licenseService = licenseService;
         this.clock = clock;
     }
 
@@ -132,7 +137,22 @@ public class ChangelogConnector implements SmartLifecycle {
 
     private void run() {
         Duration backoff = Duration.ZERO;
+        boolean waitingForLicense = false;
         while (running.get()) {
+            // Real-time sync is a licensed feature. Without it the loop idles rather than
+            // ending, so a license installed while it runs is picked up at the next poll.
+            if (!licenseService.isEnabled(LicensedFeature.CHANGELOG.id())) {
+                if (!waitingForLicense) {
+                    log.info("Changelog connector idle: {} is not covered by the license",
+                            LicensedFeature.CHANGELOG.label());
+                    waitingForLicense = true;
+                }
+                if (!sleep(properties.getPollInterval())) {
+                    return;
+                }
+                continue;
+            }
+            waitingForLicense = false;
             try {
                 int applied = pollOnce();
                 backoff = Duration.ZERO;

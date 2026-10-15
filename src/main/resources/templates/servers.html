@@ -95,7 +95,7 @@
                             <option value="BARE_HOSTNAME">Bare hostname</option>
                         </select>
                     </div>
-                    <div class="col-12 col-md-auto">
+                    <div class="col-12 col-md-auto" th:if="${@licenseService.isEnabled('projects')}">
                         <label class="form-label" for="project-filter">Project</label>
                         <select id="project-filter" class="form-select">
                             <option value="">Any</option>

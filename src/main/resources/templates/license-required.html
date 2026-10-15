@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<!--/*
+  A licensed feature this deployment's license does not cover. Reached by following an old
+  link or a bookmark: the bar does not offer what the license leaves out.
+*/-->
+<head th:replace="~{fragments/layout :: head('License required')}"></head>
+<body>
+<svg th:replace="~{fragments/icons :: sprite}"></svg>
+
+<div class="page">
+    <header th:replace="~{fragments/layout :: navbar('')}"></header>
+    <div class="page-wrapper">
+        <div class="page-body">
+            <div class="container-xl">
+                <div class="empty">
+                    <div class="empty-header">403</div>
+                    <p class="empty-title" th:text="(${feature} ?: 'This feature') + ' needs a license'">
+                        Metrics needs a license</p>
+                    <p class="empty-subtitle text-secondary" th:text="${message}">
+                        Metrics requires an ENS Solutions license.</p>
+                    <p class="empty-subtitle text-secondary">
+                        Everything else here works without one. An administrator can install a license
+                        file; it is picked up within a minute, without a restart.
+                    </p>
+                    <div class="empty-action">
+                        <a th:href="@{/users}" class="btn btn-primary">Back to the directory</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<div th:replace="~{fragments/layout :: scripts}"></div>
+</body>
+</html>

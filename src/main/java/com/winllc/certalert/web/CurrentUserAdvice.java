@@ -2,10 +2,11 @@ package com.winllc.certalert.web;
 
 import com.winllc.certalert.demo.DemoAccounts;
 import com.winllc.certalert.demo.DemoProperties;
-import java.util.List;
-import org.springframework.beans.factory.ObjectProvider;
+import com.winllc.certalert.license.LicenseService;
 import com.winllc.certalert.security.DirectoryPrincipal;
 import com.winllc.certalert.security.DirectoryPrincipalResolver;
+import java.util.List;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.webmvc.autoconfigure.error.BasicErrorController;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -21,16 +22,23 @@ import org.springframework.web.bind.annotation.ModelAttribute;
  * page served after something went wrong still carries the account menu. The exception
  * handlers call these methods directly: model attributes from an advice are not applied
  * when one runs, so nothing here would reach those pages otherwise.
+ *
+ * <p>The license status rides along for the same reason: the bar hides what the license
+ * does not cover, and the administration page says what it does.
  */
 @ControllerAdvice(assignableTypes = {ViewController.class, BasicErrorController.class})
 public class CurrentUserAdvice {
 
+    private final LicenseService licenseService;
     private final DemoProperties demoProperties;
-
     /** Absent unless this is a demo, which is the only thing that offers accounts. */
     private final ObjectProvider<DemoAccounts> demoAccounts;
 
-    public CurrentUserAdvice(DemoProperties demoProperties, ObjectProvider<DemoAccounts> demoAccounts) {
+    public CurrentUserAdvice(
+            LicenseService licenseService,
+            DemoProperties demoProperties,
+            ObjectProvider<DemoAccounts> demoAccounts) {
+        this.licenseService = licenseService;
         this.demoProperties = demoProperties;
         this.demoAccounts = demoAccounts;
     }
@@ -82,5 +90,10 @@ public class CurrentUserAdvice {
         return authentication != null
                 && authentication.getAuthorities().stream()
                         .anyMatch(authority -> DirectoryPrincipalResolver.ROLE_ADMIN.equals(authority.getAuthority()));
+    }
+
+    @ModelAttribute("license")
+    public LicenseService.Status license() {
+        return licenseService.status();
     }
 }

@@ -39,6 +39,11 @@ public class AlertDispatcher {
         String actor = AuditActors.current(AuditActors.SYSTEM);
 
         for (AlertNotifier notifier : notifiers) {
+            if (!notifier.isActive()) {
+                log.debug("Alert channel '{}' is inactive; not delivering alert for target '{}'",
+                        notifier.channelName(), alert.ownerName());
+                continue;
+            }
             try {
                 notifier.send(alert);
                 records.add(record(alert, AuditAction.ALERT_SENT, notifier.channelName(), actor, null));

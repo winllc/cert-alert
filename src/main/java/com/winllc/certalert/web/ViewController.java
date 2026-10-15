@@ -7,6 +7,8 @@ import com.winllc.certalert.domain.DirectoryServer;
 import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.domain.Project;
 import com.winllc.certalert.config.ProbeProperties;
+import com.winllc.certalert.license.LicenseService;
+import com.winllc.certalert.license.LicensedFeature;
 import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.DirectoryUserRepository;
 import com.winllc.certalert.security.ServerAccessPolicy;
@@ -47,6 +49,7 @@ public class ViewController {
     private final ServerAccessPolicy accessPolicy;
     private final ProbeProperties probeProperties;
     private final SignedInDirectoryUser signedIn;
+    private final LicenseService licenseService;
     private final Clock clock;
 
     public ViewController(
@@ -58,6 +61,7 @@ public class ViewController {
             ServerAccessPolicy accessPolicy,
             ProbeProperties probeProperties,
             SignedInDirectoryUser signedIn,
+            LicenseService licenseService,
             Clock clock) {
         this.userRepository = userRepository;
         this.serverRepository = serverRepository;
@@ -67,6 +71,7 @@ public class ViewController {
         this.accessPolicy = accessPolicy;
         this.probeProperties = probeProperties;
         this.signedIn = signedIn;
+        this.licenseService = licenseService;
         this.clock = clock;
     }
 
@@ -124,10 +129,12 @@ public class ViewController {
         model.addAttribute("projects", projectService.forServer(id));
         model.addAttribute("actions", AuditAction.values());
         // The probe opens a connection to somewhere else, so the card is offered only to
-        // the people who may run it - and only where there is somewhere to run it against.
+        // the people who may run it - and only where there is somewhere to run it against,
+        // and a license that covers it.
         model.addAttribute(
                 "mayProbe",
                 probeProperties.isEnabled()
+                        && licenseService.isEnabled(LicensedFeature.TLS_PROBE.id())
                         && EndpointAddress.of(server, null, probeProperties.getDefaultPort()).isPresent()
                         && accessPolicy.mayManageContacts(id, authentication));
         model.addAttribute("probePort", probeService.defaultPortFor(server));

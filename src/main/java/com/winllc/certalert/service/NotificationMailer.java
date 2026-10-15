@@ -2,6 +2,8 @@ package com.winllc.certalert.service;
 
 import com.winllc.certalert.config.NotificationProperties;
 import com.winllc.certalert.domain.OwnerType;
+import com.winllc.certalert.license.LicenseService;
+import com.winllc.certalert.license.LicensedFeature;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import java.util.ArrayList;
@@ -32,7 +34,8 @@ import org.thymeleaf.context.Context;
  * opened.
  *
  * <p>Absent a mail sender, or with sending switched off, this does nothing and says so
- * once. The notifications are still written and still show on the page.
+ * once. The notifications are still written and still show on the page. The same goes for
+ * a license that does not cover email notifications.
  */
 @Component
 public class NotificationMailer {
@@ -45,6 +48,7 @@ public class NotificationMailer {
     private final Optional<JavaMailSender> mailSender;
     private final TemplateEngine templates;
     private final NotificationProperties properties;
+    private final LicenseService licenseService;
 
     private boolean warned;
     private int sentThisRun;
@@ -55,10 +59,14 @@ public class NotificationMailer {
     private final List<Failure> failuresThisRun = new ArrayList<>();
 
     public NotificationMailer(
-            Optional<JavaMailSender> mailSender, TemplateEngine templates, NotificationProperties properties) {
+            Optional<JavaMailSender> mailSender,
+            TemplateEngine templates,
+            NotificationProperties properties,
+            LicenseService licenseService) {
         this.mailSender = mailSender;
         this.templates = templates;
         this.properties = properties;
+        this.licenseService = licenseService;
     }
 
     /**
@@ -75,6 +83,11 @@ public class NotificationMailer {
         // in: the question "what would this send" is asked before email is turned on, not
         // after. What comes back says which it was, so nothing reads as having gone out.
         if (!settings.isEnabled() && !dryRunThisRun) {
+            return false;
+        }
+        if (!dryRunThisRun && !licenseService.isEnabled(LicensedFeature.EMAIL_NOTIFICATIONS.id())) {
+            warnOnce("Notification email is enabled but " + LicensedFeature.EMAIL_NOTIFICATIONS.label()
+                    + " is not covered by the license");
             return false;
         }
         // A dry run needs no transport, which is rather the point: the question it answers -

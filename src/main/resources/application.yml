@@ -108,6 +108,14 @@ management:
       probes:
         enabled: true
 
+# The ENS Solutions license file. Without a valid one the application runs its core
+# features only; see the README's Licensing section for what a license adds. Re-read when
+# it changes, so a renewal needs no restart. The production image sets ENS_LICENSE_FILE to
+# /etc/ens/license/license.lic.
+ens:
+  license:
+    file: ${ENS_LICENSE_FILE:license.lic}
+
 cert-alert:
   # The fixed bars across the top and bottom of every page - what an accredited network
   # normally requires: the classification of what is on the screen, where a screenshot or

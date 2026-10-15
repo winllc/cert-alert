@@ -22,3 +22,12 @@ data/
 logs/
 *.log
 out/
+
+# ENS licenses and signing keys are never committed. The test-only key under
+# src/test/resources is the exception: it signs licenses that only the tests accept.
+*.lic
+!src/test/resources/license/test.lic
+*private.pem
+!src/test/resources/license/ens-license-test-private.pem
+# Where docker-compose.yml mounts the license from.
+/license/
