@@ -3,6 +3,7 @@ package com.winllc.certalert.web;
 import com.enssolutions.license.LicenseCheck;
 import com.enssolutions.license.LicenseException;
 import com.enssolutions.license.LicenseState;
+import com.winllc.certalert.audit.LicenseAudit;
 import com.winllc.certalert.license.LicenseInstalled;
 import com.winllc.certalert.license.Licensing;
 import com.winllc.certalert.license.LicensedFeature;
@@ -44,16 +45,19 @@ public class LicenseScreenController {
     private final DirectoryUserRepository users;
     private final CurrentUserAdvice currentUser;
     private final ApplicationEventPublisher events;
+    private final LicenseAudit audit;
 
     public LicenseScreenController(
             Licensing licensing,
             DirectoryUserRepository users,
             CurrentUserAdvice currentUser,
-            ApplicationEventPublisher events) {
+            ApplicationEventPublisher events,
+            LicenseAudit audit) {
         this.licensing = licensing;
         this.users = users;
         this.currentUser = currentUser;
         this.events = events;
+        this.audit = audit;
     }
 
     /** One catalog feature, and whether the installed license lists it. */
@@ -94,6 +98,9 @@ public class LicenseScreenController {
             return "redirect:/admin/license";
         }
         if (license == null || license.isBlank() || license.length() > MAX_LICENSE_BYTES) {
+            if (license == null || license.length() > MAX_LICENSE_BYTES) {
+                audit.rejected("the upload is too large to be a license", null);
+            }
             flash.addFlashAttribute("error", license == null
                     ? "That file is too large to be a license."
                     : "Choose a license file (.lic) or paste one.");
@@ -108,15 +115,18 @@ public class LicenseScreenController {
             if (refused) {
                 log.warn("{} uploaded a license that was refused ({}): {}",
                         AuditActors.current(AuditActors.SYSTEM), check.state(), check.message());
+                audit.rejected(check.message(), check);
                 flash.addFlashAttribute("error", "That license was not installed. " + check.message());
             } else {
                 log.info("{} installed a license: {} ({})",
                         AuditActors.current(AuditActors.SYSTEM), check.message(), check.state());
+                audit.installed(check);
                 flash.addFlashAttribute(check.isFullyLicensed() ? "notice" : "error",
                         "License installed. " + check.message());
                 events.publishEvent(new LicenseInstalled(check));
             }
         } catch (LicenseException e) {
+            audit.rejected("not a valid ENS license: " + e.getMessage(), null);
             flash.addFlashAttribute("error", "That isn't a valid ENS license: " + e.getMessage() + ".");
         } catch (IOException | RuntimeException e) {
             log.error("Could not install the uploaded license", e);

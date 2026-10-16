@@ -193,6 +193,15 @@
                         <span class="nav-link-title">Admin</span>
                     </a>
                 </li>
+                <!--/* Administrators only, and whatever the license says: the audit trail. */-->
+                <li class="nav-item" th:classappend="${active == 'audit'} ? 'active'" th:if="${isAdmin}">
+                    <a class="nav-link" th:href="@{/admin/audit}">
+                        <span class="nav-link-icon d-md-none d-lg-inline-block">
+                            <svg class="icon"><use href="#icon-lock"></use></svg>
+                        </span>
+                        <span class="nav-link-title">Audit log</span>
+                    </a>
+                </li>
             </ul>
         </div>
     </div>

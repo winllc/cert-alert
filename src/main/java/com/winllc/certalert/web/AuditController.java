@@ -139,8 +139,13 @@ public class AuditController {
         }
 
         requireAdministrator(authentication);
+        // Every entry's changes at once. The rest of the trail - sign-ins, refusals,
+        // settings, the license, job runs - is on the audit log page (/admin/audit).
         return auditRepository.findAll(
-                input, filter.and(AuditSpecifications.subjectTypeIs(subjectType)), null, AuditEventRow::from);
+                input,
+                filter.and(AuditSpecifications.subjectTypeIs(subjectType)),
+                AuditSpecifications.aboutAnEntry(),
+                AuditEventRow::from);
     }
 
     /** How much trail there is, and how much of it is recent. Administrators only. */

@@ -90,4 +90,73 @@ public enum AuditAction {
     public String label() {
         return label;
     }
+
+    /**
+     * The {@code ens-audit/1} action id this kind of record is emitted as: the constant's
+     * own name, lowercase and dotted. Stable: a SIEM searches on it, so it is never renamed.
+     */
+    public String id() {
+        return switch (this) {
+            case ENTRY_DISCOVERED -> "entry.discovered";
+            case ENTRY_PRUNED -> "entry.pruned";
+            case CERTIFICATE_CACHED -> "certificate.cached";
+            case CERTIFICATE_REMOVED -> "certificate.removed";
+            case CERTIFICATE_DELETED -> "certificate.deleted";
+            case CERTIFICATE_REVOKED -> "certificate.revoked";
+            case CERTIFICATE_STATUS_CHANGED -> "certificate.status-changed";
+            case CONTACT_ADDED -> "contact.added";
+            case CONTACT_REMOVED -> "contact.removed";
+            case ADDRESS_ADDED -> "address.added";
+            case ADDRESS_REMOVED -> "address.removed";
+            case PROJECT_ADMIN_ADDED -> "project.admin-added";
+            case PROJECT_ADMIN_REMOVED -> "project.admin-removed";
+            case ATTRIBUTE_SET -> "attribute.set";
+            case ATTRIBUTE_CLEARED -> "attribute.cleared";
+            case PROJECT_JOINED -> "project.joined";
+            case PROJECT_LEFT -> "project.left";
+            case ENDPOINT_PROBED -> "endpoint.probed";
+            case ALERT_SENT -> "alert.sent";
+            case ALERT_FAILED -> "alert.failed";
+        };
+    }
+
+    /**
+     * Its {@code ens-audit/1} category. Handing somebody the running of a project is a role
+     * granted, so {@code account}; an alert's delivery is the application's own doing,
+     * {@code system}; everything else changes the data this application keeps.
+     */
+    public String category() {
+        return switch (this) {
+            case PROJECT_ADMIN_ADDED, PROJECT_ADMIN_REMOVED -> "account";
+            case ALERT_SENT, ALERT_FAILED -> "system";
+            default -> "data";
+        };
+    }
+
+    /** {@code failure} for a delivery that failed; everything else here is something that happened. */
+    public String outcome() {
+        return this == ALERT_FAILED ? "failure" : "success";
+    }
+
+    /**
+     * {@code notice} for removing data and for roles, {@code warning} for a revocation found
+     * and for a failed delivery, {@code info} for the rest.
+     */
+    public String severity() {
+        return switch (this) {
+            case ENTRY_PRUNED, CERTIFICATE_DELETED, PROJECT_ADMIN_ADDED, PROJECT_ADMIN_REMOVED -> "notice";
+            case CERTIFICATE_REVOKED, ALERT_FAILED -> "warning";
+            default -> "info";
+        };
+    }
+
+    /** The kind with this action id, or null. */
+    public static AuditAction ofId(String id) {
+        for (AuditAction action : values()) {
+            if (action.id().equals(id)) {
+                return action;
+            }
+        }
+        return null;
+    }
 }

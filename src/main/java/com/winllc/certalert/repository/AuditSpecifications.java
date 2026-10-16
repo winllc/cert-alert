@@ -26,6 +26,11 @@ public final class AuditSpecifications {
                 builder.equal(root.get("subjectType"), subjectType), builder.equal(root.get("subjectId"), subjectId));
     }
 
+    /** Changes to a directory entry, rather than the trail's other events. */
+    public static Specification<AuditEvent> aboutAnEntry() {
+        return (root, query, builder) -> builder.isNotNull(root.get("subjectType"));
+    }
+
     /** People or servers, without naming one of them. */
     public static Specification<AuditEvent> subjectTypeIs(OwnerType subjectType) {
         if (subjectType == null) {

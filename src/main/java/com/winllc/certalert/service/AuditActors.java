@@ -34,7 +34,15 @@ public final class AuditActors {
     /** A person who did it but could not be identified - a job running outside a request. */
     public static final String SYSTEM = "system";
 
+    private static final java.util.Set<String> JOBS =
+            java.util.Set.of(SYNC, CHANGELOG, REFRESH, REVOCATION, CLEANUP, PRUNE, SYSTEM);
+
     private AuditActors() {}
+
+    /** Whether this actor is one of the jobs rather than a person. */
+    public static boolean isJob(String actor) {
+        return actor != null && JOBS.contains(actor);
+    }
 
     /**
      * Whoever is signed in, or {@code fallback} where nobody is - a scheduled job has no

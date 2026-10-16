@@ -39,6 +39,10 @@ class AuditControllerTest {
     @Autowired
     private AuditEventRepository auditRepository;
 
+    /** Records go in the way the application writes them: chained, through the audit log. */
+    @Autowired
+    private com.winllc.certalert.service.AuditService auditService;
+
     @Autowired
     private DirectoryUserRepository userRepository;
 
@@ -70,7 +74,7 @@ class AuditControllerTest {
                             start.plus(i, ChronoUnit.HOURS))
                     .by("sync"));
         }
-        auditRepository.saveAll(events);
+        auditService.recordAll(events);
     }
 
     @Test

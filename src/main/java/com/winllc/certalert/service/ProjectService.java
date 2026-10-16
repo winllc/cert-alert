@@ -1,5 +1,7 @@
 package com.winllc.certalert.service;
 
+import com.winllc.certalert.audit.AuditRecord;
+import com.winllc.certalert.audit.AuditLog;
 import com.winllc.certalert.domain.AuditAction;
 import com.winllc.certalert.domain.AuditEvent;
 import com.winllc.certalert.domain.DirectoryServer;
@@ -26,6 +28,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class ProjectService {
 
+    private final AuditLog auditLog;
+
     private static final Logger log = LoggerFactory.getLogger(ProjectService.class);
 
     private final ProjectRepository projects;
@@ -39,7 +43,9 @@ public class ProjectService {
             DirectoryUserRepository users,
             DirectoryServerRepository servers,
             AuditService auditService,
-            Clock clock) {
+            Clock clock,
+            AuditLog auditLog) {
+        this.auditLog = auditLog;
         this.projects = projects;
         this.users = users;
         this.servers = servers;
@@ -66,6 +72,9 @@ public class ProjectService {
         }
         Project project = projects.save(new Project(trimmed, description, createdBy, Instant.now(clock)));
         log.info("Created project '{}', by {}", trimmed, createdBy);
+        auditLog.record(AuditRecord.of(AuditRecord.Category.DATA, "project.created")
+                .target("project", String.valueOf(project.getId()), trimmed)
+                .detail("description", description));
         return project;
     }
 
@@ -79,7 +88,13 @@ public class ProjectService {
                     "Project already exists", "A project called '%s' already exists".formatted(trimmed));
             }
         });
+        String oldName = project.getName();
+        String oldDescription = project.getDescription();
         project.rename(trimmed, description);
+        auditLog.record(AuditRecord.of(AuditRecord.Category.DATA, "project.updated")
+                .target("project", String.valueOf(id), trimmed)
+                .change("name", oldName, trimmed)
+                .change("description", oldDescription, project.getDescription()));
         return project;
     }
 
@@ -92,6 +107,9 @@ public class ProjectService {
         Project project = projects.findById(id).orElseThrow(() -> notFound(id));
         projects.delete(project);
         log.info("Deleted project '{}'", project.getName());
+        auditLog.record(AuditRecord.of(AuditRecord.Category.DATA, "project.deleted")
+                .severity(AuditRecord.Severity.NOTICE)
+                .target("project", String.valueOf(id), project.getName()));
     }
 
     @Transactional

@@ -30,6 +30,11 @@ import org.springframework.web.util.pattern.PathPatternParser;
  *       works).
  * </ul>
  *
+ * <p>The audit trail is never refused: the audit log page, its API and the SIEM pull API are
+ * excluded where this is registered ({@code LicensingConfiguration.AUDIT_PATHS}), so
+ * administrators can open, export and verify it, and a SIEM can keep pulling it, whatever the
+ * license says.
+ *
  * <p>Runs after the security filter chain, so somebody not signed in is asked to sign in
  * first rather than told about licensing. Refusals are thrown, for
  * {@code GlobalExceptionHandler} to answer like every other refusal.

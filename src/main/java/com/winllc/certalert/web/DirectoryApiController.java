@@ -1,5 +1,6 @@
 package com.winllc.certalert.web;
 
+import com.winllc.certalert.audit.JobAudit;
 import com.winllc.certalert.domain.CachedCertificate;
 import com.winllc.certalert.license.Licensing;
 import com.winllc.certalert.license.RequiresFeature;
@@ -41,6 +42,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1")
 public class DirectoryApiController {
 
+    private final JobAudit jobs;
+
     private static final int MAX_RUN_HISTORY = 100;
 
     private final DirectorySyncService syncService;
@@ -67,7 +70,9 @@ public class DirectoryApiController {
             ChangelogCursorStore cursorStore,
             ChangelogProperties changelogProperties,
             Optional<ChangelogConnector> connector,
-            Licensing licensing) {
+            Licensing licensing,
+            JobAudit jobs) {
+        this.jobs = jobs;
         this.syncService = syncService;
         this.refreshService = refreshService;
         this.pruneService = pruneService;
@@ -85,14 +90,14 @@ public class DirectoryApiController {
     @RequiresFeature("directory-sync")
     @PostMapping("/sync/users")
     public SyncResponse syncUsers() {
-        return SyncResponse.from(syncService.syncUsers());
+        return SyncResponse.from(jobs.run("user sweep", syncService::syncUsers));
     }
 
     /** Scrapes IC Non-Person Entities now. */
     @RequiresFeature("directory-sync")
     @PostMapping("/sync/servers")
     public SyncResponse syncServers() {
-        return SyncResponse.from(syncService.syncServers());
+        return SyncResponse.from(jobs.run("server sweep", syncService::syncServers));
     }
 
     /** Runs both sweeps, in the order the schedule would. */
@@ -100,21 +105,22 @@ public class DirectoryApiController {
     @PostMapping("/sync")
     public List<SyncResponse> sync() {
         return List.of(
-                SyncResponse.from(syncService.syncUsers()), SyncResponse.from(syncService.syncServers()));
+                SyncResponse.from(jobs.run("user sweep", syncService::syncUsers)),
+                SyncResponse.from(jobs.run("server sweep", syncService::syncServers)));
     }
 
     /** Re-evaluates cached expiry without reading the directory. */
     @RequiresFeature("directory-sync")
     @PostMapping("/sync/refresh")
     public SyncResponse refresh() {
-        return SyncResponse.from(refreshService.refresh());
+        return SyncResponse.from(jobs.run("expiry refresh", refreshService::refresh));
     }
 
     /** Removes entries the directory has stopped publishing. */
     @RequiresFeature("directory-cleanup")
     @PostMapping("/sync/prune")
     public SyncResponse prune() {
-        return SyncResponse.from(pruneService.prune());
+        return SyncResponse.from(jobs.run("prune", pruneService::prune));
     }
 
     /** How many entries the next prune would remove, for checking before enabling it. */
@@ -134,7 +140,7 @@ public class DirectoryApiController {
     @RequiresFeature("directory-cleanup")
     @PostMapping("/sync/certificate-cleanup")
     public CertificateCleanupService.Result cleanUpCertificates() {
-        return cleanupService.run();
+        return jobs.run("certificate cleanup", cleanupService::run);
     }
 
     /** What that would remove, without removing it. */
@@ -178,7 +184,7 @@ public class DirectoryApiController {
     @RequiresFeature("changelog-sync")
     @PostMapping("/changelog/poll")
     public ChangelogStatus pollChangelog() {
-        connector.ifPresent(ChangelogConnector::pollOnce);
+        connector.ifPresent(c -> jobs.run("changelog sync", c::pollOnce, applied -> java.util.Map.of("changes", applied)));
         return changelog();
     }
 

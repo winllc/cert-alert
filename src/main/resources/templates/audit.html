@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Audit log')}"></head>
+<body>
+<svg th:replace="~{fragments/icons :: sprite}"></svg>
+
+<div class="page">
+    <header th:replace="~{fragments/layout :: navbar('audit')}"></header>
+
+    <div class="page-wrapper">
+        <div th:replace="~{fragments/layout :: pageheader('Audit log',
+             'Every audited event, newest first, as a tamper-evident chain (ens-audit/1)')}"></div>
+
+        <div class="page-body">
+            <div class="container-xl">
+
+                <!--/* Integrity, delivery and retention: is the trail whole, and where is it going. */-->
+                <div class="row row-cards mb-3">
+                    <div class="col-12 col-lg-5">
+                        <div class="card h-100" id="audit-verify-card">
+                            <div class="card-header">
+                                <h3 class="card-title">Integrity</h3>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-secondary">
+                                    Recomputes every retained event's SHA-256 hash in seq order. A record edited or
+                                    deleted in the database breaks the chain at that seq.
+                                </p>
+                                <div class="btn-list align-items-center">
+                                    <button type="button" class="btn btn-primary" id="audit-verify">
+                                        <svg class="icon me-1"><use href="#icon-shield-check"></use></svg>
+                                        Verify integrity
+                                    </button>
+                                </div>
+                                <div class="mt-3" id="audit-verify-result" role="status"></div>
+                                <p class="text-secondary small mt-3 mb-0">
+                                    <strong>Retention:</strong>
+                                    <span id="audit-retention" th:text="${retention}">Kept forever</span>
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-lg-7">
+                        <div class="card h-100">
+                            <div class="card-header">
+                                <h3 class="card-title">Delivery</h3>
+                                <div class="card-actions text-secondary small" id="audit-head"></div>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table card-table table-vcenter" id="audit-delivery">
+                                    <thead>
+                                    <tr>
+                                        <th>Output</th>
+                                        <th>Status</th>
+                                        <th>Last delivered</th>
+                                        <th>Backlog</th>
+                                        <th>Last error</th>
+                                    </tr>
+                                    </thead>
+                                    <tbody>
+                                    <tr><td colspan="5" class="text-secondary">Loading&hellip;</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!--/* The log. Filters are query parameters; paging is the server's. */-->
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <h3 class="card-title">Events</h3>
+                        <div class="card-actions btn-list">
+                            <a href="#" class="btn btn-sm" id="audit-export-csv">Export CSV</a>
+                            <a href="#" class="btn btn-sm" id="audit-export-ndjson">Export NDJSON</a>
+                        </div>
+                    </div>
+                    <div class="card-body border-bottom py-3">
+                        <form id="audit-filters" class="row g-2 align-items-end" autocomplete="off">
+                            <div class="col-6 col-md-2">
+                                <label class="form-label" for="f-from">From</label>
+                                <input type="date" id="f-from" name="from" class="form-control">
+                            </div>
+                            <div class="col-6 col-md-2">
+                                <label class="form-label" for="f-to">To</label>
+                                <input type="date" id="f-to" name="to" class="form-control">
+                            </div>
+                            <div class="col-6 col-md-2">
+                                <label class="form-label" for="f-category">Category</label>
+                                <select id="f-category" name="category" class="form-select">
+                                    <option value="">Any</option>
+                                    <option th:each="c : ${categories}" th:value="${c}" th:text="${c}">authentication</option>
+                                </select>
+                            </div>
+                            <div class="col-6 col-md-3">
+                                <label class="form-label" for="f-action">Action</label>
+                                <select id="f-action" name="action" class="form-select">
+                                    <option value="">Any</option>
+                                    <option th:each="a : ${actions}" th:value="${a}" th:text="${a}">auth.login</option>
+                                </select>
+                            </div>
+                            <div class="col-6 col-md-1">
+                                <label class="form-label" for="f-outcome">Outcome</label>
+                                <select id="f-outcome" name="outcome" class="form-select">
+                                    <option value="">Any</option>
+                                    <option th:each="o : ${outcomes}" th:value="${o}" th:text="${o}">success</option>
+                                </select>
+                            </div>
+                            <div class="col-6 col-md-2">
+                                <label class="form-label" for="f-severity">Severity</label>
+                                <select id="f-severity" name="severity" class="form-select">
+                                    <option value="">Any</option>
+                                    <option th:each="s : ${severities}" th:value="${s}" th:text="${s}">info</option>
+                                </select>
+                            </div>
+                            <div class="col-6 col-md-2">
+                                <label class="form-label" for="f-actor">Actor contains</label>
+                                <input type="text" id="f-actor" name="actor" class="form-control" placeholder="jdoe, scheduler">
+                            </div>
+                            <div class="col-6 col-md-2">
+                                <label class="form-label" for="f-target">Target contains</label>
+                                <input type="text" id="f-target" name="target" class="form-control" placeholder="a DN, a name, /path">
+                            </div>
+                            <div class="col-6 col-md-2">
+                                <label class="form-label" for="f-ip">Source IP</label>
+                                <input type="text" id="f-ip" name="sourceIp" class="form-control mono" placeholder="10.1.2.3">
+                            </div>
+                            <div class="col-12 col-md-4">
+                                <label class="form-label" for="f-q">Text</label>
+                                <input type="text" id="f-q" name="q" class="form-control" placeholder="anything in the event's JSON">
+                            </div>
+                            <div class="col-12 col-md-2 d-flex gap-2">
+                                <button type="submit" class="btn btn-primary">
+                                    <svg class="icon me-1"><use href="#icon-filter"></use></svg>Filter
+                                </button>
+                                <button type="reset" class="btn">Clear</button>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table card-table table-vcenter table-hover audit-table" id="audit-log">
+                            <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Severity</th>
+                                <th>Action</th>
+                                <th>Outcome</th>
+                                <th>Actor</th>
+                                <th>Target</th>
+                                <th>Source IP</th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            <tr><td colspan="7" class="text-secondary">Loading&hellip;</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="card-footer d-flex align-items-center">
+                        <p class="m-0 text-secondary" id="audit-page-info"></p>
+                        <ul class="pagination m-0 ms-auto">
+                            <li class="page-item"><a class="page-link" href="#" id="audit-prev">Newer</a></li>
+                            <li class="page-item"><a class="page-link" href="#" id="audit-next">Older</a></li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!--/* Pull API tokens, for a SIEM that collects rather than receives. */-->
+                <div class="card mb-3" id="audit-tokens-card">
+                    <div class="card-header">
+                        <h3 class="card-title">SIEM API tokens</h3>
+                        <div class="card-actions text-secondary small">
+                            <span class="mono">GET /api/audit/events?after=&lt;seq&gt;</span> with
+                            <span class="mono">Authorization: Bearer &lt;token&gt;</span>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table card-table table-vcenter" id="audit-tokens">
+                            <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Token</th>
+                                <th>Created</th>
+                                <th>Last used</th>
+                                <th>Status</th>
+                                <th></th>
+                            </tr>
+                            </thead>
+                            <tbody>
+                            <tr><td colspan="6" class="text-secondary">Loading&hellip;</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="card-body border-top">
+                        <form id="audit-token-form" class="row g-2 align-items-end">
+                            <div class="col-12 col-md-4">
+                                <label class="form-label" for="audit-token-name">Name</label>
+                                <input type="text" id="audit-token-name" class="form-control" maxlength="120"
+                                       placeholder="Splunk heavy forwarder" required>
+                            </div>
+                            <div class="col-12 col-md-auto">
+                                <button type="submit" class="btn btn-primary">
+                                    <svg class="icon me-1"><use href="#icon-key"></use></svg>Create token
+                                </button>
+                            </div>
+                            <div class="col-12">
+                                <span class="text-secondary small" id="audit-token-message"></span>
+                            </div>
+                        </form>
+                        <div class="alert alert-warning mt-3 d-none" id="audit-token-created" role="alert">
+                            <div class="mb-2">Copy this token now. It is not shown again.</div>
+                            <div class="input-group">
+                                <input type="text" class="form-control mono" id="audit-token-secret" readonly>
+                                <button type="button" class="btn" id="audit-token-copy">Copy</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!--/* One event in full. */-->
+<div class="modal modal-blur fade" id="audit-detail" tabindex="-1" role="dialog" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="audit-detail-title">Event</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <dl class="row mb-3" id="audit-detail-fields"></dl>
+                <pre class="mono small p-3 bg-light border rounded" id="audit-detail-json"></pre>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div th:replace="~{fragments/layout :: scripts}"></div>
+<script th:src="@{/js/audit-log.js}"></script>
+</body>
+</html>

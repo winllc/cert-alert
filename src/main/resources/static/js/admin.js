@@ -54,10 +54,12 @@
     }
 
     $(function () {
+        if ($('#audit-total').length) {
+            loadSummary();
+        }
         if ($('#audit-table').length === 0) {
             return;
         }
-        loadSummary();
 
         var kind = document.getElementById('audit-kind');
         var subjectType = document.getElementById('audit-subject-type');
