@@ -11,6 +11,7 @@ import com.winllc.certalert.domain.DirectoryServer;
 import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.domain.OwnerType;
 import com.winllc.certalert.ldap.LdapProperties;
+import com.winllc.certalert.license.Licensing;
 import com.winllc.certalert.ldap.LdapServerEntry;
 import com.winllc.certalert.ldap.LdapUserEntry;
 import com.winllc.certalert.ldap.ServerField;
@@ -58,6 +59,7 @@ public class DirectoryPersistenceService {
     private final ServerContactRepository contactRepository;
     private final UserEmailAliasRepository aliasRepository;
     private final AuditService auditService;
+    private final Licensing licensing;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -71,7 +73,8 @@ public class DirectoryPersistenceService {
             LdapProperties ldapProperties,
             ServerContactRepository contactRepository,
             UserEmailAliasRepository aliasRepository,
-            AuditService auditService) {
+            AuditService auditService,
+            Licensing licensing) {
         this.userRepository = userRepository;
         this.serverRepository = serverRepository;
         this.certificateParser = certificateParser;
@@ -81,6 +84,7 @@ public class DirectoryPersistenceService {
         this.contactRepository = contactRepository;
         this.aliasRepository = aliasRepository;
         this.auditService = auditService;
+        this.licensing = licensing;
     }
 
     @Transactional
@@ -97,11 +101,22 @@ public class DirectoryPersistenceService {
         BatchOutcome outcome = BatchOutcome.EMPTY;
         List<DirectoryUser> toSave = new ArrayList<>(batch.size());
         List<Change> changes = new ArrayList<>();
+        // The license is sized in directory users: somebody new is added only while it
+        // allows one more. Nobody already here is ever removed for it. Counted only when
+        // the batch holds somebody new, which after the first sweep is rare.
+        long people = batch.stream().anyMatch(entry -> !existing.containsKey(entry.dn()))
+                ? userRepository.count()
+                : 0;
 
         for (LdapUserEntry entry : batch) {
             DirectoryUser user = existing.get(entry.dn());
             boolean created = user == null;
             if (created) {
+                if (!licensing.mayAdd(people)) {
+                    outcome = outcome.plus(new BatchOutcome(0, 0, 0, 0, 1));
+                    continue;
+                }
+                people++;
                 user = new DirectoryUser(entry.dn());
             }
             // An entry nobody has seen before has no id yet, and so no addresses of its own.

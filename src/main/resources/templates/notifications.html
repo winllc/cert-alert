@@ -28,13 +28,13 @@
                                    it and what the message says, with nothing sent and nothing
                                    written down. */-->
                             <button type="button" id="notifications-dry-run" class="btn"
-                                    th:if="${isAdmin and @licenseService.isEnabled('email-notifications')}">
+                                    th:if="${isAdmin and @licensing.isEnabled('notifications')}">
                                 <svg class="icon"><use href="#icon-certificate"></use></svg>
                                 Dry run
                             </button>
                             <!--/* The round-up runs on a schedule; this is for seeing it work. */-->
                             <button type="button" id="notifications-digest" class="btn"
-                                    th:if="${isAdmin and @licenseService.isEnabled('email-notifications')}">
+                                    th:if="${isAdmin and @licensing.isEnabled('notifications')}">
                                 <svg class="icon"><use href="#icon-refresh"></use></svg>
                                 Run the expiry round-up
                             </button>

@@ -2,8 +2,7 @@ package com.winllc.certalert.service;
 
 import com.winllc.certalert.config.NotificationProperties;
 import com.winllc.certalert.domain.OwnerType;
-import com.winllc.certalert.license.LicenseService;
-import com.winllc.certalert.license.LicensedFeature;
+import com.winllc.certalert.license.Licensing;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import java.util.ArrayList;
@@ -35,7 +34,7 @@ import org.thymeleaf.context.Context;
  *
  * <p>Absent a mail sender, or with sending switched off, this does nothing and says so
  * once. The notifications are still written and still show on the page. The same goes for
- * a license that does not cover email notifications.
+ * a license that does not include email notifications, or is not in full effect.
  */
 @Component
 public class NotificationMailer {
@@ -48,7 +47,7 @@ public class NotificationMailer {
     private final Optional<JavaMailSender> mailSender;
     private final TemplateEngine templates;
     private final NotificationProperties properties;
-    private final LicenseService licenseService;
+    private final Licensing licensing;
 
     private boolean warned;
     private int sentThisRun;
@@ -62,11 +61,11 @@ public class NotificationMailer {
             Optional<JavaMailSender> mailSender,
             TemplateEngine templates,
             NotificationProperties properties,
-            LicenseService licenseService) {
+            Licensing licensing) {
         this.mailSender = mailSender;
         this.templates = templates;
         this.properties = properties;
-        this.licenseService = licenseService;
+        this.licensing = licensing;
     }
 
     /**
@@ -85,9 +84,9 @@ public class NotificationMailer {
         if (!settings.isEnabled() && !dryRunThisRun) {
             return false;
         }
-        if (!dryRunThisRun && !licenseService.isEnabled(LicensedFeature.EMAIL_NOTIFICATIONS.id())) {
-            warnOnce("Notification email is enabled but " + LicensedFeature.EMAIL_NOTIFICATIONS.label()
-                    + " is not covered by the license");
+        if (!dryRunThisRun && !licensing.isEnabled("notifications")) {
+            warnOnce("Notification email is enabled but the license does not allow it: "
+                    + (licensing.isFullyLicensed() ? "email notifications are not included" : licensing.current().message()));
             return false;
         }
         // A dry run needs no transport, which is rather the point: the question it answers -

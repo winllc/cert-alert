@@ -177,8 +177,9 @@
 
                     <!--/* What certificates are good for, where that is worth a second
                            look. A certificate can be more than one kind of risky, so these
-                           do not add up to the first row and are not meant to. */-->
-                    <div class="col-12 col-lg-6">
+                           do not add up to the first row and are not meant to. Risk
+                           analysis is licensed: without it the card is left off. */-->
+                    <div class="col-12 col-lg-6" th:if="${@licensing.shows('risky-names')}">
                         <div class="card">
                             <div class="card-header">
                                 <h3 class="card-title">Risky names</h3>

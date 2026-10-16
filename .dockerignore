@@ -30,12 +30,12 @@ logs/
 **/*.lic
 license/
 
-# Except the public key licenses are checked against, which is part of the application and
-# has to be in the jar - and the test tree's key and license, which only the tests accept
-# and which never leave the build stage, so that RUN_TESTS=true still has them.
-!src/main/resources/license/ens-license-public.pem
+# Except the test tree's license fixtures, signed with the ENS portal's published TEST key -
+# which only the tests trust - so that RUN_TESTS=true still has them. They never leave the
+# build stage.
 !src/test/resources/license/
-!src/test/resources/license/*
+!src/test/resources/license/fixtures/
+!src/test/resources/license/fixtures/*
 
 README.md
 Dockerfile

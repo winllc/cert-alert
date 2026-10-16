@@ -7,8 +7,8 @@ import com.winllc.certalert.domain.DirectoryServer;
 import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.domain.Project;
 import com.winllc.certalert.config.ProbeProperties;
-import com.winllc.certalert.license.LicenseService;
-import com.winllc.certalert.license.LicensedFeature;
+import com.winllc.certalert.license.Licensing;
+import com.winllc.certalert.license.RequiresFeature;
 import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.DirectoryUserRepository;
 import com.winllc.certalert.security.ServerAccessPolicy;
@@ -49,7 +49,7 @@ public class ViewController {
     private final ServerAccessPolicy accessPolicy;
     private final ProbeProperties probeProperties;
     private final SignedInDirectoryUser signedIn;
-    private final LicenseService licenseService;
+    private final Licensing licensing;
     private final Clock clock;
 
     public ViewController(
@@ -61,7 +61,7 @@ public class ViewController {
             ServerAccessPolicy accessPolicy,
             ProbeProperties probeProperties,
             SignedInDirectoryUser signedIn,
-            LicenseService licenseService,
+            Licensing licensing,
             Clock clock) {
         this.userRepository = userRepository;
         this.serverRepository = serverRepository;
@@ -71,7 +71,7 @@ public class ViewController {
         this.accessPolicy = accessPolicy;
         this.probeProperties = probeProperties;
         this.signedIn = signedIn;
-        this.licenseService = licenseService;
+        this.licensing = licensing;
         this.clock = clock;
     }
 
@@ -134,7 +134,7 @@ public class ViewController {
         model.addAttribute(
                 "mayProbe",
                 probeProperties.isEnabled()
-                        && licenseService.isEnabled(LicensedFeature.TLS_PROBE.id())
+                        && licensing.isEnabled("endpoint-checks")
                         && EndpointAddress.of(server, null, probeProperties.getDefaultPort()).isPresent()
                         && accessPolicy.mayManageContacts(id, authentication));
         model.addAttribute("probePort", probeService.defaultPortFor(server));
@@ -142,11 +142,13 @@ public class ViewController {
     }
 
     @GetMapping("/projects")
+    @RequiresFeature("projects")
     public String projects() {
         return "projects";
     }
 
     @GetMapping("/projects/{id}")
+    @RequiresFeature("projects")
     @Transactional(readOnly = true)
     public String project(@PathVariable Long id, Model model) {
         Project project = projectService.get(id);
@@ -165,6 +167,7 @@ public class ViewController {
     }
 
     @GetMapping("/metrics")
+    @RequiresFeature("metrics")
     public String metrics() {
         return "metrics";
     }

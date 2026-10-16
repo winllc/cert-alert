@@ -5,7 +5,8 @@
 #   ./install.sh --upgrade [--from DIR] [--no-backup]
 #                                      the same as ./upgrade.sh
 #
-# Safe to run again. It never overwrites an .env or a license that is already there.
+# Safe to run again. It never overwrites an .env, or a license already installed in the
+# application's license volume.
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -67,8 +68,9 @@ load_images() {
 }
 
 make_directories() {
-    # Mounted read-only into the application. Created here so Docker does not create them
-    # as root-owned directories the first time it starts.
+    # tls and email-templates are mounted read-only into the application, and created here
+    # so Docker does not create them as root-owned directories the first time it starts.
+    # license is where a license file can be put for this script to install.
     mkdir -p license tls email-templates
 }
 
@@ -102,11 +104,14 @@ Before cert-alert can start, edit .env and set at least:
 and, if you use them, SMTP (SPRING_MAIL_*), TLS (CERT_ALERT_TLS_* with keystores in
 $(pwd)/tls) and the banner. Every setting is described in .env.
 
-Put your ENS Solutions license at:
+cert-alert needs an ENS license (from the ENS licensing portal: an evaluation, or the
+license issued against your order). Either put it at
 
   $(pwd)/license/license.lic
 
-(without one cert-alert runs its core features only; it can be added later, no restart).
+and this script installs it when it starts cert-alert, or upload it afterwards on the
+license screen (Administration -> License, /admin/license). Until one is installed, only
+signing in and the license screen work.
 
 Then run ./install.sh again to start it.
 EOF
@@ -137,10 +142,36 @@ check_env() {
 
 check_license() {
     if [ -f license/license.lic ]; then
-        say "License: license/license.lic found."
+        say "License: license/license.lic found; it is installed once cert-alert has started."
     else
-        say "License: none at $(pwd)/license/license.lic - running core features only until one is added."
+        say "License: no license/license.lic here. If none is installed yet, upload one on the"
+        say "license screen once cert-alert is up (see below); until then only sign-in and that screen work."
     fi
+}
+
+# Where the application keeps its license, inside the ens-license volume.
+LICENSE_IN_VOLUME=/var/lib/ens/certalert/license.lic
+
+install_license() {
+    # Copies license/license.lic into the license volume, once the container exists. Never
+    # replaces a different license already there: that may be a newer one uploaded on the
+    # license screen, and an older revision put back over it is refused.
+    [ -f license/license.lic ] || return 0
+    if docker compose exec -T cert-alert cat "$LICENSE_IN_VOLUME" 2> /dev/null | cmp -s - license/license.lic; then
+        say "License: license/license.lic is already installed."
+        return 0
+    fi
+    if docker compose exec -T cert-alert test -s "$LICENSE_IN_VOLUME" 2> /dev/null; then
+        say "License: a different license is already installed (perhaps uploaded on the license screen); kept it."
+        say "         To replace it with license/license.lic, upload that file on the license screen."
+        return 0
+    fi
+    docker compose cp license/license.lic "cert-alert:$LICENSE_IN_VOLUME" \
+        || die "could not copy license/license.lic into the cert-alert container."
+    # docker cp writes it as root; make it the application's, like an uploaded one.
+    docker compose exec -T -u 0 cert-alert sh -c "chown 185:0 '$LICENSE_IN_VOLUME' && chmod 0664 '$LICENSE_IN_VOLUME'" \
+        || say "License: could not change the copied file's owner; it is still readable."
+    say "License: copied license/license.lic into the license volume ($LICENSE_IN_VOLUME)."
 }
 
 newer_settings() {
@@ -177,6 +208,7 @@ copy_from_previous() {
         fi
     done
     say "Copied license/, tls/ and email-templates/ from $FROM (existing files kept)."
+    say "The installed license, and this installation's id, are in the ens-license volume, which is kept."
 }
 
 backup_database() {
@@ -207,8 +239,11 @@ wait_until_healthy() {
                 local port scheme=http
                 port=$(env_value CERT_ALERT_PORT); port=${port:-8080}
                 [ "$(env_value CERT_ALERT_TLS_ENABLED)" = "true" ] && scheme=https
+                local url
+                url="${scheme}://$(hostname -f 2> /dev/null || hostname):${port}"
                 say ""
-                say "cert-alert $VERSION is up: ${scheme}://$(hostname -f 2> /dev/null || hostname):${port}/"
+                say "cert-alert $VERSION is up: ${url}/"
+                say "License screen (installation id, upload): ${url}/admin/license"
                 say "Sign in as one of CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS and press Sync directory."
                 return 0 ;;
             unhealthy|exited|dead) break ;;
@@ -222,6 +257,7 @@ wait_until_healthy() {
 start() {
     docker compose config --quiet || die "the compose configuration is not valid with this .env."
     docker compose up -d --remove-orphans
+    install_license
     wait_until_healthy
 }
 

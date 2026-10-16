@@ -1,5 +1,7 @@
 package com.winllc.certalert.demo;
 
+import com.winllc.certalert.license.LicenseInstalled;
+import com.winllc.certalert.license.Licensing;
 import com.winllc.certalert.repository.DirectoryUserRepository;
 import com.winllc.certalert.service.DirectorySyncService;
 import com.winllc.certalert.service.NotificationService;
@@ -8,6 +10,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.annotation.Conditional;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 /**
@@ -48,22 +51,50 @@ public class DemoDirectoryLoader implements ApplicationRunner {
     private final NotificationService notifications;
     private final DirectoryUserRepository users;
     private final DemoProject demoProject;
+    private final Licensing licensing;
 
     public DemoDirectoryLoader(
             DirectorySyncService syncService,
             NotificationService notifications,
             DirectoryUserRepository users,
-            DemoProject demoProject) {
+            DemoProject demoProject,
+            Licensing licensing) {
         this.syncService = syncService;
         this.notifications = notifications;
         this.users = users;
         this.demoProject = demoProject;
+        this.licensing = licensing;
     }
 
     @Override
     public void run(ApplicationArguments args) {
+        load();
+    }
+
+    /**
+     * A demo started without a license has nothing in its tables. When one is uploaded,
+     * do the first sweep then rather than waiting for the schedule - in the background, so
+     * the upload's answer does not wait for it.
+     */
+    @EventListener
+    public void licenseInstalled(LicenseInstalled event) {
+        if (event.check().isFullyLicensed() && users.count() == 0) {
+            Thread sweep = new Thread(this::load, "demo-first-sweep");
+            sweep.setDaemon(true);
+            sweep.start();
+        }
+    }
+
+    private synchronized void load() {
         if (users.count() > 0) {
             log.info("Demo: the cache already holds {} person(s); not sweeping", users.count());
+            return;
+        }
+        // A demo needs a license like any installation. Without one it shows only the
+        // license screen; once one is uploaded the scheduled sweep fills the tables.
+        if (!licensing.mayRun("directory-sync", "demo sweep")) {
+            log.warn("Demo: not sweeping the directory - {} Install an evaluation license from the "
+                    + "ENS portal on the license screen (/admin/license).", licensing.current().message());
             return;
         }
         log.info("Demo: sweeping the directory once, so there is something to show");
@@ -77,7 +108,9 @@ public class DemoDirectoryLoader implements ApplicationRunner {
             return;
         }
         try {
-            demoProject.seed();
+            if (licensing.isEnabled("projects")) {
+                demoProject.seed();
+            }
         } catch (RuntimeException e) {
             log.warn("Demo: could not create the project: {}", e.toString());
         }
@@ -86,7 +119,9 @@ public class DemoDirectoryLoader implements ApplicationRunner {
             // and what this is for is the rows. Sending is off in the demo profile, so it
             // gathers and goes nowhere.
             log.info("Demo: running the expiry round-up, so the notifications page has something on it");
-            notifications.digest();
+            if (licensing.isEnabled("notifications")) {
+                notifications.digest();
+            }
         } catch (RuntimeException e) {
             log.warn("Demo: could not run the round-up: {}", e.toString());
         }

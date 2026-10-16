@@ -1,16 +1,29 @@
-Put your ENS Solutions license file here, named exactly:
+cert-alert needs an ENS Solutions license, issued by the ENS licensing portal: download
+an evaluation, or the license issued against your order. Its product id is "certalert".
 
-    license.lic
+There are two ways to install it:
 
-It is mounted read-only into the application at /etc/ens/license/license.lic. The
-application runs as uid 185, so the file must be readable by it:
+  1. Put the file here, named exactly
 
-    chmod 644 license.lic
+         license.lic
 
-Without a license cert-alert runs its core features only. A license added or renewed
-while it runs is picked up within about 30 seconds - no restart needed. To check what
-was found:
+     and run ./install.sh (or ./upgrade.sh). Once cert-alert has started, the script
+     copies it into the application's license volume (ens-license, mounted at
+     /var/lib/ens/certalert). It never replaces a different license already installed
+     there - upload that one on the license screen instead.
 
-    docker compose logs cert-alert | grep 'License:'
+  2. Upload it on the license screen: sign in as an administrator and open
+     Administration -> License (/admin/license). An unlicensed cert-alert sends
+     administrators there.
 
-Licenses are issued by ENS Solutions for the product id "cert-alert".
+Until a license is installed, only signing in and the license screen work. A license
+takes effect at once, with no restart.
+
+The license screen also shows this installation's id. Enter it on the ENS portal to
+bind a license to this installation; a bound license works here and nowhere else. The
+id is kept in the ens-license volume, so keep that volume: upgrades do. Deleting it
+(docker compose down -v) gives the installation a new id.
+
+To check what is installed:
+
+    docker compose logs cert-alert | grep -i license

@@ -102,7 +102,7 @@ LABEL org.opencontainers.image.title="cert-alert" \
       org.opencontainers.image.revision="${REVISION}" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.base.name="${UBI_JRE_IMAGE}" \
-      com.enssolutions.license.path="/etc/ens/license/license.lic"
+      com.enssolutions.license.path="/var/lib/ens/certalert/license.lic"
 
 # curl is for the health check below. The minimal UBI these images are built on ships
 # curl-minimal, which provides it - so this asks whether it is there rather than
@@ -129,25 +129,34 @@ COPY --from=extract --chown=185:0 /extract/extracted/application/ ./
 
 # /app/data is only needed by the default H2 profile, which is for trying the thing out
 # rather than for running it; a real deployment uses the postgres profile and writes nothing
-# there. /etc/ens/license is where the license is mounted (see below): created so a mount
-# has somewhere to land. The mounted file needs to be readable by uid 185 or group 0.
+# there. /var/lib/ens/certalert is the license's directory (see below): owned by uid 185 and
+# group 0 with the group rwx, so it stays writable under OpenShift's arbitrary uid - the
+# license screen writes the uploaded license there.
 RUN mkdir -p /app/data \
     && chown -R 185:0 /app \
     && chmod -R g=u /app \
-    && mkdir -p /etc/ens/license \
-    && chmod 0755 /etc/ens/license
+    && mkdir -p /var/lib/ens/certalert \
+    && chown -R 185:0 /var/lib/ens \
+    && chmod -R 0775 /var/lib/ens
 
 USER 185
 
-# The ENS Solutions license. Never part of the image: the build context excludes *.lic, and
-# the file is mounted at run time. Without one - or with one that is invalid or has expired -
-# the application still starts and runs its core features; the log says which it found.
-# A license that is replaced or renewed is picked up within about 30 seconds, no restart.
+# The ENS Solutions license, issued by the ENS licensing portal (ens-license/1) and checked
+# offline against the ENS public key built into the jar. Never part of the image: the build
+# context excludes *.lic. One persistent, WRITABLE directory holds everything licensing
+# keeps - the license an administrator uploads on the license screen (Administration ->
+# License), this installation's id that licenses are bound to, and the highest license
+# revision seen - so it must survive upgrades: mount a named volume or a persistent volume
+# claim there.
 #
-# Mount the license read-only:  -v /path/to/license.lic:/etc/ens/license/license.lic:ro
-#   or a directory:             -v /path/to/license-dir:/etc/ens/license:ro
-#   or a Docker/K8s secret, with ENS_LICENSE_FILE pointing at it.
-ENV ENS_LICENSE_FILE=/etc/ens/license/license.lic
+#   docker run -v ens-license:/var/lib/ens/certalert ...
+#
+# Without a license the application starts, but only sign-in and the license screen work.
+# A license can also be put there before starting (docker compose cp, or a file copied
+# into the volume); it is re-read whenever it changes, with no restart.
+ENV ENS_LICENSE_STATE_DIR=/var/lib/ens/certalert \
+    ENS_LICENSE_FILE=/var/lib/ens/certalert/license.lic
+VOLUME /var/lib/ens
 
 # 8080 plain, 8443 when TLS is switched on for X.509 client certificates.
 EXPOSE 8080 8443

@@ -76,7 +76,7 @@
                         <div class="text-secondary small" th:if="${certificate.subjectAltNameCount != null}"
                              th:text="${certificate.subjectAltNameCount} + (${certificate.subjectAltNameCount} == 1
                                       ? ' name' : ' names')">3 names</div>
-                        <div class="mt-1" th:if="${!certificate.risks.isEmpty()}">
+                        <div class="mt-1" th:if="${!certificate.risks.isEmpty() and @licensing.shows('risky-names')}">
                             <span class="badge me-1" th:each="risk : ${certificate.risks}"
                                   th:classappend="${risk.severe} ? 'bg-red-lt' : 'bg-yellow-lt'"
                                   th:title="${risk.why()}" th:text="${risk.label()}">Wildcard</span>

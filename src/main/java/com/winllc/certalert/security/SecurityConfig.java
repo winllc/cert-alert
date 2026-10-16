@@ -86,6 +86,10 @@ public class SecurityConfig {
                 // reached through the page it sits on.
                 .requestMatchers("/admin", "/api/v1/audit/summary")
                 .hasRole("ADMIN")
+                // The license screen: what is installed, this installation's id, and the
+                // upload. Reachable whatever the license says, and only by administrators.
+                .requestMatchers("/admin/license", "/admin/license/**")
+                .hasRole("ADMIN")
                 // Defining what this deployment keeps about its servers adds a field to
                 // every server at once, and retiring one takes every value with it; setting
                 // a value is the same decision made about one server. Reading either is

@@ -4,6 +4,7 @@ import com.winllc.certalert.domain.AuditAction;
 import com.winllc.certalert.domain.CertificateRisk;
 import com.winllc.certalert.domain.CertificateStatus;
 import com.winllc.certalert.domain.RevocationStatus;
+import com.winllc.certalert.license.Licensing;
 import com.winllc.certalert.repository.AuditEventRepository;
 import com.winllc.certalert.repository.CachedCertificateRepository;
 import com.winllc.certalert.repository.DirectoryServerRepository;
@@ -50,6 +51,7 @@ public class MetricsService {
     private final NotificationRepository notifications;
     private final AuditEventRepository audit;
     private final ProjectRepository projects;
+    private final Licensing licensing;
     private final Clock clock;
 
     public MetricsService(
@@ -60,6 +62,7 @@ public class MetricsService {
             NotificationRepository notifications,
             AuditEventRepository audit,
             ProjectRepository projects,
+            Licensing licensing,
             Clock clock) {
         this.metrics = metrics;
         this.certificates = certificates;
@@ -68,6 +71,7 @@ public class MetricsService {
         this.notifications = notifications;
         this.audit = audit;
         this.projects = projects;
+        this.licensing = licensing;
         this.clock = clock;
     }
 
@@ -97,6 +101,10 @@ public class MetricsService {
      */
     private Map<String, Long> riskCounts() {
         Map<String, Long> counts = new LinkedHashMap<>();
+        // Risk analysis is a licensed feature; without it there are no counts to give.
+        if (!licensing.shows("risky-names")) {
+            return counts;
+        }
         counts.put("any", metrics.countByRiskFlagsIsNotNull());
         for (CertificateRisk risk : CertificateRisk.values()) {
             counts.put(risk.name(), metrics.countByRisk(risk.name()));

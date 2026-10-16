@@ -5,6 +5,7 @@ import com.winllc.certalert.domain.CertificateStatus;
 import com.winllc.certalert.domain.DirectoryEntry;
 import com.winllc.certalert.domain.DirectoryServer;
 import com.winllc.certalert.domain.DirectoryUser;
+import com.winllc.certalert.license.Licensing;
 import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.DirectorySpecifications;
 import com.winllc.certalert.repository.DirectoryUserRepository;
@@ -49,16 +50,19 @@ public class DirectoryDataTablesController {
     private final DirectoryUserRepository userRepository;
     private final DirectoryServerRepository serverRepository;
     private final ServerContactRepository contactRepository;
+    private final Licensing licensing;
     private final Clock clock;
 
     public DirectoryDataTablesController(
             DirectoryUserRepository userRepository,
             DirectoryServerRepository serverRepository,
             ServerContactRepository contactRepository,
+            Licensing licensing,
             Clock clock) {
         this.userRepository = userRepository;
         this.serverRepository = serverRepository;
         this.contactRepository = contactRepository;
+        this.licensing = licensing;
         this.clock = clock;
     }
 
@@ -83,7 +87,7 @@ public class DirectoryDataTablesController {
         // search is over the values a serverPOC could name them by.
         filter = filter.and(DirectorySpecifications.namedAsPointOfContactBy(poc));
         filter = filter.and(riskFilter(risk));
-        filter = filter.and(DirectorySpecifications.inProject(projectId, "members"));
+        filter = filter.and(DirectorySpecifications.inProject(projectFilter(projectId), "members"));
         return userRepository.findAll(input, filter, null, DirectoryUserRow::from);
     }
 
@@ -108,7 +112,7 @@ public class DirectoryDataTablesController {
         filter = filter.and(latestExpiryFilter(latestExpiryFrom, latestExpiryTo));
         filter = filter.and(pointOfContactFilter(poc != null ? poc : pocEmail, pocUserId));
         filter = filter.and(riskFilter(risk));
-        filter = filter.and(DirectorySpecifications.inProject(projectId, "servers"));
+        filter = filter.and(DirectorySpecifications.inProject(projectFilter(projectId), "servers"));
 
         return withContactCounts(serverRepository.findAll(input, filter, null, DirectoryServerRow::from));
     }
@@ -169,7 +173,8 @@ public class DirectoryDataTablesController {
      * every flag; a flag's own name is that one.
      */
     private <T extends DirectoryEntry> Specification<T> riskFilter(String risk) {
-        if (risk == null || risk.isBlank()) {
+        // Risk analysis is a licensed feature: without it there is nothing to filter on.
+        if (risk == null || risk.isBlank() || !licensing.shows("risky-names")) {
             return DirectorySpecifications.unfiltered();
         }
         if (risk.equalsIgnoreCase("any")) {
@@ -181,6 +186,11 @@ public class DirectoryDataTablesController {
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException("'%s' is not a kind of certificate risk".formatted(risk));
         }
+    }
+
+    /** A project to filter by, while projects are licensed; none otherwise. */
+    private Long projectFilter(Long projectId) {
+        return projectId != null && licensing.shows("projects") ? projectId : null;
     }
 
     private <T extends DirectoryEntry> Specification<T> latestExpiryFilter(LocalDate from, LocalDate to) {

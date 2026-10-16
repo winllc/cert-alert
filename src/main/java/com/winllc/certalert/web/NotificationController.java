@@ -1,5 +1,6 @@
 package com.winllc.certalert.web;
 
+import com.winllc.certalert.license.RequiresFeature;
 import com.winllc.certalert.config.NotificationProperties;
 import com.winllc.certalert.security.SignedInDirectoryUser;
 import com.winllc.certalert.service.AuditActors;
@@ -122,6 +123,7 @@ public class NotificationController {
      * @param dryRun build every message and send none, and write nothing down - what a
      *     round-up would do, asked without doing it
      */
+    @RequiresFeature("notifications")
     @PostMapping("/digest")
     public NotificationService.DigestResult digest(
             @RequestParam(defaultValue = "false") boolean dryRun) {

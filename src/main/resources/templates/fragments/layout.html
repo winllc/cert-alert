@@ -39,10 +39,12 @@
       CSS string, and escaped inlining would render its quotes as HTML entities, leaving a
       declaration the browser discards - a banner that silently does not appear.
 
+      Classification banners are a licensed feature: without it they are not drawn.
+
       Kept terse below because unlike these, a CSS comment is served on every request.
     */-->
     <th:block th:with="banner=${@bannerProperties}">
-    <style th:if="${banner.visible}" th:inline="text">
+    <style th:if="${banner.visible and @licensing.shows('classification-banners')}" th:inline="text">
         body::before,
         body::after {
             content: [(${banner.cssText})];
@@ -82,7 +84,10 @@
 
 <!--/* The application shell: brand, navigation, and who is signed in. */-->
 <header th:fragment="navbar(active)" class="navbar navbar-expand-md d-print-none"
-        th:classappend="${demo} ? 'has-demo-strip'" data-bs-theme="dark">
+        th:with="evaluation=${license != null and license.showEvaluationBanner()},
+                 renewal=${isAdmin == true and license != null and license.showRenewalWarning()},
+                 readOnly=${license != null and license.mode().name() == 'READ_ONLY'}"
+        th:classappend="(${demo} or ${evaluation} or ${renewal} or ${readOnly}) ? 'has-demo-strip'" data-bs-theme="dark">
     <div class="container-xl">
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar-menu"
                 aria-label="Toggle navigation">
@@ -160,9 +165,9 @@
                     </a>
                 </li>
                 <!--/* Projects and metrics are licensed features; what the license does not
-                       cover is left off the bar rather than offered and refused. */-->
+                       include is left off the bar rather than offered and refused. */-->
                 <li class="nav-item" th:classappend="${active == 'projects'} ? 'active'"
-                    th:if="${@licenseService.isEnabled('projects')}">
+                    th:if="${@licensing.shows('projects')}">
                     <a class="nav-link" th:href="@{/projects}">
                         <span class="nav-link-icon d-md-none d-lg-inline-block">
                             <svg class="icon"><use href="#icon-folder"></use></svg>
@@ -171,7 +176,7 @@
                     </a>
                 </li>
                 <li class="nav-item" th:classappend="${active == 'metrics'} ? 'active'"
-                    th:if="${@licenseService.isEnabled('metrics')}">
+                    th:if="${@licensing.shows('metrics')}">
                     <a class="nav-link" th:href="@{/metrics}">
                         <span class="nav-link-icon d-md-none d-lg-inline-block">
                             <svg class="icon"><use href="#icon-chart"></use></svg>
@@ -200,6 +205,29 @@
         Nothing here can be changed, whoever you signed in as &mdash; the controls are shown
         as they are, and pressing one says so. Sign out to be another role.
     </div>
+
+    <!--/* The license, where it has something to say: an evaluation copy says so on every
+           page; a license that is read-only says why; administrators are reminded to renew
+           in the last month and through the grace period. Same strip as the demo's, so it
+           is part of the bar rather than one more thing on the page. */-->
+    <div th:if="${evaluation}" class="demo-strip w-100" id="license-evaluation">
+        <span class="badge bg-orange-lt me-2">Evaluation</span>
+        This copy is licensed for evaluation only<th:block th:if="${license.daysLeft().isPresent()}"
+            th:text="', for ' + ${license.daysLeft().get()} + ' more day' + (${license.daysLeft().get()} == 1 ? '' : 's')"></th:block>.
+    </div>
+    <div th:if="${readOnly}" class="demo-strip w-100" id="license-read-only">
+        <span class="badge bg-red-lt me-2">Read-only</span>
+        <span th:text="${license.message()}">This license expired.</span>
+        <a th:if="${isAdmin}" th:href="@{/admin/license}" class="text-reset ms-1">Install a license</a>
+    </div>
+    <div th:if="${renewal} and not ${readOnly} and not ${evaluation}" class="demo-strip w-100" id="license-renewal">
+        <span class="badge bg-yellow-lt me-2">License</span>
+        <th:block th:if="${license.state().name() == 'GRACE'}" th:text="${license.message()}"></th:block>
+        <th:block th:unless="${license.state().name() == 'GRACE'}"
+                  th:text="'The license expires in ' + ${license.daysLeft().orElse(0L)} + ' day'
+                           + (${license.daysLeft().orElse(0L)} == 1 ? '' : 's') + '.'"></th:block>
+        <a th:href="@{/admin/license}" class="text-reset ms-1">Renew it</a>
+    </div>
 </header>
 
 <!--/* Page title, the run summary, and the sync control for administrators. */-->
@@ -213,11 +241,12 @@
             </div>
             <div class="col-auto ms-auto d-print-none">
                 <div class="btn-list align-items-center">
-                    <!-- Only appears when the changelog connector is enabled. -->
+                    <!-- Only appears when the changelog connector is enabled and licensed. -->
                     <span id="changelog-status" class="d-none"
-                          th:if="${@licenseService.isEnabled('changelog')}"></span>
+                          th:if="${@licensing.isEnabled('changelog-sync')}"></span>
                     <span id="sync-status" class="text-secondary small"></span>
-                    <button type="button" id="sync-now" class="btn btn-primary" th:if="${isAdmin}">
+                    <button type="button" id="sync-now" class="btn btn-primary"
+                            th:if="${isAdmin and @licensing.isEnabled('directory-sync')}">
                         <svg class="icon"><use href="#icon-refresh"></use></svg>
                         Sync directory
                     </button>

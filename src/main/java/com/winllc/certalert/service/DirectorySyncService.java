@@ -5,6 +5,8 @@ import com.winllc.certalert.ldap.LdapDirectoryClient;
 import com.winllc.certalert.ldap.LdapProperties;
 import com.winllc.certalert.ldap.LdapServerEntry;
 import com.winllc.certalert.ldap.LdapUserEntry;
+import com.winllc.certalert.license.Licensing;
+import com.winllc.certalert.repository.DirectoryUserRepository;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -35,6 +37,8 @@ public class DirectorySyncService {
     private final DirectoryPersistenceService persistenceService;
     private final LdapProperties properties;
     private final SyncRunRecorder runRecorder;
+    private final Licensing licensing;
+    private final DirectoryUserRepository people;
     private final Clock clock;
 
     public DirectorySyncService(
@@ -42,11 +46,15 @@ public class DirectorySyncService {
             DirectoryPersistenceService persistenceService,
             LdapProperties properties,
             SyncRunRecorder runRecorder,
+            Licensing licensing,
+            DirectoryUserRepository people,
             Clock clock) {
         this.directoryClient = directoryClient;
         this.persistenceService = persistenceService;
         this.properties = properties;
         this.runRecorder = runRecorder;
+        this.licensing = licensing;
+        this.people = people;
         this.clock = clock;
     }
 
@@ -91,6 +99,10 @@ public class DirectorySyncService {
                 Duration.ofNanos(System.nanoTime() - startedNanos));
 
         runRecorder.finished(runId, Instant.now(clock), result);
+        if (collector.outcome.notAdded() > 0) {
+            log.warn("{} sync: {} new person(s) not added - the license's size is used up. {}",
+                    job, collector.outcome.notAdded(), licensing.usageMessage(people.count()));
+        }
         log.info(
                 "{} sync finished in {} ms: {} entries ({} new), {} certificate(s) cached, {} removed, "
                         + "{} alert(s), {} failed batch(es)",

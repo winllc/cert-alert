@@ -15,7 +15,7 @@ public interface AlertNotifier {
     /**
      * Whether the channel may deliver at the moment. A channel that may not is passed over
      * without being recorded as having delivered or failed - the email channel, say, while
-     * the license does not cover it.
+     * the license does not allow it.
      */
     default boolean isActive() {
         return true;

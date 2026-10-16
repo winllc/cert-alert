@@ -65,6 +65,12 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
+// META-INF/build-info.properties: its build time is the release date a perpetual ENS
+// license's maintenance is measured against (see LicensingConfiguration).
+springBoot {
+    buildInfo()
+}
+
 tasks.withType<JavaCompile>().configureEach {
     options.encoding = "UTF-8"
     options.compilerArgs.add("-parameters")

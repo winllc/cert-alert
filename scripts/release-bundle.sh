@@ -106,6 +106,15 @@ expected=$(printf '%s\n' "$APP_IMAGE" "$POSTGRES_IMAGE" | sort -u)
 if grep -q '^[[:space:]]*build:' "$STAGE/docker-compose.yml"; then
     die "the release compose file must not build anything"
 fi
+# The license, the installation id and the revisions seen live in the ens-license named
+# volume, which upgrades keep (the compose project name is fixed) - never in a bind mount.
+(cd "$CHECK" && docker compose config --volumes) | grep -qx ens-license \
+    || die "docker-compose.yml does not declare the ens-license volume"
+grep -q 'ens-license:/var/lib/ens/certalert$' "$STAGE/docker-compose.yml" \
+    || die "docker-compose.yml does not mount ens-license at /var/lib/ens/certalert"
+if grep -q '\./license' "$STAGE/docker-compose.yml"; then
+    die "docker-compose.yml bind-mounts ./license; the license belongs in the ens-license volume"
+fi
 
 echo "Saving images: ${ALL_IMAGES[*]}"
 printf '%s\n' "${ALL_IMAGES[@]}" > "$STAGE/images/IMAGES"

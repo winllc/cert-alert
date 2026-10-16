@@ -52,7 +52,7 @@
 
                 <!--/* Revocation is the one fact about a certificate the certificate does not
                        carry, so it is asked for on a schedule. This is the same run, now. */-->
-                <div class="card mb-3" id="revocation-admin" th:if="${@licenseService.isEnabled('revocation')}">
+                <div class="card mb-3" id="revocation-admin" th:if="${@licensing.shows('revocation-checks')}">
                     <div class="card-header">
                         <h3 class="card-title">Revocation</h3>
                         <div class="card-actions text-secondary small" id="revocation-status">&ndash;</div>
@@ -230,18 +230,12 @@
                     pruned from the directory leaves its history behind, named by the DN it had.
                 </p>
 
-                <!--/* What the license covers, in one line: for the administrator who is
-                       wondering why a menu item is missing. GET /api/v1/license has the rest. */-->
+                <!--/* What the license allows, in one line: for the administrator who is
+                       wondering why a menu item is missing. The license screen has the rest,
+                       and is where a license is installed. */-->
                 <p class="text-secondary small" id="license-status" th:if="${license != null}">
-                    <th:block th:if="${license.licensed}"
-                              th:text="'Licensed to ' + ${license.licensee}
-                                       + (${license.expires} != null ? ' until ' + ${license.expires} : ', with no expiry date')
-                                       + (${license.features.contains('*')} ? ' · all features'
-                                          : ' · ' + ${#strings.setJoin(license.features, ', ')})">Licensed to X until Y</th:block>
-                    <th:block th:unless="${license.licensed}"
-                              th:text="'Unlicensed: core features only ('
-                                       + (${license.problem} ?: 'no license file at ' + ${license.file}) + ')'">
-                        Unlicensed: core features only</th:block>
+                    <span th:text="'License: ' + ${license.message()}">License: Licensed to Example Agency until 2027-10-14.</span>
+                    <a th:href="@{/admin/license}" class="ms-1">Manage the license</a>
                 </p>
             </div>
         </div>

@@ -12,9 +12,9 @@
 # (made from env.template by install.sh), not in this file, so an upgrade can replace this
 # file without losing anything of yours.
 
-# Fixed, so the database volume is the same one whichever directory a release is unpacked
-# into - an upgrade unpacks next to the old release and finds its data. Override with
-# COMPOSE_PROJECT_NAME in .env to run a second instance on one host.
+# Fixed, so the database and license volumes are the same ones whichever directory a release
+# is unpacked into - an upgrade unpacks next to the old release and finds its data and its
+# license. Override with COMPOSE_PROJECT_NAME in .env to run a second instance on one host.
 name: cert-alert
 
 services:
@@ -61,16 +61,16 @@ services:
       CERT_ALERT_DB_PASSWORD: ${CERT_ALERT_DB_PASSWORD:?set CERT_ALERT_DB_PASSWORD in .env}
       CERT_ALERT_LDAP_URL: ${CERT_ALERT_LDAP_URL:?set CERT_ALERT_LDAP_URL in .env}
       CERT_ALERT_LDAP_BASE: ${CERT_ALERT_LDAP_BASE:?set CERT_ALERT_LDAP_BASE in .env}
-      ENS_LICENSE_FILE: /etc/ens/license/license.lic
     ports:
       # 8080 inside whichever way it is served: plain HTTP, or HTTPS once
       # CERT_ALERT_TLS_ENABLED=true. Only the host side moves.
       - "${CERT_ALERT_BIND_ADDRESS:-0.0.0.0}:${CERT_ALERT_PORT:-8080}:8080"
     volumes:
-      # The ENS Solutions license: ./license/license.lic. Without one the application runs
-      # its core features only; a license dropped in while it runs is picked up within about
-      # 30 seconds.
-      - ./license:/etc/ens/license:ro
+      # The ENS license, this installation's id (licenses are bound to it) and the license
+      # revisions seen - writable, because the license screen saves uploads here. A named
+      # volume, so it survives upgrades; install.sh copies license/license.lic into it.
+      # The image sets ENS_LICENSE_FILE and ENS_LICENSE_STATE_DIR to point here.
+      - ens-license:/var/lib/ens/certalert
       # Keystore and truststore for TLS / X.509 client certificates, when enabled in .env.
       # Empty is fine while TLS is off.
       - ./tls:/etc/cert-alert/tls:ro
@@ -99,3 +99,7 @@ networks:
 
 volumes:
   postgres-data:
+  # Never removed by install.sh or upgrade.sh. `docker compose down -v` deletes it - and
+  # with it the installation id, so a license bound to this installation would have to be
+  # re-bound on the ENS portal.
+  ens-license:
