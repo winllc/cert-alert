@@ -41,3 +41,7 @@ README.md
 Dockerfile
 .dockerignore
 docker-compose.yml
+
+# Release bundles and their templates are not part of the image.
+dist/
+deploy/

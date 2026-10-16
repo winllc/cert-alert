@@ -2192,6 +2192,72 @@ class SlackAlertNotifier implements AlertNotifier {
 }
 ```
 
+## Releases
+
+Customers get a self-contained bundle rather than an image name: the production compose
+file, an install and an upgrade script, every setting commented in `env.template`, and the
+images themselves, so an air-gapped site needs nothing else.
+
+**Cutting a release.** Push a tag:
+
+```bash
+git tag v1.2.3 && git push origin v1.2.3
+```
+
+The `image` job builds and smoke-tests the image as on every push, publishes it (including
+`ghcr.io/winllc/cert-alert:1.2.3`), and then, from that same image, builds the bundle with
+`scripts/release-bundle.sh`. A tag with a suffix (`v1.2.3-rc.1`) is a pre-release: built
+and uploaded the same way, but `latest.txt` does not move. Every pull request builds the
+bundle too, as `0.0.0-pr<number>`, kept for three days as a workflow artifact and never
+uploaded - so a change that breaks the bundle shows up before the tag does.
+
+**What CI produces**, kept as the workflow artifact `release-cert-alert-<version>` (30 days)
+and uploaded to `s3://<bucket>/cert-alert/<version>/`:
+
+| File | |
+|---|---|
+| `cert-alert-<version>.tar.gz` | the bundle: `README.md`, `VERSION`, `install.sh`, `upgrade.sh`, `docker-compose.yml` (application and PostgreSQL, pinned to this version's images; directory and SMTP are the customer's, set in `.env`), `env.template`, `license/README.txt`, and `images/cert-alert-images-<version>.tar` (`docker save` of cert-alert and postgres) |
+| `sbom-cert-alert.spdx.json`, `sbom-postgres.spdx.json` | SPDX SBOM per image (syft) |
+| `SHA256SUMS` | checksums of all of the above |
+| `SHA256SUMS.asc` | detached GPG signature of `SHA256SUMS`, when a signing key is configured |
+
+plus `s3://<bucket>/cert-alert/latest.txt` holding the newest final version. The job summary
+lists the files and sizes, and says whether it was signed and where it went - or why not.
+
+**Configuring it** (Settings → Secrets and variables → Actions). With none of these set the
+workflow still builds the bundle and keeps it as an artifact; signing and upload are each
+skipped and the summary says so.
+
+| Name | Kind | |
+|---|---|---|
+| `RELEASE_GPG_PRIVATE_KEY` | secret | ASCII-armoured private key that signs `SHA256SUMS` |
+| `RELEASE_GPG_PASSPHRASE` | secret | its passphrase, if it has one |
+| `RELEASE_S3_BUCKET` | variable | the private bucket releases go to |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | secrets | credentials that may write to it |
+| `RELEASE_S3_ENDPOINT` | variable | for Cloudflare R2 or MinIO, e.g. `https://<account>.r2.cloudflarestorage.com`; empty for AWS S3 |
+| `RELEASE_S3_REGION` | variable | default `us-east-1` (`auto` for R2) |
+
+**Building one locally** - any image tagged with the product's name will do:
+
+```bash
+docker build -t ghcr.io/winllc/cert-alert:1.2.3 .
+scripts/release-bundle.sh 1.2.3 ghcr.io/winllc/cert-alert:1.2.3   # into dist/release-1.2.3/
+```
+
+SBOMs are generated when `syft` is on the PATH; `POSTGRES_IMAGE` overrides the bundled
+PostgreSQL (`postgres:17.11-alpine`).
+
+**How a customer checks a download**, in the directory holding the files:
+
+```bash
+sha256sum -c SHA256SUMS                      # every file is the one that was published
+gpg --import ens-release-key.asc             # once: the ENS Solutions release public key
+gpg --verify SHA256SUMS.asc SHA256SUMS       # and SHA256SUMS is the one ENS signed
+```
+
+then `tar xzf cert-alert-<version>.tar.gz` and follow the `README.md` inside: `./install.sh`
+for a first install, `./upgrade.sh --from ../cert-alert-<old version>` to move to a new one.
+
 ## Project layout
 
 ```
@@ -2199,7 +2265,9 @@ Dockerfile               three-stage image build
 docker-compose.yml       the application, a PostgreSQL and a stand-in directory
 docker-compose.ports.yml opt-in overlay that publishes them on the host
 docker/389ds/            389 Directory Server carrying the IC FSD schema and a changelog
-scripts/                 the dummy directory generator
+deploy/release/          what goes in a customer release bundle: production compose,
+                         env.template, install.sh, upgrade.sh and the customer README
+scripts/                 the dummy directory generator, and release-bundle.sh
 src/main/java/com/winllc/certalert/
 ├── alert/       notifier SPI, dispatcher, log and email channels
 ├── config/      expiry thresholds, clock, DataTables repository factory

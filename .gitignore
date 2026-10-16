@@ -31,3 +31,6 @@ out/
 !src/test/resources/license/ens-license-test-private.pem
 # Where docker-compose.yml mounts the license from.
 /license/
+
+# Release bundles built by scripts/release-bundle.sh.
+/dist/

@@ -50,6 +50,17 @@ jobs:
       contents: read
       packages: write
 
+    env:
+      # The customer release bundle (see "Release bundle" below and the README's Releases).
+      PRODUCT_ID: cert-alert
+      IMAGE_NAME: ghcr.io/${{ github.repository }}
+      # Secrets cannot be tested in a step's `if:`, so whether they are set is mapped here.
+      HAS_GPG: ${{ secrets.RELEASE_GPG_PRIVATE_KEY != '' }}
+      HAS_AWS: ${{ secrets.AWS_ACCESS_KEY_ID != '' }}
+      RELEASE_S3_BUCKET: ${{ vars.RELEASE_S3_BUCKET }}
+      RELEASE_S3_ENDPOINT: ${{ vars.RELEASE_S3_ENDPOINT }}
+      RELEASE_S3_REGION: ${{ vars.RELEASE_S3_REGION || 'us-east-1' }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -135,4 +146,175 @@ jobs:
             echo '```'
             echo "$TAGS"
             echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # ---- Release bundle -------------------------------------------------------------
+      # On a v* tag: the customer bundle for that version - compose file, install scripts and
+      # the images just tested and published, with SBOMs, checksums and (when the key is
+      # configured) a signature - uploaded to the release bucket. On a pull request: the same
+      # bundle as a dry run, kept only as a workflow artifact, so every PR proves it builds.
+      # Branch pushes build no bundle.
+
+      - name: Decide the release version
+        id: release
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          if [ "$EVENT" = push ] && [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version=${GITHUB_REF_NAME#v}
+            release=true
+          elif [ "$EVENT" = pull_request ]; then
+            version="0.0.0-pr${PR_NUMBER}"
+            release=false
+          else
+            echo "No release bundle for a $EVENT of $GITHUB_REF."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          {
+            echo "enabled=true"
+            echo "version=$version"
+            echo "release=$release"
+            echo "out_dir=$RUNNER_TEMP/release-$version"
+          } >> "$GITHUB_OUTPUT"
+          echo "Release bundle $version (release=$release)"
+
+      - name: Install syft
+        id: syft
+        if: steps.release.outputs.enabled == 'true'
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: Build the release bundle
+        if: steps.release.outputs.enabled == 'true'
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          RELEASE: ${{ steps.release.outputs.release }}
+          OUT_DIR: ${{ steps.release.outputs.out_dir }}
+          PUBLISHED: ${{ steps.meta.outputs.tags }}
+          SYFT: ${{ steps.syft.outputs.cmd }}
+          REQUIRE_SBOM: "true"
+        run: |
+          # The image that passed the smoke test, under the name customers' compose file uses.
+          # On a tag it was pushed under that name above; check, rather than ship a bundle
+          # whose compose file names an image the registry does not have.
+          if [ "$RELEASE" = true ] && ! grep -qxF "$IMAGE_NAME:$VERSION" <<< "$PUBLISHED"; then
+            echo "::error::$IMAGE_NAME:$VERSION was not among the published tags"
+            exit 1
+          fi
+          docker tag cert-alert:ci "$IMAGE_NAME:$VERSION"
+          scripts/release-bundle.sh "$VERSION" "$IMAGE_NAME:$VERSION"
+
+      - name: Sign the checksums
+        id: sign
+        if: steps.release.outputs.enabled == 'true' && env.HAS_GPG == 'true'
+        env:
+          OUT_DIR: ${{ steps.release.outputs.out_dir }}
+          GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
+        run: |
+          # A keyring of its own outside the workspace, removed afterwards. The key only ever
+          # goes from the environment into gpg's import.
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          rm -rf "$GNUPGHOME"
+          mkdir -m 700 "$GNUPGHOME"
+          trap 'gpgconf --kill all || true; rm -rf "$GNUPGHOME"' EXIT
+          printf '%s\n' "$GPG_PRIVATE_KEY" | gpg --batch --quiet --import
+          key=$(gpg --batch --list-secret-keys --with-colons | awk -F: '$1 == "fpr" { print $10; exit }')
+          [ -n "$key" ] || { echo "::error::RELEASE_GPG_PRIVATE_KEY holds no secret key"; exit 1; }
+          sign=(gpg --batch --yes --pinentry-mode loopback --local-user "$key"
+                --armor --detach-sign --output "$OUT_DIR/SHA256SUMS.asc")
+          if [ -n "$GPG_PASSPHRASE" ]; then
+            printf '%s' "$GPG_PASSPHRASE" | "${sign[@]}" --passphrase-fd 0 "$OUT_DIR/SHA256SUMS"
+          else
+            "${sign[@]}" "$OUT_DIR/SHA256SUMS"
+          fi
+          gpg --batch --verify "$OUT_DIR/SHA256SUMS.asc" "$OUT_DIR/SHA256SUMS"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the release to the bucket
+        id: upload
+        if: >-
+          steps.release.outputs.enabled == 'true' && steps.release.outputs.release == 'true'
+          && env.RELEASE_S3_BUCKET != '' && env.HAS_AWS == 'true'
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          OUT_DIR: ${{ steps.release.outputs.out_dir }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ env.RELEASE_S3_REGION }}
+        run: |
+          # An endpoint for R2 or MinIO; AWS S3 needs none.
+          aws_s3=(aws s3)
+          [ -z "$RELEASE_S3_ENDPOINT" ] || aws_s3=(aws --endpoint-url "$RELEASE_S3_ENDPOINT" s3)
+          dest="s3://$RELEASE_S3_BUCKET/$PRODUCT_ID/$VERSION/"
+          for f in "$OUT_DIR"/*; do
+            "${aws_s3[@]}" cp --no-progress "$f" "$dest"
+          done
+          # latest.txt moves only for a final release, never for 1.2.3-rc.1 and the like.
+          if [[ "$VERSION" != *-* ]]; then
+            printf '%s\n' "$VERSION" > "$RUNNER_TEMP/latest.txt"
+            "${aws_s3[@]}" cp --no-progress --content-type text/plain \
+              "$RUNNER_TEMP/latest.txt" "s3://$RELEASE_S3_BUCKET/$PRODUCT_ID/latest.txt"
+            echo "latest=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "location=$dest" >> "$GITHUB_OUTPUT"
+
+      - name: Keep the bundle as a workflow artifact
+        if: steps.release.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ env.PRODUCT_ID }}-${{ steps.release.outputs.version }}
+          path: ${{ steps.release.outputs.out_dir }}
+          retention-days: ${{ steps.release.outputs.release == 'true' && 30 || 3 }}
+          # The tarball is already compressed.
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Summarise the release bundle
+        if: always() && steps.release.outputs.enabled == 'true'
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          RELEASE: ${{ steps.release.outputs.release }}
+          OUT_DIR: ${{ steps.release.outputs.out_dir }}
+          SIGN_OUTCOME: ${{ steps.sign.outcome }}
+          SIGN_KEY: ${{ steps.sign.outputs.key }}
+          UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
+          UPLOAD_LOCATION: ${{ steps.upload.outputs.location }}
+          UPLOAD_LATEST: ${{ steps.upload.outputs.latest }}
+        run: |
+          {
+            echo "### Release bundle \`$PRODUCT_ID $VERSION\`"
+            echo
+            if [ -d "$OUT_DIR" ] && [ -n "$(ls -A "$OUT_DIR")" ]; then
+              echo "| File | Size |"
+              echo "|---|---:|"
+              for f in "$OUT_DIR"/*; do
+                echo "| \`$(basename "$f")\` | $(numfmt --to=iec-i --suffix=B "$(stat -c %s "$f")") |"
+              done
+            else
+              echo "No bundle was produced - see the *Build the release bundle* step."
+            fi
+            echo
+            case "$SIGN_OUTCOME" in
+              success) echo "**Signed:** yes, \`SHA256SUMS.asc\` by key \`$SIGN_KEY\`." ;;
+              skipped)
+                if [ "$HAS_GPG" = true ]; then echo "**Signed:** no - the bundle was not built."
+                else echo "**Signed:** no - secret \`RELEASE_GPG_PRIVATE_KEY\` is not configured."; fi ;;
+              *) echo "**Signed:** no - signing failed." ;;
+            esac
+            case "$UPLOAD_OUTCOME" in
+              success)
+                echo "**Uploaded:** \`$UPLOAD_LOCATION\`"
+                if [ "$UPLOAD_LATEST" = true ]; then echo "and \`$PRODUCT_ID/latest.txt\` now says $VERSION."
+                else echo "(a pre-release, so \`$PRODUCT_ID/latest.txt\` was left alone)."; fi ;;
+              skipped)
+                if [ "$RELEASE" != true ]; then echo "**Uploaded:** no - a pull-request dry run is never uploaded."
+                elif [ -z "$RELEASE_S3_BUCKET" ]; then echo "**Uploaded:** no - variable \`RELEASE_S3_BUCKET\` is not set."
+                elif [ "$HAS_AWS" != true ]; then echo "**Uploaded:** no - secret \`AWS_ACCESS_KEY_ID\` is not configured."
+                else echo "**Uploaded:** no - an earlier step failed."; fi ;;
+              *) echo "**Uploaded:** no - the upload failed." ;;
+            esac
+            echo
+            echo "Workflow artifact: \`release-$PRODUCT_ID-$VERSION\`."
           } >> "$GITHUB_STEP_SUMMARY"
