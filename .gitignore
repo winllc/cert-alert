@@ -23,13 +23,13 @@ logs/
 *.log
 out/
 
-# ENS licenses and signing keys are never committed. The test-only key under
-# src/test/resources is the exception: it signs licenses that only the tests accept.
+# ENS licenses and signing keys are never committed. The exceptions are the license
+# fixtures under src/test/resources, signed with the ENS portal's published TEST key, which
+# only the tests trust.
 *.lic
-!src/test/resources/license/test.lic
+!src/test/resources/license/fixtures/*.lic
 *private.pem
-!src/test/resources/license/ens-license-test-private.pem
-# Where docker-compose.yml mounts the license from.
+# Where a license is put for docker compose to copy into its volume.
 /license/
 
 # Release bundles built by scripts/release-bundle.sh.

@@ -1,5 +1,6 @@
 package com.winllc.certalert.web;
 
+import com.winllc.certalert.license.RequiresFeature;
 import com.winllc.certalert.config.RevocationProperties;
 import com.winllc.certalert.domain.RevocationStatus;
 import com.winllc.certalert.repository.CachedCertificateRepository;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
  * it is not: it asks every authority in the directory at once, and it is a scheduled job
  * being brought forward rather than a page being refreshed.
  */
+@RequiresFeature("revocation-checks")
 @RestController
 @RequestMapping("/api/v1/revocation")
 public class RevocationController {

@@ -9,6 +9,16 @@
 # The directory publishes cn=changelog, so the changelog connector can be tried here:
 # set CERT_ALERT_LDAP_CHANGELOG_ENABLED=true in the application's environment.
 #
+# It needs an ENS license like any installation: download an evaluation license for
+# CertAlert from the ENS licensing portal. Without one, only signing in and the license
+# screen work. Either upload it on the license screen (sign in as alice, and you are sent
+# there), or copy it into the license volume once the stack is up:
+#
+#   docker compose cp license/license.lic cert-alert:/var/lib/ens/certalert/license.lic
+#
+# It is kept in the ens-license volume with this installation's id, so it survives
+# restarts and rebuilds; `docker compose down -v` deletes it with everything else.
+#
 # Nothing is published to the host: everything here has a default password and the
 # directory serves plaintext LDAP, so binding any of it to an interface is opt-in. Add the
 # ports overlay to reach the UI from a browser, then sign in as alice / password at
@@ -108,13 +118,11 @@ services:
     # Nothing published to the host either - see docker-compose.ports.yml to reach the UI
     # from a browser. The application still listens on 8080 inside the container, which is
     # what the image's EXPOSE, its HEALTHCHECK and every probe path assume.
-    # Mounts, all read-only and all commented out so a first run needs no directories.
-    # The ENS Solutions license: put it at ./license/license.lic. Without one - including
-    # when ./license does not exist, which Docker then creates empty - the application runs
-    # its core features only. A license dropped in while it runs is picked up within about
-    # 30 seconds.
+    # The ENS license, this installation's id and the license revisions seen: one
+    # persistent, writable directory, kept in a named volume so it outlives the container.
+    # The license screen writes uploads there; see the top of this file for copying one in.
     volumes:
-      - ./license:/etc/ens/license:ro
+      - ens-license:/var/lib/ens/certalert
     # Further mounts, all read-only and all commented out so a first run needs no
     # directories - add them under volumes above.
     #
@@ -147,3 +155,4 @@ networks:
 volumes:
   postgres-data:
   ldap-data:
+  ens-license:

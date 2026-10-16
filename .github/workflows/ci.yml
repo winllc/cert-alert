@@ -102,6 +102,10 @@ jobs:
             if curl -fsS http://localhost:8080/actuator/health/liveness > /dev/null 2>&1; then
               echo "started after ${i}s"
               curl -fsS http://localhost:8080/actuator/health/liveness
+              # Unlicensed - no license is ever in the image - and still able to sign in,
+              # so an administrator can reach the license screen to install one.
+              curl -fsS -o /dev/null http://localhost:8080/login
+              docker exec cert-alert test -w /var/lib/ens/certalert
               docker rm -f cert-alert
               exit 0
             fi

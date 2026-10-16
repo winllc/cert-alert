@@ -14,6 +14,13 @@
             <div class="card-body">
                 <h2 class="h3 text-center mb-3">Sign in</h2>
 
+                <!--/* The evaluation banner, which every page carries - this one included. */-->
+                <p th:if="${license != null and license.showEvaluationBanner()}" id="license-evaluation"
+                   class="text-center small text-secondary mb-3">
+                    <span class="badge bg-orange-lt me-1">Evaluation</span>
+                    This copy is licensed for evaluation only.
+                </p>
+
                 <div th:unless="${demo}" class="alert alert-info" role="alert">
                     <div class="d-flex">
                         <div><svg class="icon alert-icon"><use href="#icon-key"></use></svg></div>

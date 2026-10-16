@@ -44,6 +44,14 @@ public record CachedCertificateRow(
         CertificateStatus status,
         Instant cachedAt) {
 
+    /** The same row with no risk flags, for an installation not licensed for risk analysis. */
+    public CachedCertificateRow withoutRisks() {
+        return new CachedCertificateRow(id, sha256Fingerprint, serialNumber, subjectDn, issuerDn, notBefore,
+                notAfter, signatureAlgorithm, hashAlgorithm, keyAlgorithm, keySize, subjectAlternativeNames,
+                subjectAltNameCount, List.of(), use, useDescription, keyUsages, revocationStatus, revocationLabel,
+                revokedAt, revocationReason, revocationDetail, status, cachedAt);
+    }
+
     /** One flag, as the page shows it. */
     public record Risk(String name, String label, String why, boolean severe) {
 

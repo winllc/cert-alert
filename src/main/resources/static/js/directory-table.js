@@ -60,6 +60,11 @@
      * leaves them where they are.
      */
     function handleUnauthorized(xhr) {
+        var license = licenseRefusal(xhr);
+        if (license) {
+            sayLicenseRefused(license, xhr);
+            return true;
+        }
         if (demo && xhr.status === 403) {
             sayItIsADemo(xhr);
             return true;
@@ -83,6 +88,48 @@
             }
         });
     }
+
+    /**
+     * A refusal from the license rather than from security: the application is unlicensed,
+     * read-only, or the license does not include what was asked for. The problem detail
+     * says which, in "error". Null for anything else.
+     */
+    function licenseRefusal(xhr) {
+        if (!xhr || xhr.status !== 403) {
+            return null;
+        }
+        var body = xhr.responseJSON;
+        if (!body && xhr.responseText) {
+            try {
+                body = JSON.parse(xhr.responseText);
+            } catch (ignored) {
+                body = null;
+            }
+        }
+        return body && /^(license_required|license_read_only|feature_not_licensed)$/.test(body.error || '')
+            ? body : null;
+    }
+
+    /**
+     * Unlicensed: reload, and the server sends the page to the license screen. Otherwise say
+     * why, in the same notice the demo uses - sending somebody to the sign-in page for a
+     * license refusal would be no answer at all.
+     */
+    function sayLicenseRefused(body, xhr) {
+        if (body.error === 'license_required') {
+            window.location.reload();
+            return;
+        }
+        sayItIsADemo(xhr);
+    }
+
+    // Every license refusal, wherever it came from - a button on any page.
+    $(document).ajaxError(function (event, xhr) {
+        var license = licenseRefusal(xhr);
+        if (license && !demo) {
+            sayLicenseRefused(license, xhr);
+        }
+    });
 
     var demoNoticeTimer = null;
     var DEMO_REFUSAL = 'This is a read-only demo \u2014 nothing here can be changed.';

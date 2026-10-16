@@ -100,23 +100,30 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * A licensed feature this deployment's license does not cover. Forbidden rather than
-     * not found: the address is real, and saying what it needs is the useful answer. The
-     * problem detail carries the feature's id, so a script can tell this from a missing
-     * permission.
+     * Something the license does not allow: no license this installation can use, a
+     * read-only one and a request that would change something, or a feature the license
+     * does not include. Forbidden rather than not found: the address is real, and saying
+     * what it needs is the useful answer. The problem detail carries {@code error}
+     * ({@code license_required}, {@code license_read_only} or {@code feature_not_licensed}),
+     * the license {@code state} and its {@code message}, so a script can tell this from a
+     * missing permission.
      */
     @ExceptionHandler(LicenseRequiredException.class)
     public Object handleUnlicensed(LicenseRequiredException e, HttpServletRequest request) {
         if (wantsHtml(request)) {
             ModelAndView page = page("license-required", HttpStatus.FORBIDDEN, e.getMessage(), request);
-            page.addObject("feature", e.getFeature().label());
+            page.addObject("refusal", e.getKind().name());
+            page.addObject("feature", e.getFeatureLabel());
             return page;
         }
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, e.getMessage());
-        problem.setTitle("License required");
-        problem.setProperty("error", "license_required");
-        problem.setProperty("feature", e.getFeature().id());
+        problem.setTitle(e.getKind().title());
+        problem.setProperty("error", e.getKind().error());
+        problem.setProperty("state", e.getState());
         problem.setProperty("message", e.getMessage());
+        if (e.getFeature() != null) {
+            problem.setProperty("feature", e.getFeature());
+        }
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(problem);
     }
 

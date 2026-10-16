@@ -60,60 +60,104 @@ Two details from the spec shape the design:
 
 ## Licensing
 
-cert-alert runs without a license. What a license adds is a set of **licensed features**;
-everything else is **core** and works the same with or without one.
+cert-alert needs an **ENS license** to run. Licenses are issued by the ENS licensing portal
+(an evaluation, or the license issued against an order) in the portal's `ens-license/1`
+format, for the product id **`certalert`**, and are checked offline: the application
+verifies the Ed25519 signature against the ENS public key built into it
+(`license/EnsKeys.java`; not configurable), so no network is involved. The verifier is the
+portal's zero-dependency library, copied unchanged into `com.enssolutions.license`.
 
-| | Feature (license id) | What it covers |
+### What the license does
+
+| State (`/api/v1/license`) | Mode | What works |
 |---|---|---|
-| Core | — | Directory sync and expiry refresh, the People and Servers tables and pages, expiry status, signing in, in-app notifications, the logging alert channel, the classification banner, the audit trail and administration page, server attributes, points of contact |
-| Licensed | Revocation checking (`revocation`) | `/api/v1/revocation/**` and the scheduled revocation job |
-| Licensed | TLS endpoint probing (`tls-probe`) | `POST /api/v1/servers/{id}/probe` and the probe card on a server's page |
-| Licensed | Real-time changelog sync (`changelog`) | `/api/v1/changelog/**` and the changelog connector's polling |
-| Licensed | Directory cleanup (`directory-cleanup`) | `/api/v1/sync/prune/**`, `/api/v1/sync/certificate-cleanup/**` and their scheduled jobs |
-| Licensed | Email notifications (`email-notifications`) | The expiry digest (`POST /api/v1/notifications/digest` and its job), the email alert channel and digest email |
-| Licensed | Projects (`projects`) | `/projects`, `/api/v1/projects/**`, the Projects menu item and project filters |
-| Licensed | Metrics (`metrics`) | `/metrics`, `/api/v1/metrics` and the Metrics menu item |
+| `VALID`, `GRACE` (expired, within its grace days) | full | Everything the license's features include. In grace, administrators see a renewal reminder (also in the last 30 days) |
+| `EXPIRED` (past grace), `RELEASE_NOT_COVERED` (perpetual, this build is newer than its maintenance) | read-only | Everything readable — pages, tables, exports. Nothing that changes data (403 `license_read_only`); directory sweeps, scheduled jobs, the changelog connector and outgoing email pause |
+| `MISSING`, `INVALID`, `WRONG_PRODUCT`, `WRONG_INSTALLATION`, `SUPERSEDED`, `NOT_YET_VALID` | unlicensed | Only signing in and out, static assets, health, the error page and the license screen. Administrators are sent to the license screen, anyone else to a page saying to ask one; the API answers 403 `license_required` |
 
-The split is written down once, in `license/LicensedFeature.java`.
+An evaluation license puts an **Evaluation** strip on every page. Refusals are problem
+detail like every other error here, with `error` (`license_required`, `license_read_only`
+or `feature_not_licensed`), the license `state` and its `message`:
 
-A license is a signed text file issued by ENS Solutions for the `cert-alert` product. It
-lists the features it covers (`features=*` is all of them) and when it expires. The
-application checks its signature against a public key built into the jar, so it cannot be
-edited: changing any line invalidates it.
-
-**Where it goes.** The application reads the file named by `ens.license.file`, or the
-environment variable `ENS_LICENSE_FILE`; the default is `license.lic` in the working
-directory. The container image sets `ENS_LICENSE_FILE=/etc/ens/license/license.lic`. A
-license is never built into the image — `.dockerignore` excludes `*.lic` — it is mounted:
-
-```bash
-docker build -t cert-alert:latest .
-
-docker run -d -p 8080:8080 \
-  -v /path/to/license.lic:/etc/ens/license/license.lic:ro \
-  cert-alert:latest
-# or a directory holding license.lic:   -v /path/to/license-dir:/etc/ens/license:ro
-# or a Docker/Kubernetes secret, with ENS_LICENSE_FILE pointing at wherever it is mounted
+```json
+{"title":"License required","status":403,"error":"license_required","state":"MISSING",
+ "message":"No license is installed. Upload one on the license screen.", ...}
 ```
 
-`docker compose up` mounts `./license` there: put the file at `./license/license.lic`.
+### Features
 
-**Checking it.** The log says what was found at startup — `License: licensed to …` or
-`License: no license file at …; running with core features only`. Signed in, `GET
-/api/v1/license` returns the state (`LICENSED`, `MISSING`, `INVALID` or `EXPIRED`), the
-licensee, expiry and features, and what is wrong with a file that was rejected;
-administrators also see the path it was read from. The administration page carries the
-same in one line at the bottom.
+Every feature in the portal's catalog is gated, including the ones every license carries
+today, so moving one between tiers needs only a change on the portal. Endpoints carry
+`@RequiresFeature` (403 `feature_not_licensed` with the `feature` id when it is not
+included); jobs, menus, cards and buttons ask `Licensing` and are hidden when it is not.
 
-**What happens without one.** Licensed pages answer `403` with a page saying what they
-need, and the API answers `403` with problem detail carrying
-`"error": "license_required"` and the feature's id. Their menu items and buttons are not
-shown, and their scheduled jobs do nothing. Nothing else changes.
+| Feature id | What it gates |
+|---|---|
+| `directory-sync` | The scheduled user and server sweeps and the expiry refresh; `POST /api/v1/sync`, `/sync/users`, `/sync/servers`, `/sync/refresh`; the Sync directory button. Every license has it |
+| `changelog-sync` | `/api/v1/changelog/**` and the changelog connector's polling; the header's changelog badge |
+| `notifications` | Email: the expiry digest job and `POST /api/v1/notifications/digest`, the email alert channel, digest email. In-app notifications stay available |
+| `metrics` | `/metrics`, `/api/v1/metrics`, the Metrics menu item |
+| `projects` | `/projects/**`, `/api/v1/projects/**`, the Projects menu item, project filters and cards |
+| `revocation-checks` | `/api/v1/revocation/**`, the revocation job, the administration page's revocation card |
+| `endpoint-checks` | `POST /api/v1/servers/{id}/probe` and the probe card on a server's page |
+| `risky-names` | Risk analysis: the risky-name badges, filters and metrics (flags are still computed during a sweep, so they appear at once when it is licensed) |
+| `directory-cleanup` | `/api/v1/sync/prune/**`, `/api/v1/sync/certificate-cleanup/**` and their scheduled jobs |
+| `classification-banners` | The configured classification banner (`cert-alert.banner`): not drawn without it |
+| `multi-directory` (Enterprise) | Not yet implemented; listed on the license screen only |
 
-**Expiry and renewal.** A license is good through the end of its expiry date (UTC). After
-that the application falls back to core features — it does not stop. The file is checked
-for changes at most every 30 seconds, whenever a feature is next asked about, so dropping a
-renewed license in place takes effect within about 30 seconds and without a restart.
+In read-only mode what a listed feature has gathered stays readable (its pages and `GET`
+endpoints), but nothing runs.
+
+**Size.** A license is sized in **directory users** — the people in the cache. The license
+screen shows the count against it. Up to 10% over, sweeps carry on with a warning; beyond
+that a sweep (or the changelog) stops adding *new* people until the license is updated. Nobody
+already cached is ever removed, and servers are not counted.
+
+### The license screen
+
+**Administration → License** (`/admin/license`, administrators only, reachable whatever
+the license says) shows the state and its message, the licensee, edition, dates, grace and
+maintenance, every catalog feature ticked or not, the size in use, and **this
+installation's id** (e.g. `CA-7F3K-29QD`, with a copy button): enter it on the portal to
+bind a license to this installation. Upload a `.lic` file, or paste one, to install it; it
+takes effect at once. A file for another product, bound to another installation, or an
+older revision of a license already seen here is refused with the reason, and the
+installed one stays. `GET /api/v1/license` returns the same as JSON to anyone signed in —
+the installation id and the file's path to administrators only.
+
+### Where it is kept
+
+One persistent, **writable** directory holds the license, the installation id and the
+highest revision seen of each license (so an older file cannot be put back):
+
+| Environment | Default outside a container | In the image |
+|---|---|---|
+| `ENS_LICENSE_FILE` | `/etc/ens/certalert.lic` | `/var/lib/ens/certalert/license.lic` |
+| `ENS_LICENSE_STATE_DIR` | `/var/lib/ens/certalert` | `/var/lib/ens/certalert` |
+
+The image declares `VOLUME /var/lib/ens`; mount a named volume or persistent volume claim
+at `/var/lib/ens/certalert` so the license and the installation id survive upgrades (lose
+it, and the installation gets a new id, so bound licenses must be re-bound). Running from
+Gradle or a jar, point both variables somewhere writable, e.g.
+`ENS_LICENSE_STATE_DIR=$HOME/.ens/certalert ENS_LICENSE_FILE=$HOME/.ens/certalert/license.lic`.
+
+```bash
+docker run -d -p 8080:8080 -v ens-license:/var/lib/ens/certalert cert-alert:latest
+# then upload the license on /admin/license, or copy it in:
+docker cp license.lic <container>:/var/lib/ens/certalert/license.lic
+```
+
+`docker compose up` keeps it in the `ens-license` volume; the release bundle's
+`install.sh` copies `license/license.lic` into that volume (see `deploy/release/README.md`).
+A license is never built into the image: `.dockerignore` and `.gitignore` exclude `*.lic`.
+
+**Perpetual licenses** cover releases built up to their maintenance date. The release date
+is this build's time, from Spring Boot's build-info (`springBoot { buildInfo() }`).
+
+**Tests** trust the portal's published TEST key instead (`support/TestLicenseConfiguration`
+replaces the `LicenseManager` for the `test` profile, with a full license installed), and
+`support/TestLicenses` signs test licenses with it. Nothing signed with it is accepted by a
+build anybody runs.
 
 ## Running it
 
@@ -124,8 +168,11 @@ renewed license in place takes effect within about 30 seconds and without a rest
 The `dev` profile runs against an **embedded sample directory** (four people, four
 servers, a mix of valid, expiring and expired certificates) so the UI works with no LDAP
 server to hand. Open <http://localhost:8080/users> and sign in as `alice` / `password` —
-the sample gives everyone that password, and alice is the configured administrator — then
-press **Sync directory**.
+the sample gives everyone that password, and alice is the configured administrator. Like
+any installation it needs a license (an evaluation from the ENS portal): you are sent to
+the license screen to upload it, and need `ENS_LICENSE_STATE_DIR` and `ENS_LICENSE_FILE`
+pointed somewhere writable (see [Licensing](#where-it-is-kept)). Then press **Sync
+directory**.
 
 The sample's expiry dates are baked in and will age; regenerate it by re-enabling and
 running `DevLdifGenerator`. Neither the in-memory directory nor its fixture reaches the
@@ -195,6 +242,7 @@ docker run --rm -p 8080:8080 \
   -e CERT_ALERT_LDAP_BASE=dc=example,dc=gov \
   -e CERT_ALERT_LDAP_USER='cn=cert-alert,ou=services,dc=example,dc=gov' \
   -e CERT_ALERT_LDAP_PASSWORD=... \
+  -v ens-license:/var/lib/ens/certalert \
   cert-alert:latest
 ```
 
@@ -219,8 +267,10 @@ To reach the UI from a browser, add the ports overlay:
 docker compose -f docker-compose.yml -f docker-compose.ports.yml up --build
 ```
 
-Then sign in at <http://localhost:8181> as `alice` / `password` and press **Sync
-directory**. `CERT_ALERT_PORT` and `CERT_ALERT_LDAP_PORT` move the host side —
+Then sign in at <http://localhost:8181> as `alice` / `password`. The first time, you are
+sent to the license screen: upload an evaluation license from the ENS licensing portal (or
+`docker compose cp license/license.lic cert-alert:/var/lib/ens/certalert/license.lic`). It
+is kept in the `ens-license` volume. Then press **Sync directory**. `CERT_ALERT_PORT` and `CERT_ALERT_LDAP_PORT` move the host side —
 `CERT_ALERT_PORT=9090 docker compose -f docker-compose.yml -f docker-compose.ports.yml up`.
 Only the host side moves: the application still listens on 8080 inside the container, which
 is what the image's `EXPOSE`, its `HEALTHCHECK` and every probe path assume.
@@ -345,20 +395,23 @@ Notes on the image:
   image's own `HEALTHCHECK` is for plain `docker run`; Kubernetes ignores it and wants its
   own probes.
 - Keystores for X.509 belong in a mounted volume or a secret. `.dockerignore` excludes
-  `*.p12`, `*.jks`, `*.pem` and `*.key` so one cannot be baked in by accident — bar the
-  license public key under `src/main/resources/license`, which belongs in the jar.
-- The license is mounted at `/etc/ens/license/license.lic` (see [Licensing](#licensing));
-  `.dockerignore` excludes `*.lic` so one cannot be baked in either.
+  `*.p12`, `*.jks`, `*.pem` and `*.key` so one cannot be baked in by accident.
+- The license lives in `/var/lib/ens/certalert` (see [Licensing](#where-it-is-kept)), a
+  directory owned by uid 185 and group 0 with the group able to write, as OpenShift's
+  arbitrary uid needs; mount a persistent volume there. `.dockerignore` excludes `*.lic` so
+  one cannot be baked in.
 - The image can serve a directory of its own, because the LDAP SDK ships in the jar for
   [demo mode](#demo-mode) — a complete instance in one container, with nothing to point it
   at:
 
   ```bash
-  docker run --rm -p 8080:8080 cert-alert:latest --spring.profiles.active=demo
+  docker run --rm -p 8080:8080 -v cert-alert-demo-license:/var/lib/ens/certalert \
+    cert-alert:latest --spring.profiles.active=demo
   ```
 
   That is for showing the application, never for running it: it publishes working
-  credentials on its own sign-in page.
+  credentials on its own sign-in page. It needs a license too — see
+  [Demo mode](#demo-mode).
 
 Tests are not run during the image build — CI runs them, and they need an in-memory LDAP
 server and a database. Build with `--build-arg RUN_TESTS=true` to run them anyway.
@@ -659,10 +712,19 @@ people without issuing them a certificate or an account first.
 ./gradlew bootRun --args='--spring.profiles.active=demo'
 ```
 
-That is the whole of it — nothing else has to be running. The demo generates a directory
-of invented people and servers, serves it from memory over LDAP, and then indexes it the
-way it would index anyone's, so what a visitor sees is the application working rather than
-a mock-up of it.
+That is the whole of it — nothing else has to be running, bar a license. The demo
+generates a directory of invented people and servers, serves it from memory over LDAP, and
+then indexes it the way it would index anyone's, so what a visitor sees is the application
+working rather than a mock-up of it.
+
+**A demo needs a license like any installation.** Download an evaluation license for
+CertAlert from the ENS licensing portal. An unlicensed demo shows only the license screen:
+sign in as `demo.admin` and upload it there — the one change a demo accepts, and only while
+it has no license in full effect, so a visitor cannot swap a working one. The first sweep
+runs as soon as it is installed. Or put it in place before starting: in the license
+volume (`docker cp`, or `ENS_LICENSE_FILE` pointing at it when run from Gradle). No license
+is ever committed to this repository; the tests sign their own with the portal's TEST key,
+which a real build does not trust.
 
 #### Signing in as each role
 
@@ -788,7 +850,8 @@ What it holds is chosen to exercise the application rather than to look tidy:
 Seeded, so a demo restarted an hour later is the same demo; only the dates move.
 
 Three things the demo does for itself, none of them a visitor's doing. It sweeps the
-directory once at startup, because otherwise the tables stay blank until the small hours.
+directory once at startup (or as soon as a license is installed, if it started without
+one), because otherwise the tables stay blank until the small hours.
 It then runs the expiry round-up, because notifications are written when a sweep sees a
 certificate *change* state and on a first sweep nothing has changed — everything is simply
 new — which would leave the notifications page empty beside tables full of things expiring
@@ -2268,12 +2331,13 @@ docker/389ds/            389 Directory Server carrying the IC FSD schema and a c
 deploy/release/          what goes in a customer release bundle: production compose,
                          env.template, install.sh, upgrade.sh and the customer README
 scripts/                 the dummy directory generator, and release-bundle.sh
+src/main/java/com/enssolutions/license/   the ENS portal's license verifier, copied unchanged
 src/main/java/com/winllc/certalert/
 ├── alert/       notifier SPI, dispatcher, log and email channels
 ├── config/      expiry thresholds, clock, DataTables repository factory
 ├── domain/      DirectoryUser, DirectoryServer, CachedCertificate, ServerContact, AuditEvent
 ├── ldap/        attribute mapping, paged streaming directory client
-├── license/     the ENS license check, the licensed-feature list and the request gate
+├── license/     ENS license wiring: keys, feature catalog, request gate, the Licensing facade
 ├── repository/  DataTables repositories and the filter specifications
 ├── security/    X.509 and directory-password authentication, roles
 ├── scheduling/  the four cron jobs
@@ -2281,7 +2345,6 @@ src/main/java/com/winllc/certalert/
 └── web/         DataTables endpoints, REST API, page controllers
 src/main/resources/
 ├── db/migration/          Flyway migrations
-├── license/               the public key licenses are checked against
 ├── static/{css,js}/       a thin layer over Tabler, and the table wiring
 ├── templates/             Thymeleaf pages, Tabler layout and the icon sprite
 │                          two search pages, two details pages, login

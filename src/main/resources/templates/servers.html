@@ -79,7 +79,7 @@
                             <input type="date" id="latest-to" class="form-control" aria-label="to">
                         </div>
                     </div>
-                    <div class="col-12 col-md-auto">
+                    <div class="col-12 col-md-auto" th:if="${@licensing.shows('risky-names')}">
                         <!--/* A certificate is risky for what it is good for, not for what
                                state it is in: one key for a whole domain, or for forty
                                things, or for a name that means something different on
@@ -95,7 +95,7 @@
                             <option value="BARE_HOSTNAME">Bare hostname</option>
                         </select>
                     </div>
-                    <div class="col-12 col-md-auto" th:if="${@licenseService.isEnabled('projects')}">
+                    <div class="col-12 col-md-auto" th:if="${@licensing.shows('projects')}">
                         <label class="form-label" for="project-filter">Project</label>
                         <select id="project-filter" class="form-select">
                             <option value="">Any</option>

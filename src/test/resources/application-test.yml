@@ -21,12 +21,9 @@ cert-alert:
       # Tests drive the jobs explicitly; nothing should fire on a timer.
       enabled: false
 
-# A test license covering every feature, signed with the test key that
-# src/test/resources/license/ens-license-public.pem overrides the real one with. Relative to
-# the module directory, which is where Gradle runs the tests.
-ens:
-  license:
-    file: src/test/resources/license/test.lic
+# The license: TestLicenseConfiguration (src/test/java/.../support) replaces the
+# LicenseManager with one that trusts the ENS portal's published TEST key and installs a
+# full test license, in a temporary directory, for every context with this profile.
 
 logging:
   level:

@@ -1,49 +1,53 @@
 package com.winllc.certalert.license;
 
-import java.util.List;
-import java.util.Optional;
-
 /**
- * The features a license turns on. Everything not listed here is core and runs unlicensed:
- * the directory sync and refresh, the people and servers tables and pages, expiry status,
- * signing in, in-app notifications, the logging alert channel, the banner, the audit trail
- * and the administration page, server attributes and points of contact.
+ * Every CertAlert feature in the ENS licensing portal's catalog (products-page
+ * {@code src/data/licensing.ts}), by the id a license file lists it under, as
+ * {@code certalert.<id>}.
  *
- * <p>The one place the split is written down. Each feature names the addresses that belong
- * to it, which {@link LicenseInterceptor} refuses while the feature is not licensed; the
- * scheduled jobs, the alert channels and the templates ask {@link LicenseService} by id.
- * Moving a feature between core and licensed is an edit here and nowhere else - bar the
- * job or the button that belongs to it.
+ * <p>The license screen lists all of them, ticked or not. What each one gates is decided
+ * where the gated thing is: {@link RequiresFeature} on its endpoints, {@link Licensing} in
+ * its jobs, menus and buttons. Ids must never be renamed: licenses carrying them have been
+ * issued.
  */
 public enum LicensedFeature {
 
-    REVOCATION("revocation", "Revocation checking",
-            "/api/v1/revocation", "/api/v1/revocation/**"),
-    TLS_PROBE("tls-probe", "TLS endpoint probing",
-            "/api/v1/servers/*/probe"),
-    CHANGELOG("changelog", "Real-time changelog sync",
-            "/api/v1/changelog", "/api/v1/changelog/**"),
-    DIRECTORY_CLEANUP("directory-cleanup", "Directory cleanup",
-            "/api/v1/sync/prune", "/api/v1/sync/prune/**",
-            "/api/v1/sync/certificate-cleanup", "/api/v1/sync/certificate-cleanup/**"),
-    EMAIL_NOTIFICATIONS("email-notifications", "Email notifications",
-            "/api/v1/notifications/digest"),
-    PROJECTS("projects", "Projects",
-            "/projects", "/projects/**", "/api/v1/projects", "/api/v1/projects/**"),
+    DIRECTORY_SYNC("directory-sync", "Directory sweeps",
+            "Finds every certificate people and servers publish in the directory.", false),
+    CHANGELOG_SYNC("changelog-sync", "Changelog sync",
+            "Picks up directory changes within minutes from the changelog, between full sweeps.", false),
+    NOTIFICATIONS("notifications", "Email notifications",
+            "Warns points of contact by email, with digests and email alerts.", false),
     METRICS("metrics", "Metrics",
-            "/metrics", "/api/v1/metrics");
+            "Trends across the whole directory: expiry, issuing authorities, revocation.", false),
+    PROJECTS("projects", "Projects",
+            "Groups servers into projects with their own administrators.", false),
+    REVOCATION_CHECKS("revocation-checks", "Revocation checks",
+            "Checks every certificate against OCSP and CRLs.", false),
+    ENDPOINT_CHECKS("endpoint-checks", "Endpoint checks",
+            "Probes servers for the certificate they actually serve.", false),
+    RISKY_NAMES("risky-names", "Risk analysis",
+            "Flags certificates with risky names, keys and algorithms.", false),
+    DIRECTORY_CLEANUP("directory-cleanup", "Directory cleanup",
+            "Removes expired certificates and stale entries from the directory.", false),
+    CLASSIFICATION_BANNERS("classification-banners", "Classification banners",
+            "Configurable banners for classified networks.", false),
+    MULTI_DIRECTORY("multi-directory", "Multiple directories",
+            "Sweeps more than one directory or forest from one installation.", true);
 
     private final String id;
     private final String label;
-    private final List<String> paths;
+    private final String description;
+    private final boolean enterprise;
 
-    LicensedFeature(String id, String label, String... paths) {
+    LicensedFeature(String id, String label, String description, boolean enterprise) {
         this.id = id;
         this.label = label;
-        this.paths = List.of(paths);
+        this.description = description;
+        this.enterprise = enterprise;
     }
 
-    /** What a license file's {@code features} line calls it. */
+    /** The id after {@code certalert.} in a license file. */
     public String id() {
         return id;
     }
@@ -52,17 +56,22 @@ public enum LicensedFeature {
         return label;
     }
 
-    /** Path patterns, in {@code PathPattern} syntax, that belong to this feature. */
-    public List<String> paths() {
-        return paths;
+    public String description() {
+        return description;
     }
 
-    public static Optional<LicensedFeature> byId(String id) {
+    /** Only in the top size band, evaluations and pilots, or when ENS adds it to an order. */
+    public boolean enterprise() {
+        return enterprise;
+    }
+
+    /** The feature with this id, or the id itself as the label when the catalog has no such feature. */
+    public static String labelOf(String id) {
         for (LicensedFeature feature : values()) {
             if (feature.id.equals(id)) {
-                return Optional.of(feature);
+                return feature.label;
             }
         }
-        return Optional.empty();
+        return id;
     }
 }

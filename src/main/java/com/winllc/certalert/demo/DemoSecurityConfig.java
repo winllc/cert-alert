@@ -16,6 +16,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.authentication.AuthenticationProvider;
+import com.winllc.certalert.license.Licensing;
 import com.winllc.certalert.security.SignedInDirectoryUser;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.authorization.AuthorizationDecision;
@@ -98,7 +99,10 @@ public class DemoSecurityConfig {
 
     @Bean
     public SecurityFilterChain demoFilterChain(
-            HttpSecurity http, List<AuthenticationProvider> authenticationProviders, ObjectMapper json)
+            HttpSecurity http,
+            List<AuthenticationProvider> authenticationProviders,
+            ObjectMapper json,
+            Licensing licensing)
             throws Exception {
         log.warn("DEMO MODE: every account in this directory is published on the sign-in page with "
                 + "its password. Nothing can be changed, but everything the directory holds can be "
@@ -112,6 +116,16 @@ public class DemoSecurityConfig {
                         // The reads that are an administrator's, and the only place the
                         // roles differ once every write is refused anyway.
                         .requestMatchers("/admin", "/api/v1/audit/summary", "/actuator/**")
+                        .hasRole("ADMIN")
+                        // A demo needs a license like any installation. Its administrator
+                        // may install one while it has none in full effect - the one write a
+                        // demo allows, and only then: once licensed, the license screen is
+                        // as read-only as everything else, so a visitor cannot swap it.
+                        .requestMatchers(HttpMethod.POST, "/admin/license")
+                        .access((authentication, context) -> new AuthorizationDecision(
+                                SignedInDirectoryUser.isAdmin(authentication.get())
+                                        && !licensing.isFullyLicensed()))
+                        .requestMatchers("/admin/license", "/admin/license/**")
                         .hasRole("ADMIN")
                         // The search tables, which ask by POST and write nothing.
                         .requestMatchers(HttpMethod.POST, READ_ONLY_POSTS)

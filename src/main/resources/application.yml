@@ -108,13 +108,11 @@ management:
       probes:
         enabled: true
 
-# The ENS Solutions license file. Without a valid one the application runs its core
-# features only; see the README's Licensing section for what a license adds. Re-read when
-# it changes, so a renewal needs no restart. The production image sets ENS_LICENSE_FILE to
-# /etc/ens/license/license.lic.
-ens:
-  license:
-    file: ${ENS_LICENSE_FILE:license.lic}
+# The ENS Solutions license is not configured here. Where it is kept comes from the
+# environment - ENS_LICENSE_FILE (default /etc/ens/certalert.lic) and ENS_LICENSE_STATE_DIR
+# (default /var/lib/ens/certalert), which the container image points at its
+# /var/lib/ens/certalert volume - and the keys it is checked against are built in. See the
+# README's Licensing section.
 
 cert-alert:
   # The fixed bars across the top and bottom of every page - what an accredited network

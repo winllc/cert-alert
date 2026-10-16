@@ -46,7 +46,8 @@
         var riskFilter = document.getElementById('risk-filter');
         // Arriving from the metrics page with a kind of risk already chosen.
         var wantedRisk = new URLSearchParams(window.location.search).get('risk');
-        if (wantedRisk) {
+        // Absent where risk analysis is not licensed.
+        if (wantedRisk && riskFilter) {
             riskFilter.value = wantedRisk;
         }
         // A link may want something other than the default - the metrics page sends people
@@ -143,7 +144,7 @@
             if (contact) {
                 filters.poc = contact;
             }
-            if (riskFilter.value) {
+            if (riskFilter && riskFilter.value) {
                 filters.risk = riskFilter.value;
             }
             var project = ProjectFilter.selected();

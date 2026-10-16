@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<!--/*
+  Administration → License. What is installed and what it allows, this installation's id
+  (which a customer enters on the ENS portal to bind a license to it), how much of the
+  licensed size is in use, and the upload. Reachable whatever the license says: an
+  unlicensed or read-only installation sends its administrators here.
+*/-->
+<head th:replace="~{fragments/layout :: head('License')}"></head>
+<body>
+<svg th:replace="~{fragments/icons :: sprite}"></svg>
+
+<div class="page">
+    <header th:replace="~{fragments/layout :: navbar('admin')}"></header>
+
+    <div class="page-wrapper">
+        <div class="page-header d-print-none">
+            <div class="container-xl">
+                <div class="page-pretitle">Administration</div>
+                <h2 class="page-title">License</h2>
+                <div class="text-secondary mt-1">What this installation is licensed for, and installing a license</div>
+            </div>
+        </div>
+
+        <div class="page-body"
+             th:with="mode=${check.mode().name()}, state=${check.state().name()}, l=${check.license().orElse(null)}">
+            <div class="container-xl">
+                <div th:if="${notice}" class="alert alert-success" role="alert" id="license-notice" th:text="${notice}">
+                    License installed.</div>
+                <div th:if="${error}" class="alert alert-danger" role="alert" id="license-error" th:text="${error}">
+                    That license was not installed.</div>
+
+                <div class="row row-cards">
+                    <div class="col-12 col-lg-7">
+                        <div class="card mb-3" id="license-state">
+                            <div class="card-header">
+                                <h3 class="card-title">Installed license</h3>
+                                <div class="card-actions">
+                                    <span class="badge" th:text="${state}"
+                                          th:classappend="${mode == 'FULL'} ? (${state == 'GRACE'} ? 'bg-yellow-lt' : 'bg-green-lt')
+                                                          : (${mode == 'READ_ONLY'} ? 'bg-orange-lt' : 'bg-red-lt')">VALID</span>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <p class="mb-3" th:text="${check.message()}">Licensed to Example Agency until 2027-10-14.</p>
+                                <p class="text-secondary mb-0" th:if="${mode == 'UNLICENSED'}">
+                                    Until a license is installed, only signing in and this screen work.
+                                </p>
+                                <p class="text-secondary mb-0" th:if="${mode == 'READ_ONLY'}">
+                                    Everything stays readable, but nothing can be changed, and the directory
+                                    sweeps, scheduled jobs and email notifications are paused.
+                                </p>
+                            </div>
+                            <table class="table card-table table-vcenter" th:if="${l != null}">
+                                <tbody>
+                                <tr><th class="w-33">Licensee</th><td th:text="${l.licensee()}">Pat Rivera, Example Agency</td></tr>
+                                <tr><th>Edition</th><td class="text-capitalize" th:text="${l.edition()}">subscription</td></tr>
+                                <tr><th>License</th>
+                                    <td class="mono" th:text="${l.id()} + ' (revision ' + ${l.revision()} + ')'">lic_1 (revision 3)</td></tr>
+                                <tr><th>Valid from</th><td th:text="${#strings.substring(l.notBefore().toString(), 0, 10)}">2026-10-14</td></tr>
+                                <tr><th>Expires</th>
+                                    <td>
+                                        <span th:if="${l.expiresAt().isPresent()}"
+                                              th:text="${#strings.substring(l.expiresAt().get().toString(), 0, 10)}">2027-10-14</span>
+                                        <span th:unless="${l.expiresAt().isPresent()}">Never (perpetual)</span>
+                                        <span class="text-secondary" th:if="${check.daysLeft().isPresent()}"
+                                              th:text="' · ' + ${check.daysLeft().get()} + ' day(s) left'"> · 300 day(s) left</span>
+                                    </td></tr>
+                                <tr th:if="${l.expiresAt().isPresent()}"><th>Grace period</th>
+                                    <td th:text="${l.graceDays()} + ' day(s) of full use after expiry'">30 days</td></tr>
+                                <tr th:if="${l.maintenanceUntil().isPresent()}"><th>Maintenance until</th>
+                                    <td th:text="${#strings.substring(l.maintenanceUntil().get().toString(), 0, 10)}">2027-10-14</td></tr>
+                                <tr th:if="${l.installationId().isPresent()}"><th>Bound to</th>
+                                    <td class="mono" th:text="${l.installationId().get()}">CA-0000-0000</td></tr>
+                                <tr><th>Size</th>
+                                    <td th:text="${l.limitQuantity()} + ' ' + ${l.limitUnit()}">2500 directory users</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div class="card mb-3" id="license-features">
+                            <div class="card-header">
+                                <h3 class="card-title">Features</h3>
+                            </div>
+                            <table class="table card-table table-vcenter">
+                                <tbody>
+                                <tr th:each="feature : ${features}" th:attr="data-feature=${feature.id()}">
+                                    <td class="w-1">
+                                        <span th:if="${feature.included()}" class="text-green" title="Included">&#10003;</span>
+                                        <span th:unless="${feature.included()}" class="text-secondary" title="Not included">&ndash;</span>
+                                    </td>
+                                    <td>
+                                        <div>
+                                            <span th:text="${feature.label()}">Revocation checks</span>
+                                            <span th:if="${feature.enterprise()}" class="badge bg-purple-lt ms-1">Enterprise</span>
+                                        </div>
+                                        <div class="text-secondary small" th:text="${feature.description()}">
+                                            Checks every certificate against OCSP and CRLs.</div>
+                                        <div class="text-secondary small" th:if="${feature.id() == 'multi-directory'}">
+                                            Not yet available in this release.</div>
+                                    </td>
+                                    <td class="text-end"><span class="mono small text-secondary" th:text="${feature.id()}">revocation-checks</span></td>
+                                </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="col-12 col-lg-5">
+                        <div class="card mb-3" id="license-installation">
+                            <div class="card-header">
+                                <h3 class="card-title">Installation id</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="input-group mb-2">
+                                    <input type="text" class="form-control mono" id="installation-id" readonly
+                                           th:value="${installationId}" value="CA-0000-0000" aria-label="Installation id">
+                                    <button type="button" class="btn" id="installation-id-copy">Copy</button>
+                                </div>
+                                <p class="text-secondary small mb-0">
+                                    Enter this on the ENS licensing portal to bind a license to this installation.
+                                    A bound license works here and nowhere else. The id is kept with the license,
+                                    in the same persistent directory.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="card mb-3" id="license-usage">
+                            <div class="card-header">
+                                <h3 class="card-title">Usage</h3>
+                            </div>
+                            <div class="card-body">
+                                <p class="mb-1" th:text="${usageMessage}">1200 of 2500 directory users.</p>
+                                <p class="text-secondary small mb-0">
+                                    People in the directory cache. Up to 10% over the licensed size is allowed,
+                                    with a warning; beyond that, sweeps stop adding new people until the license is
+                                    updated. Nobody already here is removed.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="card mb-3" id="license-upload">
+                            <div class="card-header">
+                                <h3 class="card-title">Install a license</h3>
+                            </div>
+                            <div class="card-body">
+                                <form method="post" th:action="@{/admin/license}" enctype="multipart/form-data">
+                                    <div class="mb-3">
+                                        <label class="form-label" for="license-file">License file</label>
+                                        <input type="file" class="form-control" id="license-file" name="file" accept=".lic,text/plain">
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label" for="license-text">or paste it</label>
+                                        <textarea class="form-control mono" id="license-text" name="text" rows="4"
+                                                  placeholder="-----BEGIN ENS LICENSE-----"></textarea>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary">Install</button>
+                                </form>
+                                <p class="text-secondary small mt-3 mb-0">
+                                    Licenses come from the ENS licensing portal: an evaluation, or the license issued
+                                    against your order. A file for another product, bound to another installation, or
+                                    older than one already installed here is refused, and the installed license stays.
+                                    It is kept at <span class="mono" th:text="${licenseFile}">/var/lib/ens/certalert/license.lic</span>.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div th:replace="~{fragments/layout :: scripts}"></div>
+<script th:src="@{/js/license.js}"></script>
+</body>
+</html>

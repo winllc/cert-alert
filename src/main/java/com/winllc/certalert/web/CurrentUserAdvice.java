@@ -2,7 +2,8 @@ package com.winllc.certalert.web;
 
 import com.winllc.certalert.demo.DemoAccounts;
 import com.winllc.certalert.demo.DemoProperties;
-import com.winllc.certalert.license.LicenseService;
+import com.enssolutions.license.LicenseCheck;
+import com.winllc.certalert.license.Licensing;
 import com.winllc.certalert.security.DirectoryPrincipal;
 import com.winllc.certalert.security.DirectoryPrincipalResolver;
 import java.util.List;
@@ -23,22 +24,24 @@ import org.springframework.web.bind.annotation.ModelAttribute;
  * handlers call these methods directly: model attributes from an advice are not applied
  * when one runs, so nothing here would reach those pages otherwise.
  *
- * <p>The license status rides along for the same reason: the bar hides what the license
- * does not cover, and the administration page says what it does.
+ * <p>The license check rides along for the same reason: the bar hides what the license
+ * does not include, and carries the evaluation banner and the renewal warning.
  */
-@ControllerAdvice(assignableTypes = {ViewController.class, BasicErrorController.class})
+@ControllerAdvice(assignableTypes = {
+    ViewController.class, LicenseScreenController.class, BasicErrorController.class
+})
 public class CurrentUserAdvice {
 
-    private final LicenseService licenseService;
+    private final Licensing licensing;
     private final DemoProperties demoProperties;
     /** Absent unless this is a demo, which is the only thing that offers accounts. */
     private final ObjectProvider<DemoAccounts> demoAccounts;
 
     public CurrentUserAdvice(
-            LicenseService licenseService,
+            Licensing licensing,
             DemoProperties demoProperties,
             ObjectProvider<DemoAccounts> demoAccounts) {
-        this.licenseService = licenseService;
+        this.licensing = licensing;
         this.demoProperties = demoProperties;
         this.demoAccounts = demoAccounts;
     }
@@ -93,7 +96,7 @@ public class CurrentUserAdvice {
     }
 
     @ModelAttribute("license")
-    public LicenseService.Status license() {
-        return licenseService.status();
+    public LicenseCheck license() {
+        return licensing.current();
     }
 }

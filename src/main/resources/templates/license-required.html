@@ -1,8 +1,9 @@
 <!DOCTYPE html>
 <html lang="en" xmlns:th="http://www.thymeleaf.org">
 <!--/*
-  A licensed feature this deployment's license does not cover. Reached by following an old
-  link or a bookmark: the bar does not offer what the license leaves out.
+  Something the license does not allow, for a browser: a feature the license does not
+  include (reached by an old link or a bookmark - the bar does not offer it), or a change
+  while the license is read-only. A script gets the same refusal as problem detail.
 */-->
 <head th:replace="~{fragments/layout :: head('License required')}"></head>
 <body>
@@ -15,13 +16,18 @@
             <div class="container-xl">
                 <div class="empty">
                     <div class="empty-header">403</div>
-                    <p class="empty-title" th:text="(${feature} ?: 'This feature') + ' needs a license'">
-                        Metrics needs a license</p>
+                    <p class="empty-title" th:if="${refusal == 'FEATURE'}"
+                       th:text="${feature} + ' is not included in the license'">Metrics is not included in the license</p>
+                    <p class="empty-title" th:if="${refusal == 'READ_ONLY'}">The application is read-only</p>
+                    <p class="empty-title" th:if="${refusal == 'UNLICENSED'}">This application is not licensed</p>
                     <p class="empty-subtitle text-secondary" th:text="${message}">
-                        Metrics requires an ENS Solutions license.</p>
-                    <p class="empty-subtitle text-secondary">
-                        Everything else here works without one. An administrator can install a license
-                        file; it is picked up within a minute, without a restart.
+                        Metrics is not included in this installation's license.</p>
+                    <p class="empty-subtitle text-secondary" th:if="${isAdmin}">
+                        A license that includes it can be installed on the
+                        <a th:href="@{/admin/license}">license screen</a>; it takes effect at once.
+                    </p>
+                    <p class="empty-subtitle text-secondary" th:unless="${isAdmin}">
+                        Ask an administrator if you need it.
                     </p>
                     <div class="empty-action">
                         <a th:href="@{/users}" class="btn btn-primary">Back to the directory</a>

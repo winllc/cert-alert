@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<!--/*
+  What anybody but an administrator sees while the application is not licensed. Plain on
+  purpose: there is nothing they can do here but ask, and sign out.
+*/-->
+<head th:replace="~{fragments/layout :: head('Not licensed')}"></head>
+<body class="d-flex flex-column bg-surface-secondary">
+<svg th:replace="~{fragments/icons :: sprite}"></svg>
+
+<div class="page page-center">
+    <div class="container container-tight py-4">
+        <div class="text-center mb-4">
+            <img th:src="@{/img/logo.png}" alt="CertAlert" class="logo logo-lg">
+        </div>
+        <div class="card card-md">
+            <div class="card-body text-center">
+                <h2 class="h3 mb-3">This application is not licensed</h2>
+                <p class="text-secondary">
+                    CertAlert needs a license before it can be used. Ask your administrator to
+                    install one.
+                </p>
+                <form method="post" th:action="@{/logout}">
+                    <button type="submit" class="btn">
+                        <svg class="icon me-2"><use href="#icon-logout"></use></svg>
+                        Sign out
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>

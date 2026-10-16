@@ -7,16 +7,21 @@ import static org.springframework.security.test.web.servlet.response.SecurityMoc
 import static org.springframework.security.test.web.servlet.response.SecurityMockMvcResultMatchers.unauthenticated;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.flash;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.forwardedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.unboundid.ldap.sdk.Entry;
+import com.enssolutions.license.LicenseManager;
+import com.enssolutions.license.LicenseState;
 import com.winllc.certalert.security.SecurityConfig;
+import com.winllc.certalert.support.TestLicenses;
 import com.winllc.certalert.service.DirectorySyncService;
 import com.winllc.certalert.support.EmbeddedDirectory;
 import com.winllc.certalert.support.TestCertificates;
@@ -32,6 +37,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpSession;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -85,6 +91,9 @@ class DemoModeTest {
 
     @Autowired
     private com.winllc.certalert.security.SecurityProperties properties;
+
+    @Autowired
+    private LicenseManager licenses;
 
     private MockMvc mockMvc;
     private MockHttpSession admin;
@@ -395,5 +404,48 @@ class DemoModeTest {
                  "order":[{"column":0,"dir":"asc"}],
                  "search":{"value":"","regex":false}}"""
                 .formatted(column);
+    }
+
+    // --- the license -------------------------------------------------------------------
+
+    /**
+     * A demo needs a license like any installation. Without one its administrator is sent
+     * to the license screen, and may install one there - the one change a demo accepts.
+     */
+    @Test
+    void anUnlicensedDemosAdministratorMayInstallALicense() throws Exception {
+        TestLicenses.uninstall(licenses);
+        try {
+            mockMvc.perform(get("/users").session(admin).accept(MediaType.TEXT_HTML))
+                    .andExpect(status().is3xxRedirection())
+                    .andExpect(redirectedUrl("/admin/license"));
+            mockMvc.perform(get("/admin/license").session(admin)).andExpect(status().isOk());
+
+            mockMvc.perform(multipart("/admin/license").file(licenseFile()).session(reader).with(csrf()))
+                    .andExpect(status().isForbidden());
+            mockMvc.perform(multipart("/admin/license").file(licenseFile()).session(admin).with(csrf()))
+                    .andExpect(status().is3xxRedirection())
+                    .andExpect(flash().attributeExists("notice"));
+            assertThat(licenses.current().state()).isEqualTo(LicenseState.VALID);
+        } finally {
+            TestLicenses.restoreFull(licenses);
+        }
+    }
+
+    /** Once licensed, the license screen is as read-only as the rest: nobody can swap it. */
+    @Test
+    void aLicensedDemosLicenseCannotBeReplaced() throws Exception {
+        String installed = licenses.current().license().orElseThrow().id();
+
+        mockMvc.perform(get("/admin/license").session(admin)).andExpect(status().isOk());
+        mockMvc.perform(multipart("/admin/license").file(licenseFile()).session(admin).with(csrf()))
+                .andExpect(status().isForbidden());
+
+        assertThat(licenses.current().license().orElseThrow().id()).isEqualTo(installed);
+    }
+
+    private static MockMultipartFile licenseFile() {
+        return new MockMultipartFile("file", "license.lic", "text/plain",
+                TestLicenses.full().getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 }

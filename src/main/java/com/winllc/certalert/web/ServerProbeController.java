@@ -1,5 +1,6 @@
 package com.winllc.certalert.web;
 
+import com.winllc.certalert.license.RequiresFeature;
 import com.winllc.certalert.security.DirectoryPrincipal;
 import com.winllc.certalert.security.ServerAccessPolicy;
 import com.winllc.certalert.service.ServerProbeService;
@@ -40,6 +41,7 @@ public class ServerProbeController {
         this.accessPolicy = accessPolicy;
     }
 
+    @RequiresFeature("endpoint-checks")
     @PostMapping("/servers/{id}/probe")
     public ProbeView probe(
             @PathVariable Long id,

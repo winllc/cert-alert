@@ -1,5 +1,8 @@
 package com.winllc.certalert.web;
 
+import com.winllc.certalert.domain.CachedCertificate;
+import com.winllc.certalert.license.Licensing;
+import com.winllc.certalert.license.RequiresFeature;
 import com.winllc.certalert.domain.DirectoryServer;
 import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.repository.DirectoryServerRepository;
@@ -51,6 +54,7 @@ public class DirectoryApiController {
     private final ChangelogProperties changelogProperties;
     // Absent unless the changelog connector is enabled.
     private final Optional<ChangelogConnector> connector;
+    private final Licensing licensing;
 
     public DirectoryApiController(
             DirectorySyncService syncService,
@@ -62,7 +66,8 @@ public class DirectoryApiController {
             SyncRunRepository syncRunRepository,
             ChangelogCursorStore cursorStore,
             ChangelogProperties changelogProperties,
-            Optional<ChangelogConnector> connector) {
+            Optional<ChangelogConnector> connector,
+            Licensing licensing) {
         this.syncService = syncService;
         this.refreshService = refreshService;
         this.pruneService = pruneService;
@@ -73,21 +78,25 @@ public class DirectoryApiController {
         this.cursorStore = cursorStore;
         this.changelogProperties = changelogProperties;
         this.connector = connector;
+        this.licensing = licensing;
     }
 
     /** Scrapes IC Persons now, rather than waiting for the schedule. */
+    @RequiresFeature("directory-sync")
     @PostMapping("/sync/users")
     public SyncResponse syncUsers() {
         return SyncResponse.from(syncService.syncUsers());
     }
 
     /** Scrapes IC Non-Person Entities now. */
+    @RequiresFeature("directory-sync")
     @PostMapping("/sync/servers")
     public SyncResponse syncServers() {
         return SyncResponse.from(syncService.syncServers());
     }
 
     /** Runs both sweeps, in the order the schedule would. */
+    @RequiresFeature("directory-sync")
     @PostMapping("/sync")
     public List<SyncResponse> sync() {
         return List.of(
@@ -95,18 +104,21 @@ public class DirectoryApiController {
     }
 
     /** Re-evaluates cached expiry without reading the directory. */
+    @RequiresFeature("directory-sync")
     @PostMapping("/sync/refresh")
     public SyncResponse refresh() {
         return SyncResponse.from(refreshService.refresh());
     }
 
     /** Removes entries the directory has stopped publishing. */
+    @RequiresFeature("directory-cleanup")
     @PostMapping("/sync/prune")
     public SyncResponse prune() {
         return SyncResponse.from(pruneService.prune());
     }
 
     /** How many entries the next prune would remove, for checking before enabling it. */
+    @RequiresFeature("directory-cleanup")
     @GetMapping("/sync/prune/preview")
     public Map<String, Long> prunePreview() {
         return Map.of("prunable", pruneService.countPrunable());
@@ -119,12 +131,14 @@ public class DirectoryApiController {
      * set: running it by hand is bringing a scheduled job forward, not a way around the
      * switch that says this deployment permits writing to the directory.
      */
+    @RequiresFeature("directory-cleanup")
     @PostMapping("/sync/certificate-cleanup")
     public CertificateCleanupService.Result cleanUpCertificates() {
         return cleanupService.run();
     }
 
     /** What that would remove, without removing it. */
+    @RequiresFeature("directory-cleanup")
     @GetMapping("/sync/certificate-cleanup/preview")
     public CertificateCleanupService.Preview certificateCleanupPreview() {
         return cleanupService.preview();
@@ -141,6 +155,7 @@ public class DirectoryApiController {
     }
 
     /** Where the changelog connector has got to, and how far behind the directory it is. */
+    @RequiresFeature("changelog-sync")
     @GetMapping("/changelog")
     public ChangelogStatus changelog() {
         // Read from configuration, not from whether a bean happens to exist: the cursor
@@ -160,6 +175,7 @@ public class DirectoryApiController {
      * <p>Useful when the loop is deliberately not auto-started, and for confirming the
      * connector can reach the changelog at all without waiting out an interval.
      */
+    @RequiresFeature("changelog-sync")
     @PostMapping("/changelog/poll")
     public ChangelogStatus pollChangelog() {
         connector.ifPresent(ChangelogConnector::pollOnce);
@@ -184,7 +200,7 @@ public class DirectoryApiController {
     public List<CachedCertificateRow> userCertificates(@PathVariable Long id) {
         DirectoryUser user =
                 userRepository.findWithCertificatesById(id).orElseThrow(() -> ResourceNotFoundException.user(id));
-        return user.getCertificates().stream().map(CachedCertificateRow::from).toList();
+        return rows(user.getCertificates());
     }
 
     @GetMapping("/servers/{id}/certificates")
@@ -192,6 +208,15 @@ public class DirectoryApiController {
     public List<CachedCertificateRow> serverCertificates(@PathVariable Long id) {
         DirectoryServer server =
                 serverRepository.findWithCertificatesById(id).orElseThrow(() -> ResourceNotFoundException.server(id));
-        return server.getCertificates().stream().map(CachedCertificateRow::from).toList();
+        return rows(server.getCertificates());
+    }
+
+    /** Risk flags are shown only where risk analysis is licensed. */
+    private List<CachedCertificateRow> rows(List<CachedCertificate> certificates) {
+        boolean risks = licensing.shows("risky-names");
+        return certificates.stream()
+                .map(CachedCertificateRow::from)
+                .map(row -> risks ? row : row.withoutRisks())
+                .toList();
     }
 }

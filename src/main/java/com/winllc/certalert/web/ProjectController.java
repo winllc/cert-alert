@@ -1,5 +1,6 @@
 package com.winllc.certalert.web;
 
+import com.winllc.certalert.license.RequiresFeature;
 import com.winllc.certalert.domain.Project;
 import com.winllc.certalert.repository.ProjectRepository;
 import com.winllc.certalert.security.DirectoryPrincipal;
@@ -24,6 +25,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 /** Creating projects and saying who and what is in them. */
+@RequiresFeature("projects")
 @RestController
 @RequestMapping("/api/v1/projects")
 public class ProjectController {
