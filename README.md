@@ -2139,7 +2139,7 @@ CertAlert keeps a complete, tamper-evident audit trail in the format every ENS p
 SHA-256, so an edited or deleted record shows. Administrators search, inspect, export and
 verify it at **`/admin/audit`**; Splunk or any SIEM receives it over HEC or syslog, pulls it
 from an API, or reads it from stdout or a file. The full format and the Splunk set-up are on
-the documentation site: [audit-logging.md](audit-logging.md).
+the documentation site: [audit-logging.md](https://github.com/winllc/ens-apps-documentation/blob/master/docs/audit-logging.md).
 
 ```json
 {"schema":"ens-audit/1","id":"…","seq":1234,"time":"2026-10-16T02:10:11.123Z","product":"certalert",
