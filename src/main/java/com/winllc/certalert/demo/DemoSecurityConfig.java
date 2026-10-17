@@ -19,6 +19,7 @@ import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.authentication.AuthenticationProvider;
 import com.winllc.certalert.license.Licensing;
+import com.winllc.certalert.observability.ManagementEndpoints;
 import com.winllc.certalert.security.ConsentBanner;
 import com.winllc.certalert.security.ConsentFilter;
 import com.winllc.certalert.security.EnsSecurityProperties;
@@ -116,7 +117,8 @@ public class DemoSecurityConfig {
             AccessDenials denials,
             EnsSecurityProperties ens,
             ConsentBanner consentBanner,
-            SessionPolicy sessionPolicy)
+            SessionPolicy sessionPolicy,
+            org.springframework.core.env.Environment environment)
             throws Exception {
         log.warn("DEMO MODE: every account in this directory is published on the sign-in page with "
                 + "its password. Nothing can be changed, but everything the directory holds can be "
@@ -129,10 +131,12 @@ public class DemoSecurityConfig {
         http.authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(PUBLIC_PATHS)
                         .permitAll()
-                        .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info")
+                        .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info", "/livez", "/readyz")
                         .permitAll()
                         // The reads that are an administrator's, and the only place the
                         // roles differ once every write is refused anyway.
+                        .requestMatchers(ManagementEndpoints.prometheusScrape(environment))
+                        .permitAll()
                         .requestMatchers("/admin", "/api/v1/audit/summary", "/actuator/**")
                         .hasRole("ADMIN")
                         // The audit log page and its reads, and verifying the trail - which

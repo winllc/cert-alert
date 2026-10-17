@@ -6,17 +6,21 @@ import java.util.Map;
 import com.winllc.certalert.audit.AccessDenials;
 import com.winllc.certalert.audit.AuditingAccessDeniedHandler;
 import com.winllc.certalert.demo.DemoMode;
+import com.winllc.certalert.observability.ManagementEndpoints;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationEventPublisher;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.DefaultAuthenticationEventPublisher;
+import org.springframework.security.authentication.InternalAuthenticationServiceException;
 import org.springframework.security.authentication.event.AuthenticationFailureBadCredentialsEvent;
+import org.springframework.security.authentication.event.AuthenticationFailureServiceExceptionEvent;
 import org.springframework.security.authorization.AuthenticatedAuthorizationManager;
 import org.springframework.security.authorization.AuthorityAuthorizationManager;
 import org.springframework.security.authorization.AuthorizationManager;
@@ -85,7 +89,8 @@ public class SecurityConfig {
             SessionPolicy sessionPolicy,
             EnsX509Properties x509,
             ForwardedCertificates forwardedCertificates,
-            AuthenticationEventPublisher authenticationEvents)
+            AuthenticationEventPublisher authenticationEvents,
+            Environment environment)
             throws Exception {
 
         SecurityHeaders.apply(http, ens.getCsp().isReportOnly());
@@ -104,7 +109,11 @@ public class SecurityConfig {
                 .permitAll()
                 // Liveness has to answer before anyone signs in; everything else the
                 // management endpoints expose is for administrators.
-                .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info")
+                .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info", "/livez", "/readyz")
+                .permitAll()
+                // Metrics, on the management port only, for the scraper - the port the
+                // ingress never publishes.
+                .requestMatchers(ManagementEndpoints.prometheusScrape(environment))
                 .permitAll()
                 .requestMatchers("/actuator/**")
                 .hasRole("ADMIN")
@@ -207,17 +216,19 @@ public class SecurityConfig {
     }
 
     /**
-     * Spring Boot's publisher, plus the one failure of ours it would otherwise not publish.
+     * Spring Boot's publisher, plus the failures it would otherwise not publish.
      *
      * <p>It maps exceptions to failure events by exact class, and has no event for one it
      * does not know - so a revoked or expired certificate being refused would leave no
-     * {@code auth.login} failure in the audit trail at all.
+     * {@code auth.login} failure in the audit trail at all, and neither would a password
+     * sign-in the directory could not be reached to check.
      */
     @Bean
     public DefaultAuthenticationEventPublisher authenticationEventPublisher(ApplicationEventPublisher publisher) {
         DefaultAuthenticationEventPublisher events = new DefaultAuthenticationEventPublisher(publisher);
-        events.setAdditionalExceptionMappings(
-                Map.of(RefusedCertificateException.class, AuthenticationFailureBadCredentialsEvent.class));
+        events.setAdditionalExceptionMappings(Map.of(
+                RefusedCertificateException.class, AuthenticationFailureBadCredentialsEvent.class,
+                InternalAuthenticationServiceException.class, AuthenticationFailureServiceExceptionEvent.class));
         return events;
     }
 

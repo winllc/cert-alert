@@ -28,7 +28,11 @@ import org.springframework.test.context.ActiveProfiles;
  * <p>Run with a limit of three so a handful of rows stands in for a directory publishing
  * tens of thousands of old certificates.
  */
-@SpringBootTest(properties = "cert-alert.notifications.digest.scan-limit=" + NotificationDigestScanTest.LIMIT)
+@SpringBootTest(properties = {
+    "cert-alert.notifications.digest.scan-limit=" + NotificationDigestScanTest.LIMIT,
+    // Spring Boot's tests record no metrics unless asked; ens_certalert_digest_truncated_total is.
+    "management.defaults.metrics.export.enabled=true"
+})
 @ActiveProfiles("test")
 @ExtendWith(OutputCaptureExtension.class)
 class NotificationDigestScanTest {
@@ -37,6 +41,9 @@ class NotificationDigestScanTest {
 
     @Autowired
     private NotificationService notificationService;
+
+    @Autowired
+    private io.micrometer.core.instrument.MeterRegistry meters;
 
     @Autowired
     private NotificationRepository notifications;
@@ -77,7 +84,10 @@ class NotificationDigestScanTest {
                 CertificateStatus.EXPIRING_SOON));
         save(soon);
 
+        double truncatedBefore = truncated();
         notificationService.digest();
+        // Stopping at the limit is counted, for an alert on it.
+        org.assertj.core.api.Assertions.assertThat(truncated()).isEqualTo(truncatedBefore + 1);
 
         assertThat(addressedTo("soon@example.gov")).hasSize(1);
         // The most recently expired are the ones kept; the longest gone are left out.
@@ -174,5 +184,10 @@ class NotificationDigestScanTest {
                 now);
         certificate.updateStatus(status, now);
         return certificate;
+    }
+
+    private double truncated() {
+        io.micrometer.core.instrument.Counter counter = meters.find("ens.certalert.digest.truncated").counter();
+        return counter == null ? 0 : counter.count();
     }
 }

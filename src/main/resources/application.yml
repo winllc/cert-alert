@@ -131,11 +131,16 @@ server:
     trust-store-password: ${CERT_ALERT_TRUSTSTORE_PASSWORD:}
     trust-store-type: ${CERT_ALERT_TRUSTSTORE_TYPE:PKCS12}
 
+# The actuator. On the application's own port: health (open), info (open), metrics and
+# loggers (administrators) - as before. Set MANAGEMENT_SERVER_PORT (e.g. 9090) to move the
+# actuator to a port of its own, which is never published: there health and Prometheus
+# (/actuator/prometheus) are open without signing in, and Prometheus is served nowhere else.
+# /livez and /readyz stay on the application's port either way.
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,loggers
+        include: health,info,metrics,loggers,prometheus
   endpoint:
     health:
       show-details: when-authorized
@@ -145,6 +150,19 @@ management:
       # perfectly well.
       probes:
         enabled: true
+        # /livez and /readyz on the application's port, also when the actuator has its own.
+        add-additional-paths: true
+      group:
+        # The process itself, nothing it talks to.
+        liveness:
+          include: livenessState
+        # What it cannot serve without: the database, and an audit log it can write (a
+        # sign-in that cannot be audited is refused). Not the directory: everything here
+        # is served from the cache and certificates sign in from it, so a directory outage
+        # is a reason to page somebody, not to stop serving. Add ldap here
+        # (MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE) to make it one.
+        readiness:
+          include: readinessState,db,auditLog
 
 # The ENS Solutions license is not configured here. Where it is kept comes from the
 # environment - ENS_LICENSE_FILE (default /etc/ens/certalert.lic) and ENS_LICENSE_STATE_DIR

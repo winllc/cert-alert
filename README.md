@@ -663,6 +663,44 @@ element and put what follows into the page as markup.
 One trade-off worth knowing: generated content is announced by screen readers but is not
 selectable text, so the marking cannot be copied out of the page.
 
+## Metrics, health and logs
+
+The ENS platform baseline:
+
+- **Prometheus** at `/actuator/prometheus`, **only on the management port**: set
+  `MANAGEMENT_SERVER_PORT` (e.g. `9090`, Spring Boot's own setting) and the actuator moves to
+  that port, where health and Prometheus are open without signing in — so never publish it
+  beyond your monitoring network. Unset (the default), Prometheus is not served at all, and the
+  application's port keeps the actuator exactly as before (`health` and `info` open, `metrics`
+  and `loggers` for administrators). `/livez` and `/readyz` stay on the application's port
+  either way. The Helm chart sets the port (`metrics.enabled`, default on, port `9090`) and
+  points its probes at it.
+- **Health**: `/actuator/health/liveness` is the process alone; `/actuator/health/readiness`
+  is the database and the audit log being writable (`auditLog`: the `ENS_AUDIT_FILE` output,
+  when set). The directory is deliberately not in readiness — everything is served from the
+  cache, and certificates sign in from it — add `ldap` with
+  `MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE=readinessState,db,auditLog,ldap` to make it
+  one. Details are shown only to administrators.
+- **Business metrics** (Prometheus names):
+
+| Metric | Type | |
+|---|---|---|
+| `ens_license_mode{mode}` | gauge | 1 for the current mode: `FULL`, `READ_ONLY`, `UNLICENSED` |
+| `ens_license_days_remaining` | gauge | Days until the license expires (or its grace ends); NaN for a perpetual one |
+| `ens_audit_events_total{category,outcome}` | counter | Events written to the audit trail |
+| `ens_audit_forward_failures_total{output}` | counter | Failed attempts to forward them (`splunk`, `syslog`) |
+| `ens_auth_attempts_total{method,outcome}` | counter | Sign-ins and refusals: `x509` (once per session) or `ldap`, `success` or `failure` |
+| `ens_certalert_certificates{status}` | gauge | Cached certificates by state: `none`, `valid`, `expiring_soon`, `expired` |
+| `ens_certalert_job_last_success_seconds{job}` | gauge | When each job last finished without failing (Unix time), since startup |
+| `ens_certalert_digest_truncated_total` | counter | Round-ups that stopped at `cert-alert.notifications.digest.scan-limit` |
+| `ens_certalert_revocation_unknown` | gauge | Cached certificates whose authority gave no revocation answer |
+| `ens_certalert_mail_outbox{state}` | gauge | Email `pending` in the outbox, and `failed` (given up on) |
+
+  The counts are read from the database at most once a minute.
+- **Logs**: `LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs` (Spring Boot's own setting) writes the
+  application log as one ECS JSON object per line. The Helm chart does so by default
+  (`logFormat: json`). The audit trail's stdout lines are raw `ens-audit/1` JSON either way.
+
 ## Security headers, cookies and TLS
 
 The ENS platform baseline, the same in every ENS product:

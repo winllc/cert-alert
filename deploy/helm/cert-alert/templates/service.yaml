@@ -31,5 +31,12 @@ spec:
       {{- if and (has .Values.service.type (list "LoadBalancer" "NodePort")) .Values.service.nodePort }}
       nodePort: {{ .Values.service.nodePort }}
       {{- end }}
+    {{- if .Values.metrics.enabled }}
+    # The actuator, for Prometheus. The ingress and route never send traffic here.
+    - name: metrics
+      port: {{ .Values.metrics.port }}
+      targetPort: metrics
+      protocol: TCP
+    {{- end }}
   selector:
     {{- include "cert-alert.selectorLabels" . | nindent 4 }}

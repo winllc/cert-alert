@@ -190,6 +190,16 @@ A release without audit logging ignores these variables.
 | `extraEnvFrom` | `[]` | e.g. `[{secretRef: {name: cert-alert-extra}}]` |
 | `extraVolumes`, `extraVolumeMounts` | `[]` | |
 
+### Metrics and logs
+
+| Value | Default | Environment | Description |
+|---|---|---|---|
+| `metrics.enabled` | `true` | `MANAGEMENT_SERVER_PORT` | The actuator on its own port (plain HTTP), with health and `/actuator/prometheus` open there; the probes use it and the Service gets a `metrics` port. The ingress and route never route to it |
+| `metrics.port` | `9090` | | |
+| `metrics.serviceMonitor.enabled` | `false` | | Renders a `monitoring.coreos.com/v1` ServiceMonitor; `.interval`, `.scrapeTimeout`, `.labels` |
+| `metrics.allowFrom` | `[]` | | With `networkPolicy.enabled`, the peers admitted to the metrics port |
+| `logFormat` | `json` | `LOGGING_STRUCTURED_FORMAT_CONSOLE` | `json` (ECS) or `text` |
+
 ### Networking
 
 | Value | Default | Description |

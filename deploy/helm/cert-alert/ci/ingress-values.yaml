@@ -1,5 +1,6 @@
 # Behind ingress-nginx with TLS at the ingress (password sign-in), mail, banner, audit to
-# Splunk and syslog with a persisted audit file, and a NetworkPolicy.
+# Splunk and syslog with a persisted audit file, a Prometheus Operator ServiceMonitor, and a
+# NetworkPolicy that admits the monitoring namespace to the metrics port.
 ldap:
   url: ldaps://directory.example.gov:636
   base: dc=example,dc=gov
@@ -74,6 +75,16 @@ ingress:
   tls:
     - secretName: cert-alert-tls
       hosts: [cert-alert.example.gov]
+metrics:
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: kube-prometheus-stack
+  allowFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+logFormat: text
 networkPolicy:
   enabled: true
   ingress:

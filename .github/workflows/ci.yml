@@ -81,8 +81,12 @@ jobs:
             # renders one, so only it may skip missing schemas.
             extra=()
             case "$values" in *openshift*) extra=(-ignore-missing-schemas) ;; esac
+            # ServiceMonitor (Prometheus Operator) is validated against the CRDs catalog.
             helm template cert-alert "$CHART" -f "$values" \
-              | kubeconform -strict -summary -kubernetes-version 1.29.0 "${extra[@]}"
+              | kubeconform -strict -summary -kubernetes-version 1.29.0 \
+                  -schema-location default \
+                  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+                  "${extra[@]}"
             echo "::endgroup::"
           done
 

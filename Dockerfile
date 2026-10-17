@@ -175,10 +175,12 @@ EXPOSE 8080 8443
 ENV JAVA_OPTS="-XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError" \
     SERVER_PORT=8080
 
-# Docker and Compose honour this; Kubernetes ignores it and wants its own probes against
-# the same path, which is open precisely so it can be reached before anyone signs in.
+# Docker and Compose honour this; Kubernetes ignores it and wants its own probes. Liveness
+# (/livez) rather than the aggregate health, which turns DOWN when the directory is
+# unreachable; and on the application's port even when MANAGEMENT_SERVER_PORT gives the
+# actuator one of its own. Open, so it can be reached before anyone signs in.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-    CMD curl -fsS "http://localhost:${SERVER_PORT}/actuator/health" || exit 1
+    CMD curl -fsS "http://localhost:${SERVER_PORT}/livez" || exit 1
 
 # exec form, so the JVM is PID 1 and receives SIGTERM directly - which is what lets Spring
 # shut down gracefully and the changelog connector stop mid-poll rather than being killed.

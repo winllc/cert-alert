@@ -1,5 +1,10 @@
 {{- $v := .Values -}}
 {{- $scheme := include "cert-alert.scheme" . | upper -}}
+{{- $probePort := "http" -}}
+{{- if $v.metrics.enabled -}}
+{{- $scheme = "HTTP" -}}
+{{- $probePort = "metrics" -}}
+{{- end -}}
 {{- $secretEnv := list
   (dict "env" "CERT_ALERT_DB_PASSWORD" "ref" (include "cert-alert.db.passwordRef" .))
   (dict "env" "CERT_ALERT_LDAP_PASSWORD" "ref" (include "cert-alert.secretRef" (dict "root" . "inline" $v.ldap.bindPassword "existing" $v.ldap.existingSecret "existingKey" $v.ldap.existingSecretKey "key" "ldap-password")))
@@ -106,6 +111,12 @@ spec:
             - name: http
               containerPort: 8080
               protocol: TCP
+            {{- if $v.metrics.enabled }}
+            # The actuator: health for the probes, /actuator/prometheus for the scraper.
+            - name: metrics
+              containerPort: {{ $v.metrics.port }}
+              protocol: TCP
+            {{- end }}
           envFrom:
             - configMapRef:
                 name: {{ include "cert-alert.fullname" . }}
@@ -133,7 +144,7 @@ spec:
           startupProbe:
             httpGet:
               path: /actuator/health/liveness
-              port: http
+              port: {{ $probePort }}
               scheme: {{ $scheme }}
             initialDelaySeconds: {{ $v.startupProbe.initialDelaySeconds }}
             periodSeconds: {{ $v.startupProbe.periodSeconds }}
@@ -144,7 +155,7 @@ spec:
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
-              port: http
+              port: {{ $probePort }}
               scheme: {{ $scheme }}
             initialDelaySeconds: {{ $v.livenessProbe.initialDelaySeconds }}
             periodSeconds: {{ $v.livenessProbe.periodSeconds }}
@@ -155,7 +166,7 @@ spec:
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
-              port: http
+              port: {{ $probePort }}
               scheme: {{ $scheme }}
             initialDelaySeconds: {{ $v.readinessProbe.initialDelaySeconds }}
             periodSeconds: {{ $v.readinessProbe.periodSeconds }}

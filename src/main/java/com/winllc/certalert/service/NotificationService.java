@@ -13,6 +13,7 @@ import com.winllc.certalert.domain.Notification;
 import com.winllc.certalert.domain.NotificationKind;
 import com.winllc.certalert.domain.OwnerType;
 import com.winllc.certalert.domain.Severity;
+import com.winllc.certalert.observability.EnsMetrics;
 import com.winllc.certalert.repository.CachedCertificateRepository;
 import com.winllc.certalert.repository.NotificationRepository;
 import java.time.Clock;
@@ -28,6 +29,7 @@ import java.util.Objects;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -69,6 +71,7 @@ public class NotificationService {
     private final CredentialProperties credentialProperties;
     private final MailOutbox outbox;
     private final TransactionTemplate transactions;
+    private final ObjectProvider<EnsMetrics> metrics;
     private final Clock clock;
 
     public NotificationService(
@@ -81,6 +84,7 @@ public class NotificationService {
             CredentialProperties credentialProperties,
             MailOutbox outbox,
             PlatformTransactionManager transactionManager,
+            ObjectProvider<EnsMetrics> metrics,
             Clock clock) {
         this.notifications = notifications;
         this.certificates = certificates;
@@ -91,6 +95,7 @@ public class NotificationService {
         this.credentialProperties = credentialProperties;
         this.outbox = outbox;
         this.transactions = new TransactionTemplate(transactionManager);
+        this.metrics = metrics;
         this.clock = clock;
     }
 
@@ -560,6 +565,10 @@ public class NotificationService {
      * certificates furthest from expiring, or the longest expired.
      */
     private void warnIfCutShort(Scan upcoming, Scan lapsed, int limit, int leadDays) {
+        EnsMetrics counting = metrics.getIfAvailable();
+        if (counting != null && (upcoming.truncated() || lapsed.truncated())) {
+            counting.digestTruncated();
+        }
         if (upcoming.truncated()) {
             log.warn("Expiry digest: more than {} certificate(s) expire in the next {} day(s); this round-up "
                             + "reports the {} soonest and the rest wait for a later run. Raise "

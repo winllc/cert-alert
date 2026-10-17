@@ -1,5 +1,6 @@
 package com.winllc.certalert.audit;
 
+import com.winllc.certalert.observability.EnsMetrics;
 import com.winllc.certalert.security.DirectoryPrincipal;
 import com.winllc.certalert.security.RefusedCertificateException;
 import com.winllc.certalert.security.SessionPolicy;
@@ -48,10 +49,22 @@ public class AuthenticationAudit {
 
     private final AuditLog audit;
     private final FailureCollapser certificateFailures;
+    private final org.springframework.beans.factory.ObjectProvider<EnsMetrics> metrics;
 
-    public AuthenticationAudit(AuditLog audit, java.time.Clock clock) {
+    public AuthenticationAudit(
+            AuditLog audit,
+            java.time.Clock clock,
+            org.springframework.beans.factory.ObjectProvider<EnsMetrics> metrics) {
         this.audit = audit;
         this.certificateFailures = new FailureCollapser(audit, clock);
+        this.metrics = metrics;
+    }
+
+    private void count(String method, boolean succeeded) {
+        EnsMetrics counting = metrics.getIfAvailable();
+        if (counting != null) {
+            counting.authAttempt(method, succeeded);
+        }
     }
 
     @EventListener
@@ -63,6 +76,7 @@ public class AuthenticationAudit {
         if (alreadySignedIn(authentication)) {
             return;
         }
+        count(methodOf(authentication), true);
         AuditRecord record = AuditRecord.of(AuditRecord.Category.AUTHENTICATION, "auth.login")
                 .actor(AuditContext.actorOf(authentication))
                 .detail("method", methodOf(authentication));
@@ -83,6 +97,7 @@ public class AuthenticationAudit {
         }
         Authentication attempt = event.getAuthentication();
         String method = methodOf(attempt);
+        count(method, false);
         String attempted = attempt == null ? null : attempt.getName();
         AuditRecord record = AuditRecord.of(AuditRecord.Category.AUTHENTICATION, "auth.login")
                 .outcome(AuditRecord.Outcome.FAILURE)
