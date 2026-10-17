@@ -43,7 +43,7 @@ dependencies {
     // Front-end assets ship in the jar rather than loading from a CDN: this runs against
     // directories on networks that have no route to one.
     runtimeOnly("org.webjars:webjars-locator-lite")
-    runtimeOnly("org.webjars:jquery:3.7.1")
+    runtimeOnly("org.webjars:jquery:4.0.0")
     runtimeOnly("org.webjars:datatables:2.3.8")
     // Tabler (MIT) is the admin template the UI is built on; it bundles the Bootstrap 5
     // it is built from, so no separate Bootstrap dependency. Its icon package is 6.8MB of
