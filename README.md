@@ -1455,10 +1455,15 @@ The subject is **not** a foreign key on purpose. An audit record has to outlive 
 describes — the most interesting record of all is the one saying an entry was deleted — and
 a foreign key would either take the record with it or refuse the deletion.
 
-Nothing is ever trimmed unless asked: `cert-alert.audit.retention.enabled` is `false`, and
-turning it on removes records older than `cert-alert.audit.retention.after` (a year by
-default) on a weekly schedule. `cert-alert.audit.enabled: false` stops new records being
-written without deleting or hiding what is already there.
+Every one of these records is also an event in the application-wide audit trail, in the
+shared ENS format — see [Audit logging](#audit-logging), which covers sign-ins, refusals,
+settings, the license and job runs as well, and how the trail reaches a SIEM.
+
+Nothing is ever pruned unless asked: `ENS_AUDIT_RETENTION_DAYS` is `0` (keep forever) by
+default. The older `cert-alert.audit.retention.enabled` / `.after` still work while it is 0
+(they are mapped onto it), now on a daily schedule. `cert-alert.audit.enabled: false` stops
+these entry records being written without deleting or hiding what is already there;
+security events are recorded regardless.
 
 ### Metrics
 
@@ -1808,17 +1813,11 @@ access to dn.subtree="ou=servers,dc=example,dc=test"
 
 #### The administration page
 
-`/admin` is the system audit log: every record, across every entry, in one search table.
-Above it are counts — how much trail there is, how much of it is from the last day and the
-last week, how many distinct people and jobs appear in it — and the span it covers, which
-together say whether anything is running at all.
-
-| Narrowed by | How |
-|---|---|
-| Kind of event | a select built from the enum, so a new kind appears the day it is added |
-| About | people, servers, or both; and a box searching a record's name and DN at once |
-| Who did it | part of a name — a person as the directory names them, or a job: `sync`, `changelog`, `expiry refresh`, `prune` |
-| When | a date range, either end optional |
+`/admin` carries counts of the audit trail — how much there is, how much of it is from the
+last day and the last week, how many distinct people and jobs appear in it — and the span it
+covers, which together say whether anything is running at all. The trail itself is on the
+**audit log page**, `/admin/audit` (see [Audit logging](#audit-logging)), which filters by
+time, category, action, outcome, severity, actor, target, source address and free text.
 
 An entry's own history stays open to anyone signed in: a person looking at a server can see
 what has been done to it, and an audit trail nobody may read holds nobody to account. The
@@ -1827,9 +1826,8 @@ here, what they touched and when. Asking `/api/v1/datatables/audit` without a su
 that same request, so it checks for itself rather than trusting the page it is usually
 reached through.
 
-Records outlive what they describe. A row links to its entry only while there is one to
-link to; after a prune the DN it carried is what is left, and the log still says the entry
-was pruned.
+Records outlive what they describe. After a prune the DN an entry's records carry is what
+is left, and the trail still says the entry was pruned.
 
 ### Project administrators
 
@@ -2133,6 +2131,113 @@ is not news, it is just the first time we looked — so a first sync of a 100,00
 directory does not produce a flood. When a certificate already in the cache moves into
 `EXPIRING_SOON` or `EXPIRED` — whether noticed by a sweep or by the refresh job — that is an
 alert, carrying the owner and the contact to chase.
+
+## Audit logging
+
+CertAlert keeps a complete, tamper-evident audit trail in the format every ENS product shares,
+**`ens-audit/1`**: one JSON object per event, numbered by `seq` without gaps and chained by
+SHA-256, so an edited or deleted record shows. Administrators search, inspect, export and
+verify it at **`/admin/audit`**; Splunk or any SIEM receives it over HEC or syslog, pulls it
+from an API, or reads it from stdout or a file. The full format and the Splunk set-up are on
+the documentation site: [audit-logging.md](https://github.com/winllc/ens-apps-documentation/blob/master/docs/audit-logging.md).
+
+```json
+{"schema":"ens-audit/1","id":"…","seq":1234,"time":"2026-10-16T02:10:11.123Z","product":"certalert",
+ "version":"1.4.0","host":"…","installationId":"…","category":"authentication","action":"auth.login",
+ "outcome":"failure","severity":"warning","actor":{"type":"anonymous","id":"jdoe","name":null,"roles":[]},
+ "source":{"ip":"10.1.2.3","userAgent":"…"},"target":null,"reason":"bad credentials",
+ "details":{"method":"ldap"},"requestId":"…","session":"…","prevHash":"…","hash":"…"}
+```
+
+### What is recorded
+
+| Category | Actions |
+|---|---|
+| authentication | `auth.login` (success and failure; `details.method` `x509` or `ldap`, the attempted name as an `anonymous` actor on failure, `alert` severity after repeated failures for one name), `auth.logout` |
+| authorization | `access.denied` for every 403: a role refused, `license_required`, `license_read_only`, `feature_not_licensed`, a CSRF failure — with method, path and reason code; identical refusals within 60 s are one event with `details.count` |
+| account | `project.admin-added`, `project.admin-removed` (the one role this application grants) |
+| configuration | `settings.changed` (the round-up's lead days, `<field>.old`/`.new`), `server-attribute.defined`, `.changed`, `.retired` |
+| license | `license.installed`, `license.rejected` (with the reason), `license.mode-changed` (FULL / READ_ONLY / UNLICENSED, checked at startup, on every request and every minute), `license.limit-exceeded` (at most hourly, with the count refused) |
+| data | every entry change, as it always was: `entry.discovered`, `entry.pruned`, `certificate.cached`, `.removed`, `.deleted` (cleanup), `.revoked`, `.status-changed`, `contact.added`/`.removed`, `address.added`/`.removed`, `attribute.set`/`.cleared`, `project.joined`/`.left`, `endpoint.probed`; and `project.created`, `.updated`, `.deleted` |
+| system | `system.started`, `system.stopped`; `job.completed` / `job.failed` once per run of every job — user and server sweeps, the expiry refresh, changelog sync (each poll that applied changes, each run of failures), the expiry digest and notification trim, revocation checks, certificate cleanup, prune — with counts and duration, scheduled or started from the UI; `job.skipped` once each time a job stands down for the license; `alert.sent` / `alert.failed` |
+| audit | `audit.exported`, `audit.verified`, `audit.token-created`, `audit.token-revoked`, `audit.pruned`, `audit.delivery-failed`, `audit.delivery-recovered` |
+
+Secrets are never recorded: passwords, tokens, keys, license text, session ids and codes are
+written as `"[redacted]"`. `session` is the first 16 hex characters of the SHA-256 of the
+session id. `source.ip` is the request's remote address; this application does not trust
+`X-Forwarded-For` unless `server.forward-headers-strategy` is set.
+
+### Where it is kept
+
+In the database, in `audit_event` — the same table the entry histories have always lived in,
+migrated by Flyway (`V18`); the records from before are numbered and chained at first
+startup, oldest first, keeping their times, with `details.migrated=true`. Each event is
+written in the transaction that caused it, so a change and its record commit together; if
+the record cannot be written, a security change fails rather than happening unaudited.
+Writers are serialised by a row lock on the single `audit_chain_head` row, taken just before
+commit, which holds across instances sharing one database. Nothing in the application
+updates or deletes an event except retention pruning.
+
+### The audit log page
+
+`/admin/audit`, for administrators, and reachable whatever the license says — unlicensed and
+read-only included, since the audit trail is not a licensed feature:
+
+- the log, newest first and paged on the server, filtered by time, category, action,
+  outcome, severity, actor, target, source IP and free text over the JSON; a row opens the
+  event in full, with its formatted JSON, seq and hash;
+- **Export** of the current filter (up to 100,000 events) as CSV or NDJSON, itself recorded
+  as `audit.exported`;
+- **Verify integrity**, which recomputes the chain and reports intact, broken at seq N, or the
+  anchor (the first retained seq after pruning, whose `prevHash` is taken as given);
+- **Delivery**: per output, whether it is on, the last seq delivered and when, the backlog
+  and the last error;
+- **SIEM API tokens**: create (shown once, with a copy button), list, revoke;
+- **Retention**, as configured.
+
+### Outputs and settings
+
+| Variable | Default | |
+|---|---|---|
+| `ENS_AUDIT_STDOUT` | `true` | each event as one raw JSON line on stdout (logger `ens.audit`, its own appender, no prefix) |
+| `ENS_AUDIT_FILE` | empty (off) | a JSONL file, e.g. `/var/log/ens/certalert/audit.jsonl`, rotated daily or at 100 MB |
+| `ENS_AUDIT_FILE_KEEP` | `30` | rotated files kept |
+| `ENS_AUDIT_RETENTION_DAYS` | `0` (forever) | prune events older than this, daily, once every forwarding output has delivered them; never the newest. `cert-alert.audit.retention.*` still applies while this is 0 |
+| `ENS_AUDIT_SPLUNK_URL` | empty (off) | Splunk HEC, e.g. `https://splunk.example:8088`; posts batches of up to 100 to `/services/collector/event` |
+| `ENS_AUDIT_SPLUNK_TOKEN` / `ENS_AUDIT_SPLUNK_TOKEN_FILE` | | the HEC token, or a file holding it |
+| `ENS_AUDIT_SPLUNK_INDEX` | empty | |
+| `ENS_AUDIT_SPLUNK_SOURCETYPE` | `ens:audit` | |
+| `ENS_AUDIT_SPLUNK_INSECURE` | `false` | skip TLS verification — test setups only; warned about at startup |
+| `ENS_AUDIT_SYSLOG_HOST` | empty (off) | RFC 5424 syslog: APP-NAME `certalert`, MSGID the action, the JSON line as the message |
+| `ENS_AUDIT_SYSLOG_PORT` | 514, or 6514 for tls | |
+| `ENS_AUDIT_SYSLOG_PROTOCOL` | `tcp` | `udp`, `tcp` or `tls` (octet-counted framing on tcp and tls) |
+| `ENS_AUDIT_SYSLOG_FACILITY` | `local0` | |
+
+HEC and syslog are delivered in the background from the database by a cursor kept in
+`audit_delivery`: at-least-once (Splunk can de-duplicate on `id`), resumed after a restart,
+retried with backoff up to five minutes, and never slowing a request. An output failing for
+fifteen minutes records `audit.delivery-failed`, and `audit.delivery-recovered` when it comes
+back. Stdout and the file are written just after each commit. Startup logs one line per
+output saying whether it is on; the token is never logged. TLS trusts the JVM's trust store.
+
+The release bundle passes every `ENS_AUDIT_*` variable through (see `env.template`) and mounts
+the `ens-audit` volume at `/var/log/ens`, which the image creates writable by its user and by
+group 0 for OpenShift.
+
+### Getting it into Splunk
+
+Any one of these:
+
+- **HEC** — set `ENS_AUDIT_SPLUNK_URL` and `ENS_AUDIT_SPLUNK_TOKEN`. Events arrive with
+  `sourcetype=ens:audit`, `source=certalert`.
+- **Universal Forwarder** — monitor the file (`ENS_AUDIT_FILE`, in the `ens-audit` volume) or
+  the container's Docker logs, with `sourcetype=ens:audit`. Each line is one event.
+- **Pull API** — create a token on `/admin/audit`, then
+  `GET /api/audit/events?after=<seq>&limit=<1..1000>` with `Authorization: Bearer <token>`.
+  NDJSON by default, one event per line in seq order; with `Accept: application/json`,
+  `{"events":[…],"next":<seq>}`. Ask again with `after` set to the last seq you have. It needs
+  no session or CSRF token, works while the application is unlicensed, and is not itself
+  audited (the token's last use is recorded instead).
 
 ## Configuration
 

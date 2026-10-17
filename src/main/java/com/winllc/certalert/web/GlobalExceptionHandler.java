@@ -1,5 +1,6 @@
 package com.winllc.certalert.web;
 
+import com.winllc.certalert.audit.AccessDenials;
 import com.winllc.certalert.license.LicenseRequiredException;
 import com.winllc.certalert.service.AlreadyExistsException;
 import com.winllc.certalert.service.ProbeUnavailableException;
@@ -43,10 +44,12 @@ public class GlobalExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     private final CurrentUserAdvice currentUser;
+    private final AccessDenials denials;
     private final Clock clock;
 
-    public GlobalExceptionHandler(CurrentUserAdvice currentUser, Clock clock) {
+    public GlobalExceptionHandler(CurrentUserAdvice currentUser, AccessDenials denials, Clock clock) {
         this.currentUser = currentUser;
+        this.denials = denials;
         this.clock = clock;
     }
 
@@ -96,6 +99,7 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(AccessDeniedException.class)
     public Object handleDenied(AccessDeniedException e, HttpServletRequest request) {
+        note(request, "permission_denied", e.getMessage());
         return respond(request, HttpStatus.FORBIDDEN, "Not allowed", e.getMessage());
     }
 
@@ -110,6 +114,7 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(LicenseRequiredException.class)
     public Object handleUnlicensed(LicenseRequiredException e, HttpServletRequest request) {
+        note(request, e.getKind().error(), e.getMessage());
         if (wantsHtml(request)) {
             ModelAndView page = page("license-required", HttpStatus.FORBIDDEN, e.getMessage(), request);
             page.addObject("refusal", e.getKind().name());
@@ -166,6 +171,15 @@ public class GlobalExceptionHandler {
 
         log.error("Unhandled exception while serving {}", request.getRequestURI(), e);
         return respond(request, HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error", null);
+    }
+
+    /** Every 403 answered here is recorded as access.denied; noting it never changes the answer. */
+    private void note(HttpServletRequest request, String reason, String message) {
+        try {
+            denials.denied(request, reason, message);
+        } catch (RuntimeException ex) {
+            log.warn("Could not note a refusal for the audit trail: {}", ex.toString());
+        }
     }
 
     /** Problem detail for a caller that parses, a page for a caller that reads. */

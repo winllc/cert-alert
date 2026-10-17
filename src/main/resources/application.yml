@@ -335,17 +335,21 @@ cert-alert:
       # anonymous search, e.g. ["uid={0},ou=people"].
       user-dn-patterns: []
 
-  # The audit trail: what happened to an entry, and who did it. Records are written for
-  # changes only - a sweep that finds everything as it left it writes nothing here, and the
-  # sweep itself is in the run log.
+  # The history of directory entries: what happened to an entry, and who did it. Written
+  # for changes only - a sweep that finds everything as it left it writes nothing. These
+  # records are part of the ens-audit/1 trail (ens.audit, below), alongside sign-ins,
+  # refusals, settings, the license and job runs.
   audit:
+    # Off stops the entry-change records only. Security events are always recorded.
     enabled: true
     retention:
       # Off by default. An audit trail that quietly deletes itself is worse than one that
-      # grows; turn this on once you have decided how long you are keeping.
+      # grows. ENS_AUDIT_RETENTION_DAYS, when above 0, takes precedence over these two; with
+      # it at 0 (its default) turning this on prunes after "after", as it always did.
       enabled: false
       after: 365d
-      cron: "0 30 3 * * SUN"
+      # Daily. Pruning only removes what every forwarding output has delivered.
+      cron: "0 30 3 * * *"
 
   # What a certificate is good for, as distinct from what state it is in. A wildcard covers
   # hosts that do not exist yet; forty names means one key for forty things. Both are
@@ -474,6 +478,33 @@ cert-alert:
       from: cert-alert@localhost
       to: []
       subject-prefix: "[cert-alert] "
+
+# The shared ENS audit trail (ens-audit/1): one JSON line per event, chained by SHA-256,
+# stored in the database and, optionally, sent on. Every product reads the same ENS_AUDIT_*
+# variables; see the README's "Audit logging" section.
+ens:
+  audit:
+    # Each event as a raw JSON line on stdout (logger ens.audit, no prefix), for Docker's
+    # logging driver or a Splunk Universal Forwarder.
+    stdout: ${ENS_AUDIT_STDOUT:true}
+    # A JSONL file, e.g. /var/log/ens/certalert/audit.jsonl, rotated daily or at 100 MB.
+    file: ${ENS_AUDIT_FILE:}
+    file-keep: ${ENS_AUDIT_FILE_KEEP:30}
+    # 0 keeps everything. Above 0, events older than this many days are pruned daily once
+    # every forwarding output has delivered them.
+    retention-days: ${ENS_AUDIT_RETENTION_DAYS:0}
+    splunk:
+      url: ${ENS_AUDIT_SPLUNK_URL:}
+      token: ${ENS_AUDIT_SPLUNK_TOKEN:}
+      token-file: ${ENS_AUDIT_SPLUNK_TOKEN_FILE:}
+      index: ${ENS_AUDIT_SPLUNK_INDEX:}
+      sourcetype: ${ENS_AUDIT_SPLUNK_SOURCETYPE:ens:audit}
+      insecure: ${ENS_AUDIT_SPLUNK_INSECURE:false}
+    syslog:
+      host: ${ENS_AUDIT_SYSLOG_HOST:}
+      port: ${ENS_AUDIT_SYSLOG_PORT:}
+      protocol: ${ENS_AUDIT_SYSLOG_PROTOCOL:tcp}
+      facility: ${ENS_AUDIT_SYSLOG_FACILITY:local0}
 
 logging:
   level:

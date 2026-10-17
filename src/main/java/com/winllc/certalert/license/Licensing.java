@@ -3,10 +3,12 @@ package com.winllc.certalert.license;
 import com.enssolutions.license.LicenseCheck;
 import com.enssolutions.license.LicenseManager;
 import com.enssolutions.license.LicenseState;
+import com.winllc.certalert.audit.LicenseAudit;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 /**
@@ -27,6 +29,8 @@ import org.springframework.stereotype.Component;
  *
  * <p>{@link LicenseManager#current()} is cheap (it re-reads the file only when it changes),
  * so everything here asks it afresh: a license uploaded or renewed takes effect at once.
+ * Every check is also shown to {@link LicenseAudit}, which records {@code license.mode-changed}
+ * when the mode is not the one last recorded.
  */
 @Component("licensing")
 public class Licensing {
@@ -34,12 +38,14 @@ public class Licensing {
     private static final Logger log = LoggerFactory.getLogger(Licensing.class);
 
     private final LicenseManager licenses;
+    private final ObjectProvider<LicenseAudit> audit;
 
     /** Jobs that have already said they are standing down. */
     private final Set<String> standingDown = ConcurrentHashMap.newKeySet();
 
-    public Licensing(LicenseManager licenses) {
+    public Licensing(LicenseManager licenses, ObjectProvider<LicenseAudit> audit) {
         this.licenses = licenses;
+        this.audit = audit;
     }
 
     public LicenseManager manager() {
@@ -47,17 +53,27 @@ public class Licensing {
     }
 
     public LicenseCheck current() {
-        return licenses.current();
+        return check();
+    }
+
+    /** The license as it stands, shown to the audit on the way past. */
+    private LicenseCheck check() {
+        LicenseCheck check = licenses.current();
+        LicenseAudit recorder = audit.getIfAvailable();
+        if (recorder != null) {
+            recorder.observe(check);
+        }
+        return check;
     }
 
     /** Full mode, and the license lists the feature. */
     public boolean isEnabled(String feature) {
-        return licenses.current().isFeatureEnabled(feature);
+        return check().isFeatureEnabled(feature);
     }
 
     /** Full or read-only mode, and the license lists the feature. */
     public boolean shows(String feature) {
-        return shows(licenses.current(), feature);
+        return shows(check(), feature);
     }
 
     static boolean shows(LicenseCheck check, String feature) {
@@ -70,7 +86,7 @@ public class Licensing {
 
     /** Full mode: the license is valid or in its grace period. */
     public boolean isFullyLicensed() {
-        return licenses.current().isFullyLicensed();
+        return check().isFullyLicensed();
     }
 
     /**
@@ -78,40 +94,63 @@ public class Licensing {
      * it may not, and again after it could and then could not, rather than once per firing.
      */
     public boolean mayRun(String feature, String job) {
-        LicenseCheck check = licenses.current();
+        LicenseCheck check = check();
         if (check.isFeatureEnabled(feature)) {
             standingDown.remove(job);
             return true;
         }
         if (standingDown.add(job)) {
-            log.info("Skipping the scheduled {} job: {}", job, check.isFullyLicensed()
+            String reason = check.isFullyLicensed()
                     ? LicensedFeature.labelOf(feature) + " is not included in the license"
-                    : check.message());
+                    : check.message();
+            log.info("Skipping the scheduled {} job: {}", job, reason);
+            skipped(job, feature, check, reason);
         }
         return false;
     }
 
+    private void skipped(String job, String feature, LicenseCheck check, String reason) {
+        LicenseAudit recorder = audit.getIfAvailable();
+        if (recorder != null) {
+            recorder.jobSkipped(job, feature, check, reason);
+        }
+    }
+
     /** Whether housekeeping with no feature of its own may run: full mode. */
     public boolean mayRun(String job) {
-        LicenseCheck check = licenses.current();
+        LicenseCheck check = check();
         if (check.isFullyLicensed()) {
             standingDown.remove(job);
             return true;
         }
         if (standingDown.add(job)) {
             log.info("Skipping the scheduled {} job: {}", job, check.message());
+            skipped(job, null, check, check.message());
         }
         return false;
     }
 
-    /** Whether one more directory user may be added to {@code currentCount}. */
+    /**
+     * Whether one more directory user may be added to {@code currentCount}. A refusal is
+     * recorded as {@code license.limit-exceeded} (collapsed, see {@link LicenseAudit}).
+     */
     public boolean mayAdd(long currentCount) {
-        return licenses.current().mayAdd(currentCount);
+        LicenseCheck check = check();
+        boolean may = check.mayAdd(currentCount);
+        if (!may) {
+            LicenseAudit recorder = audit.getIfAvailable();
+            if (recorder != null) {
+                recorder.limitExceeded(currentCount,
+                        check.license().map(l -> l.limitQuantity()).orElse(null),
+                        check.license().map(l -> l.limitUnit()).orElse(null));
+            }
+        }
+        return may;
     }
 
     /** "1,234 of 2,500 directory users." and so on, for the license screen and the log. */
     public String usageMessage(long count) {
-        return licenses.current().usageMessage(count);
+        return check().usageMessage(count);
     }
 
     public String installationId() {

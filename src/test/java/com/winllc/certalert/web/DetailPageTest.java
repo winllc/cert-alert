@@ -58,6 +58,10 @@ class DetailPageTest {
     @Autowired
     private AuditEventRepository auditRepository;
 
+    /** Records go in the way the application writes them: chained, through the audit log. */
+    @Autowired
+    private com.winllc.certalert.service.AuditService auditService;
+
     private MockMvc mockMvc;
     private Long userId;
     private Long serverId;
@@ -94,7 +98,7 @@ class DetailPageTest {
         server.refreshCertificateSummary();
         serverId = serverRepository.save(server).getId();
 
-        auditRepository.saveAll(List.of(
+        auditService.recordAll(List.of(
                 AuditEvent.about(
                                 AuditEvent.SubjectRef.of(user),
                                 AuditAction.ENTRY_DISCOVERED,

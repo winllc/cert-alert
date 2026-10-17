@@ -8,6 +8,8 @@ import java.util.List;
 import java.nio.charset.StandardCharsets;
 import org.springframework.http.ProblemDetail;
 import tools.jackson.databind.ObjectMapper;
+import com.winllc.certalert.audit.AccessDenials;
+import com.winllc.certalert.audit.AuditingAccessDeniedHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
@@ -102,7 +104,8 @@ public class DemoSecurityConfig {
             HttpSecurity http,
             List<AuthenticationProvider> authenticationProviders,
             ObjectMapper json,
-            Licensing licensing)
+            Licensing licensing,
+            AccessDenials denials)
             throws Exception {
         log.warn("DEMO MODE: every account in this directory is published on the sign-in page with "
                 + "its password. Nothing can be changed, but everything the directory holds can be "
@@ -116,6 +119,12 @@ public class DemoSecurityConfig {
                         // The reads that are an administrator's, and the only place the
                         // roles differ once every write is refused anyway.
                         .requestMatchers("/admin", "/api/v1/audit/summary", "/actuator/**")
+                        .hasRole("ADMIN")
+                        // The audit log page and its reads, and verifying the trail - which
+                        // writes nothing but its own audit record.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/admin/audit/verify")
+                        .hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/admin/audit", "/api/v1/admin/audit/**")
                         .hasRole("ADMIN")
                         // A demo needs a license like any installation. Its administrator
                         // may install one while it has none in full effect - the one write a
@@ -149,7 +158,8 @@ public class DemoSecurityConfig {
                 // A denial from the authorization filter never reaches the controller
                 // advice - it is translated further down the chain - so the wording has to
                 // be put on the response here.
-                .exceptionHandling(exceptions -> exceptions.accessDeniedHandler(refuse(json)));
+                .exceptionHandling(exceptions -> exceptions.accessDeniedHandler(
+                        new AuditingAccessDeniedHandler(refuse(json), denials)));
 
         // The same providers the ordinary configuration uses, so a demo password is checked
         // by binding to the directory exactly as a real one is.

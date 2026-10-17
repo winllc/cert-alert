@@ -61,6 +61,22 @@ services:
       CERT_ALERT_DB_PASSWORD: ${CERT_ALERT_DB_PASSWORD:?set CERT_ALERT_DB_PASSWORD in .env}
       CERT_ALERT_LDAP_URL: ${CERT_ALERT_LDAP_URL:?set CERT_ALERT_LDAP_URL in .env}
       CERT_ALERT_LDAP_BASE: ${CERT_ALERT_LDAP_BASE:?set CERT_ALERT_LDAP_BASE in .env}
+      # The audit trail (ens-audit/1): every ENS_AUDIT_* setting, passed through. Unset
+      # means the application's default; see env.template and the README.
+      ENS_AUDIT_STDOUT: ${ENS_AUDIT_STDOUT:-true}
+      ENS_AUDIT_FILE: ${ENS_AUDIT_FILE:-}
+      ENS_AUDIT_FILE_KEEP: ${ENS_AUDIT_FILE_KEEP:-30}
+      ENS_AUDIT_RETENTION_DAYS: ${ENS_AUDIT_RETENTION_DAYS:-0}
+      ENS_AUDIT_SPLUNK_URL: ${ENS_AUDIT_SPLUNK_URL:-}
+      ENS_AUDIT_SPLUNK_TOKEN: ${ENS_AUDIT_SPLUNK_TOKEN:-}
+      ENS_AUDIT_SPLUNK_TOKEN_FILE: ${ENS_AUDIT_SPLUNK_TOKEN_FILE:-}
+      ENS_AUDIT_SPLUNK_INDEX: ${ENS_AUDIT_SPLUNK_INDEX:-}
+      ENS_AUDIT_SPLUNK_SOURCETYPE: ${ENS_AUDIT_SPLUNK_SOURCETYPE:-ens:audit}
+      ENS_AUDIT_SPLUNK_INSECURE: ${ENS_AUDIT_SPLUNK_INSECURE:-false}
+      ENS_AUDIT_SYSLOG_HOST: ${ENS_AUDIT_SYSLOG_HOST:-}
+      ENS_AUDIT_SYSLOG_PORT: ${ENS_AUDIT_SYSLOG_PORT:-}
+      ENS_AUDIT_SYSLOG_PROTOCOL: ${ENS_AUDIT_SYSLOG_PROTOCOL:-tcp}
+      ENS_AUDIT_SYSLOG_FACILITY: ${ENS_AUDIT_SYSLOG_FACILITY:-local0}
     ports:
       # 8080 inside whichever way it is served: plain HTTP, or HTTPS once
       # CERT_ALERT_TLS_ENABLED=true. Only the host side moves.
@@ -71,6 +87,10 @@ services:
       # volume, so it survives upgrades; install.sh copies license/license.lic into it.
       # The image sets ENS_LICENSE_FILE and ENS_LICENSE_STATE_DIR to point here.
       - ens-license:/var/lib/ens/certalert
+      # The audit trail's JSONL file, when ENS_AUDIT_FILE points under /var/log/ens (e.g.
+      # /var/log/ens/certalert/audit.jsonl). A named volume, writable by the runtime user
+      # (uid 185, group 0 rwx for OpenShift), so a Splunk forwarder can mount it too.
+      - ens-audit:/var/log/ens
       # Keystore and truststore for TLS / X.509 client certificates, when enabled in .env.
       # Empty is fine while TLS is off.
       - ./tls:/etc/cert-alert/tls:ro
@@ -103,3 +123,6 @@ volumes:
   # with it the installation id, so a license bound to this installation would have to be
   # re-bound on the ENS portal.
   ens-license:
+  # The audit file output, when ENS_AUDIT_FILE is set. The database holds the trail
+  # regardless; this is a copy for a forwarder to tail.
+  ens-audit:

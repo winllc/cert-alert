@@ -1,5 +1,6 @@
 package com.winllc.certalert.service;
 
+import com.winllc.certalert.audit.JobAudit;
 import com.winllc.certalert.domain.ChangelogCursor;
 import com.winllc.certalert.ldap.ChangelogBounds;
 import com.winllc.certalert.ldap.ChangelogEntry;
@@ -61,6 +62,7 @@ public class ChangelogConnector implements SmartLifecycle {
     private final DirectorySyncService syncService;
     private final ChangelogProperties properties;
     private final Licensing licensing;
+    private final JobAudit jobs;
     private final Clock clock;
 
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -73,6 +75,7 @@ public class ChangelogConnector implements SmartLifecycle {
             DirectorySyncService syncService,
             ChangelogProperties properties,
             Licensing licensing,
+            JobAudit jobs,
             Clock clock) {
         this.changelogClient = changelogClient;
         this.applier = applier;
@@ -80,6 +83,7 @@ public class ChangelogConnector implements SmartLifecycle {
         this.syncService = syncService;
         this.properties = properties;
         this.licensing = licensing;
+        this.jobs = jobs;
         this.clock = clock;
     }
 
@@ -154,8 +158,14 @@ public class ChangelogConnector implements SmartLifecycle {
                 continue;
             }
             waitingForLicense = false;
+            Instant started = Instant.now(clock);
             try {
                 int applied = pollOnce();
+                // One audit event per poll that found something, and one per run of
+                // failures - an idle poll every few seconds is not worth recording.
+                if (applied > 0) {
+                    jobs.completed("changelog sync", started, false, java.util.Map.of("changes", applied));
+                }
                 backoff = Duration.ZERO;
                 // Something was there: come straight back rather than sleeping, so a burst
                 // of changes drains at the speed of the directory rather than the clock.
@@ -163,6 +173,9 @@ public class ChangelogConnector implements SmartLifecycle {
                     return;
                 }
             } catch (RuntimeException e) {
+                if (backoff.isZero()) {
+                    jobs.failed("changelog sync", started, false, e);
+                }
                 backoff = nextBackoff(backoff);
                 recordError(e);
                 log.error("Changelog poll failed; retrying in {}s", backoff.toSeconds(), e);

@@ -1,5 +1,6 @@
 package com.winllc.certalert.web;
 
+import com.winllc.certalert.audit.AuditAdminController;
 import com.winllc.certalert.demo.DemoAccounts;
 import com.winllc.certalert.demo.DemoProperties;
 import com.enssolutions.license.LicenseCheck;
@@ -28,7 +29,7 @@ import org.springframework.web.bind.annotation.ModelAttribute;
  * does not include, and carries the evaluation banner and the renewal warning.
  */
 @ControllerAdvice(assignableTypes = {
-    ViewController.class, LicenseScreenController.class, BasicErrorController.class
+    ViewController.class, LicenseScreenController.class, AuditAdminController.class, BasicErrorController.class
 })
 public class CurrentUserAdvice {
 

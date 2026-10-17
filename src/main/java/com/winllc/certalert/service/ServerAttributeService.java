@@ -1,5 +1,7 @@
 package com.winllc.certalert.service;
 
+import com.winllc.certalert.audit.AuditRecord;
+import com.winllc.certalert.audit.AuditLog;
 import com.winllc.certalert.domain.AuditAction;
 import com.winllc.certalert.domain.AuditEvent;
 import com.winllc.certalert.domain.DirectoryServer;
@@ -42,6 +44,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class ServerAttributeService {
 
+    private final AuditLog auditLog;
+
     private static final Logger log = LoggerFactory.getLogger(ServerAttributeService.class);
 
     private static final int MAX_VALUE_LENGTH = 1000;
@@ -62,7 +66,9 @@ public class ServerAttributeService {
             LdapServerAttributes directory,
             DirectoryPersistenceService persistence,
             AuditService auditService,
-            Clock clock) {
+            Clock clock,
+            AuditLog auditLog) {
+        this.auditLog = auditLog;
         this.definitions = definitions;
         this.servers = servers;
         this.directory = directory;
@@ -117,6 +123,8 @@ public class ServerAttributeService {
                 now));
         log.info("The directory attribute {} is now editable here as '{}' ({}, {}), by {}",
                 attribute, label, type, several ? "several values" : "one value", actor);
+        auditLog.record(describe(AuditRecord.of(AuditRecord.Category.CONFIGURATION, "server-attribute.defined")
+                .target("server-attribute", attribute, label), definition));
         return definition;
     }
 
@@ -136,6 +144,8 @@ public class ServerAttributeService {
         String attribute = requireAttribute(ldapAttribute);
         String label = name == null || name.isBlank() ? attribute : name.trim();
         requireUnused(attribute, label, id);
+        AuditRecord changed = AuditRecord.of(AuditRecord.Category.CONFIGURATION, "server-attribute.changed");
+        Snapshot before = Snapshot.of(definition);
 
         definition.update(
                 attribute,
@@ -148,6 +158,8 @@ public class ServerAttributeService {
                 actor,
                 Instant.now(clock));
         log.info("Changed the managed attribute '{}' ({}), by {}", label, attribute, actor);
+        before.compare(Snapshot.of(definition), changed.target("server-attribute", attribute, label));
+        auditLog.record(changed);
         return definition;
     }
 
@@ -162,6 +174,8 @@ public class ServerAttributeService {
         definitions.delete(definition);
         log.info("{} is no longer editable here; what servers hold for it is untouched, by {}",
                 definition.getLdapAttribute(), actor);
+        auditLog.record(AuditRecord.of(AuditRecord.Category.CONFIGURATION, "server-attribute.retired")
+                .target("server-attribute", definition.getLdapAttribute(), definition.getName()));
     }
 
     // -------------------------------------------------------------------------------------
@@ -392,5 +406,45 @@ public class ServerAttributeService {
     /** Lowercased attribute names, for matching what a directory returned. */
     static String key(String attribute) {
         return attribute == null ? "" : attribute.toLowerCase(Locale.ROOT);
+    }
+
+    /** What an administrator can change about a managed attribute, for settings audit records. */
+    private record Snapshot(String ldapAttribute, String name, String description, String type, boolean multiValued,
+            String options, int displayOrder) {
+
+        static Snapshot of(ServerAttributeDefinition definition) {
+            return new Snapshot(definition.getLdapAttribute(), definition.getName(), definition.getDescription(),
+                    definition.getType() == null ? null : definition.getType().name(), definition.isMultiValued(),
+                    String.join("|", definition.getOptions()), definition.getDisplayOrder());
+        }
+
+        /** Records each field that changed as {@code <field>.old} and {@code <field>.new}. */
+        void compare(Snapshot after, AuditRecord record) {
+            java.util.List<String> keys = new java.util.ArrayList<>();
+            change(record, keys, "ldapAttribute", ldapAttribute, after.ldapAttribute);
+            change(record, keys, "name", name, after.name);
+            change(record, keys, "description", description, after.description);
+            change(record, keys, "type", type, after.type);
+            change(record, keys, "multiValued", multiValued, after.multiValued);
+            change(record, keys, "options", options, after.options);
+            change(record, keys, "displayOrder", displayOrder, after.displayOrder);
+            record.detail("keys", String.join(",", keys));
+        }
+
+        private static void change(AuditRecord record, java.util.List<String> keys, String field, Object old,
+                Object now) {
+            if (!java.util.Objects.equals(old, now)) {
+                keys.add(field);
+                record.change(field, old, now);
+            }
+        }
+    }
+
+    private static AuditRecord describe(AuditRecord record, ServerAttributeDefinition definition) {
+        return record.detail("ldapAttribute", definition.getLdapAttribute())
+                .detail("name", definition.getName())
+                .detail("type", definition.getType() == null ? null : definition.getType().name())
+                .detail("multiValued", definition.isMultiValued())
+                .detail("options", String.join("|", definition.getOptions()));
     }
 }

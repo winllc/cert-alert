@@ -3,8 +3,8 @@ package com.winllc.certalert.scheduling;
 import com.winllc.certalert.domain.SyncJob;
 import com.winllc.certalert.ldap.LdapProperties;
 import com.winllc.certalert.config.NotificationProperties;
+import com.winllc.certalert.audit.JobAudit;
 import com.winllc.certalert.license.Licensing;
-import com.winllc.certalert.service.AuditService;
 import com.winllc.certalert.service.CertificateCleanupService;
 import com.winllc.certalert.service.CertificateRefreshService;
 import com.winllc.certalert.service.DirectoryPruneService;
@@ -39,8 +39,8 @@ import org.springframework.stereotype.Component;
  *       the directory, and off by default for that reason.
  *   <li><b>prune</b> removes entries the directory has stopped publishing. It is off by
  *       default: deleting records is not something to start doing on its own.
- *   <li><b>audit retention</b> trims the audit trail, and is off by default for the same
- *       reason - more so, since the whole point of that table is that it remembers.
+ *   <li><b>audit retention</b> is not here: the audit trail is not a licensed feature, and
+ *       prunes on its own schedule (see {@code AuditScheduler}).
  *   <li><b>expiry digest</b> tells each point of contact what of theirs is expiring, once a
  *       day. The alert channels tell the operators as things happen; this tells the person
  *       who has to renew it.
@@ -57,6 +57,9 @@ import org.springframework.stereotype.Component;
  * every job pauses, the housekeeping ones included. Their schedules stay wired either way; a
  * firing the license does not allow returns without doing anything, so installing a license
  * needs no restart.
+ *
+ * <p>Every run is recorded in the audit trail as {@code job.completed} or {@code job.failed},
+ * with its counts and duration - one event per run, not per entry.
  */
 @Component
 @EnableScheduling
@@ -68,7 +71,7 @@ public class DirectoryJobScheduler {
     private final DirectorySyncService syncService;
     private final CertificateRefreshService refreshService;
     private final DirectoryPruneService pruneService;
-    private final AuditService auditService;
+    private final JobAudit jobs;
     private final NotificationService notificationService;
     private final NotificationProperties notificationProperties;
     private final RevocationService revocationService;
@@ -82,7 +85,7 @@ public class DirectoryJobScheduler {
             DirectorySyncService syncService,
             CertificateRefreshService refreshService,
             DirectoryPruneService pruneService,
-            AuditService auditService,
+            JobAudit jobs,
             NotificationService notificationService,
             NotificationProperties notificationProperties,
             RevocationService revocationService,
@@ -92,7 +95,7 @@ public class DirectoryJobScheduler {
         this.syncService = syncService;
         this.refreshService = refreshService;
         this.pruneService = pruneService;
-        this.auditService = auditService;
+        this.jobs = jobs;
         this.notificationService = notificationService;
         this.notificationProperties = notificationProperties;
         this.revocationService = revocationService;
@@ -109,7 +112,7 @@ public class DirectoryJobScheduler {
         if (!licensing.mayRun("directory-sync", "user sweep")) {
             return;
         }
-        runOnce(SyncJob.USERS, syncService::syncUsers);
+        runOnce(SyncJob.USERS, "user sweep", syncService::syncUsers);
     }
 
     @Scheduled(cron = "${cert-alert.ldap.sync.servers-cron}", zone = "UTC")
@@ -117,7 +120,7 @@ public class DirectoryJobScheduler {
         if (!licensing.mayRun("directory-sync", "server sweep")) {
             return;
         }
-        runOnce(SyncJob.SERVERS, syncService::syncServers);
+        runOnce(SyncJob.SERVERS, "server sweep", syncService::syncServers);
     }
 
     @Scheduled(cron = "${cert-alert.ldap.sync.refresh-cron}", zone = "UTC")
@@ -125,7 +128,7 @@ public class DirectoryJobScheduler {
         if (!licensing.mayRun("directory-sync", "expiry refresh")) {
             return;
         }
-        runOnce(SyncJob.REFRESH, refreshService::refresh);
+        runOnce(SyncJob.REFRESH, "expiry refresh", refreshService::refresh);
     }
 
     /**
@@ -140,31 +143,15 @@ public class DirectoryJobScheduler {
         }
         try {
             if (licensing.mayRun("notifications", "expiry digest")) {
-                notificationService.digest();
+                jobs.run("expiry digest", notificationService::digest);
             }
             // Trimming old notifications is housekeeping for the in-app ones, which stay
             // whatever the license includes - but nothing runs while it is not in full effect.
             if (licensing.mayRun("notification trim")) {
-                notificationService.trim();
+                jobs.run("notification trim", notificationService::trim, removed -> java.util.Map.of("removed", removed));
             }
         } catch (RuntimeException e) {
             log.error("The expiry digest failed", e);
-        }
-    }
-
-    /**
-     * Trimming the audit trail. Not guarded like the others: it is one delete statement,
-     * and it is not recorded in the run log because the run log is about the directory.
-     */
-    @Scheduled(cron = "${cert-alert.audit.retention.cron}", zone = "UTC")
-    public void trimAuditTrail() {
-        if (!licensing.mayRun("audit trim")) {
-            return;
-        }
-        try {
-            auditService.trim();
-        } catch (RuntimeException e) {
-            log.error("Trimming the audit trail failed", e);
         }
     }
 
@@ -179,7 +166,7 @@ public class DirectoryJobScheduler {
         if (!licensing.mayRun("revocation-checks", "revocation")) {
             return;
         }
-        runOnce(SyncJob.REVOCATION, revocationService::checkAll);
+        runOnce(SyncJob.REVOCATION, "revocation", revocationService::checkAll);
     }
 
     /**
@@ -193,7 +180,7 @@ public class DirectoryJobScheduler {
                 || !licensing.mayRun("directory-cleanup", "certificate cleanup")) {
             return;
         }
-        runOnce(SyncJob.CERTIFICATE_CLEANUP, cleanupService::run);
+        runOnce(SyncJob.CERTIFICATE_CLEANUP, "certificate cleanup", cleanupService::run);
     }
 
     @Scheduled(cron = "${cert-alert.ldap.prune.cron}", zone = "UTC")
@@ -201,18 +188,21 @@ public class DirectoryJobScheduler {
         if (!properties.getPrune().isEnabled() || !licensing.mayRun("directory-cleanup", "prune")) {
             return;
         }
-        runOnce(SyncJob.PRUNE, pruneService::prune);
+        runOnce(SyncJob.PRUNE, "prune", pruneService::prune);
     }
 
-    /** Runs the job unless it is already running, and never lets it escape as an exception. */
-    private void runOnce(SyncJob job, Runnable work) {
+    /**
+     * Runs the job unless it is already running, and never lets it escape as an exception.
+     * The run is audited as job.completed or job.failed.
+     */
+    private void runOnce(SyncJob job, String name, java.util.function.Supplier<?> work) {
         AtomicBoolean guard = running.get(job);
         if (!guard.compareAndSet(false, true)) {
             log.warn("Skipping the scheduled {} job: the previous run has not finished", job);
             return;
         }
         try {
-            work.run();
+            jobs.run(name, work);
         } catch (RuntimeException e) {
             // Already logged with context by the service; swallowing it here keeps the
             // scheduler alive for the next firing.

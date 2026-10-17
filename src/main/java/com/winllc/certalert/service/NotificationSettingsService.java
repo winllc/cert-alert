@@ -1,5 +1,7 @@
 package com.winllc.certalert.service;
 
+import com.winllc.certalert.audit.AuditRecord;
+import com.winllc.certalert.audit.AuditLog;
 import com.winllc.certalert.config.NotificationProperties;
 import com.winllc.certalert.domain.NotificationSetting;
 import com.winllc.certalert.repository.NotificationSettingRepository;
@@ -27,6 +29,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class NotificationSettingsService {
 
+    private final AuditLog auditLog;
+
     private static final Logger log = LoggerFactory.getLogger(NotificationSettingsService.class);
 
     /** Below a day there is nothing to warn about; beyond a year it is not a warning. */
@@ -39,7 +43,9 @@ public class NotificationSettingsService {
     private final Clock clock;
 
     public NotificationSettingsService(
-            NotificationSettingRepository settings, NotificationProperties properties, Clock clock) {
+            NotificationSettingRepository settings, NotificationProperties properties, Clock clock,
+            AuditLog auditLog) {
+        this.auditLog = auditLog;
         this.settings = settings;
         this.properties = properties;
         this.clock = clock;
@@ -67,6 +73,7 @@ public class NotificationSettingsService {
                     .formatted(MINIMUM_LEAD_DAYS, MAXIMUM_LEAD_DAYS));
         }
         Instant now = Instant.now(clock);
+        int previous = current().leadDays();
         NotificationSetting setting = settings
                 .findById(NotificationSetting.SINGLETON_ID)
                 .map(existing -> {
@@ -76,6 +83,11 @@ public class NotificationSettingsService {
                 .orElseGet(() -> settings.save(new NotificationSetting(leadDays, actor, now)));
 
         log.info("The expiry round-up now looks {} day(s) ahead, set by {}", leadDays, actor);
+        // In the same transaction: a change that cannot be audited is not made.
+        auditLog.record(AuditRecord.of(AuditRecord.Category.CONFIGURATION, "settings.changed")
+                .target("settings", "notifications", "Expiry round-up")
+                .detail("keys", "leadDays")
+                .change("leadDays", previous, leadDays));
         return new Settings(
                 setting.getLeadDays(), configuredLeadDays(), false, setting.getUpdatedAt(), setting.getUpdatedBy());
     }
