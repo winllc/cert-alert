@@ -97,11 +97,26 @@ server:
   # connector stop between changes rather than mid-batch, is worth a few seconds.
   shutdown: graceful
 
+  servlet:
+    session:
+      cookie:
+        # Never readable from script, and not sent on cross-site requests other than a
+        # top-level navigation. Secure is set by the container on any request that arrived
+        # over TLS - directly, or behind a proxy with server.forward-headers-strategy set -
+        # and always with ENS_COOKIE_SECURE=true, for a proxy that terminates TLS and does not
+        # say so.
+        http-only: true
+        same-site: lax
+        secure: ${ENS_COOKIE_SECURE:false}
+
   # X.509 needs TLS with client authentication. "want" is deliberate: with "need", a
   # browser holding no certificate cannot even reach the login form, so the password
   # fallback becomes unreachable.
   ssl:
     enabled: ${CERT_ALERT_TLS_ENABLED:false}
+    # TLS 1.2 and 1.3 only. Everything older is broken or deprecated (RFC 8996), and a client
+    # that cannot do 1.2 is not one to hand a session to.
+    enabled-protocols: TLSv1.3,TLSv1.2
     client-auth: want
     key-store: ${CERT_ALERT_KEYSTORE:}
     key-store-password: ${CERT_ALERT_KEYSTORE_PASSWORD:}
@@ -529,10 +544,17 @@ cert-alert:
       to: []
       subject-prefix: "[cert-alert] "
 
-# The shared ENS audit trail (ens-audit/1): one JSON line per event, chained by SHA-256,
-# stored in the database and, optionally, sent on. Every product reads the same ENS_AUDIT_*
-# variables; see the README's "Audit logging" section.
+# The ENS platform baseline: the same ENS_* settings, with the same defaults, in every ENS
+# product. See the README's "Security headers" section.
 ens:
+  csp:
+    # true sends Content-Security-Policy-Report-Only instead of enforcing the policy: an
+    # escape hatch for a page the tests missed, not a way to run.
+    report-only: ${ENS_CSP_REPORT_ONLY:false}
+
+  # The shared ENS audit trail (ens-audit/1): one JSON line per event, chained by SHA-256,
+  # stored in the database and, optionally, sent on. Every product reads the same ENS_AUDIT_*
+  # variables; see the README's "Audit logging" section.
   audit:
     # Each event as a raw JSON line on stdout (logger ens.audit, no prefix), for Docker's
     # logging driver or a Splunk Universal Forwarder.

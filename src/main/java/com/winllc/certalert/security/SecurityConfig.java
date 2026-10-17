@@ -76,8 +76,11 @@ public class SecurityConfig {
             SecurityProperties properties,
             X509DirectoryUserDetailsService x509UserDetailsService,
             List<AuthenticationProvider> authenticationProviders,
-            AccessDenials denials)
+            AccessDenials denials,
+            EnsSecurityProperties ens)
             throws Exception {
+
+        SecurityHeaders.apply(http, ens.getCsp().isReportOnly());
 
         http.authorizeHttpRequests(authorize -> authorize
                 .requestMatchers(PUBLIC_PATHS)

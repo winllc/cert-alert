@@ -663,6 +663,37 @@ element and put what follows into the page as markup.
 One trade-off worth knowing: generated content is announced by screen readers but is not
 selectable text, so the marking cannot be copied out of the page.
 
+## Security headers, cookies and TLS
+
+The ENS platform baseline, the same in every ENS product:
+
+- **Content-Security-Policy** on every response: `default-src 'self'; script-src 'self';
+  style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:;
+  connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self';
+  object-src 'none'`. Scripts come from this application only: no page has an inline script
+  or an event-handler attribute, and a test keeps it that way. `ENS_CSP_REPORT_ONLY=true`
+  sends `Content-Security-Policy-Report-Only` instead — an escape hatch for a page the tests
+  missed, not a way to run.
+- `Strict-Transport-Security: max-age=31536000; includeSubDomains` on secure requests,
+  `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+  `Referrer-Policy: strict-origin-when-cross-origin` and
+  `Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()`.
+- **The session cookie** is `HttpOnly` and `SameSite=Lax`, and `Secure` on any request that
+  arrived over TLS. `ENS_COOKIE_SECURE=true` makes it `Secure` always, for a proxy that
+  terminates TLS without saying so.
+- **TLS 1.2 and 1.3 only** when the application terminates TLS itself
+  (`server.ssl.enabled-protocols`).
+- **Behind a proxy that terminates TLS**, set `SERVER_FORWARD_HEADERS_STRATEGY=framework` so
+  the application trusts its `X-Forwarded-*` headers: redirects stay on https, HSTS and the
+  `Secure` cookie follow the browser's request, and the audit trail records the client's
+  address rather than the proxy's. Only with a proxy in front that sets those headers itself.
+  The Helm chart sets it whenever its ingress or an edge or reencrypt Route terminates TLS.
+- **The release bundle** publishes on every interface by default, as it always has
+  (`CERT_ALERT_BIND_ADDRESS`, default `0.0.0.0`); with TLS off, `install.sh` now warns that
+  passwords and cookies would cross the network in clear text.
+- **PostgreSQL**: reach a database outside the bundle's internal network over TLS, with
+  `sslmode=verify-full` in the JDBC URL (the chart's `database.params`).
+
 ## Signing in
 
 Two ways in, in order of preference.

@@ -19,6 +19,8 @@ import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.authentication.AuthenticationProvider;
 import com.winllc.certalert.license.Licensing;
+import com.winllc.certalert.security.EnsSecurityProperties;
+import com.winllc.certalert.security.SecurityHeaders;
 import com.winllc.certalert.security.SignedInDirectoryUser;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.authorization.AuthorizationDecision;
@@ -105,11 +107,14 @@ public class DemoSecurityConfig {
             List<AuthenticationProvider> authenticationProviders,
             ObjectMapper json,
             Licensing licensing,
-            AccessDenials denials)
+            AccessDenials denials,
+            EnsSecurityProperties ens)
             throws Exception {
         log.warn("DEMO MODE: every account in this directory is published on the sign-in page with "
                 + "its password. Nothing can be changed, but everything the directory holds can be "
                 + "read by anyone who can reach this application.");
+
+        SecurityHeaders.apply(http, ens.getCsp().isReportOnly());
 
         http.authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(PUBLIC_PATHS)

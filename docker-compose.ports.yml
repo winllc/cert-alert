@@ -13,6 +13,9 @@
 #   CERT_ALERT_PORT=9090 CERT_ALERT_LDAP_PORT=2389 \
 #     docker compose -f docker-compose.yml -f docker-compose.ports.yml up
 #
+# CERT_ALERT_BIND_ADDRESS=127.0.0.1 keeps the UI to this machine; the default is every
+# interface, as it always was.
+#
 # Only the host side moves. Inside the network the application is still on 8080 and the
 # directory still on 3389, which is what the images' EXPOSE, their HEALTHCHECKs and every
 # probe path assume.
@@ -23,4 +26,4 @@ services:
 
   cert-alert:
     ports:
-      - "${CERT_ALERT_PORT:-8181}:8080"
+      - "${CERT_ALERT_BIND_ADDRESS:-0.0.0.0}:${CERT_ALERT_PORT:-8181}:8080"

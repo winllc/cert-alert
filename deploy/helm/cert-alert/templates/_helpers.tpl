@@ -126,6 +126,19 @@ openshift.enabled so the restricted SCC assigns them.
 {{- if .Values.tls.enabled }}https{{ else }}http{{ end }}
 {{- end }}
 
+{{/*
+Whether something in front terminates TLS and forwards the request: an ingress, unless the
+pod serves TLS itself (passthrough), or an edge or reencrypt Route. Then the application
+trusts X-Forwarded-* (SERVER_FORWARD_HEADERS_STRATEGY=framework), so it sees the browser's
+https request. Never with passthrough: nothing in front would rewrite a client's own
+X-Forwarded-For.
+*/}}
+{{- define "cert-alert.proxyTerminatesTls" -}}
+{{- if and .Values.ingress.enabled (not .Values.tls.enabled) -}}true
+{{- else if and .Values.route.enabled (has .Values.route.tls.termination (list "edge" "reencrypt")) -}}true
+{{- end -}}
+{{- end }}
+
 {{/* The database host the application connects to. */}}
 {{- define "cert-alert.db.host" -}}
 {{- if .Values.database.embedded.enabled -}}

@@ -1,5 +1,7 @@
 package com.winllc.certalert.audit;
 
+import com.winllc.certalert.security.EnsSecurityProperties;
+import com.winllc.certalert.security.SecurityHeaders;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -33,7 +35,9 @@ public class AuditApiSecurityConfig {
 
     @Bean
     @Order(Ordered.HIGHEST_PRECEDENCE)
-    public SecurityFilterChain auditApiFilterChain(HttpSecurity http, AuditTokens tokens) throws Exception {
+    public SecurityFilterChain auditApiFilterChain(
+            HttpSecurity http, AuditTokens tokens, EnsSecurityProperties ens) throws Exception {
+        SecurityHeaders.apply(http, ens.getCsp().isReportOnly());
         http.securityMatcher(PATH)
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

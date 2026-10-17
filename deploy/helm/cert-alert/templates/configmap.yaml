@@ -13,6 +13,10 @@ data:
   SERVER_PORT: "8080"
   ENS_LICENSE_STATE_DIR: "/var/lib/ens/certalert"
   ENS_LICENSE_FILE: "/var/lib/ens/certalert/license.lic"
+  {{- if include "cert-alert.proxyTerminatesTls" . }}
+  # TLS ends at the ingress or route, which forwards the request with X-Forwarded-*.
+  SERVER_FORWARD_HEADERS_STRATEGY: "framework"
+  {{- end }}
   # Database (the password is in a Secret).
   CERT_ALERT_DB_URL: {{ printf "jdbc:postgresql://%s:%d/%s%s" (include "cert-alert.db.host" .) (int $v.database.port) $v.database.name (ternary (printf "?%s" $v.database.params) "" (ne $v.database.params "")) | quote }}
   CERT_ALERT_DB_NAME: {{ $v.database.name | quote }}

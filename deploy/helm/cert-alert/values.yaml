@@ -226,7 +226,11 @@ database:
   password: ""
   existingSecret: ""
   existingSecretKey: db-password
-  # Appended to the JDBC URL, e.g. "sslmode=verify-full".
+  # Appended to the JDBC URL. Use TLS to a database outside the cluster, or anywhere the
+  # network between is not yours: "sslmode=verify-full" checks the server's certificate and
+  # name (add "&sslrootcert=/etc/cert-alert/pg/ca.pem", mounted with extraVolumes, for a
+  # private CA); "sslmode=require" encrypts without checking who answered. Empty: the
+  # driver's default, which tries TLS and falls back to plain text without saying so.
   params: ""
   # CERT_ALERT_DB_POOL_SIZE (default 10).
   poolSize: null
