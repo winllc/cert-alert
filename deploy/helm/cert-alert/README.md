@@ -21,6 +21,15 @@ helm install cert-alert oci://ghcr.io/winllc/charts/cert-alert --version X.Y.Z \
 It is also in each release download as `cert-alert-X.Y.Z.tgz`, covered by `SHA256SUMS` and its
 signature (see the Releases page of the docs): `helm install cert-alert ./cert-alert-X.Y.Z.tgz ...`.
 
+The chart and the image are signed with cosign (keyless, by the release workflow). Check either
+by digest before installing:
+
+```bash
+cosign verify ghcr.io/winllc/charts/cert-alert@<digest> \
+  --certificate-identity-regexp 'https://github.com/winllc/cert-alert/.github/workflows/.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
 What you must set: `ldap.url`, `ldap.base`, and either `database.host` (an external PostgreSQL)
 or `database.embedded.enabled=true` (evaluation only). Set `security.adminIdentifiers` too, or
 nobody can reach the license screen or run the first sync.

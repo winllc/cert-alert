@@ -60,7 +60,9 @@ Two details from the spec shape the design:
 
 ## Licensing
 
-cert-alert needs an **ENS license** to run. Licenses are issued by the ENS licensing portal
+cert-alert is proprietary software of ENS Solutions ([`LICENSE`](LICENSE), SPDX
+`LicenseRef-ENS-Commercial`, as the image's and the chart's license labels say): its source being
+visible does not license it. It needs an **ENS license** to run. Licenses are issued by the ENS licensing portal
 (an evaluation, or the license issued against an order) in the portal's `ens-license/1`
 format, for the product id **`certalert`**, and are checked offline: the application
 verifies the Ed25519 signature against the ENS public key built into it
@@ -284,9 +286,15 @@ never moves.
 The branch name, which does. `latest`, only from the default branch. And on a `v*` tag, the
 version and its major.minor. Nothing is published from a pull request.
 
-What is published is the image that was tested, not a rebuild of it: the Dockerfile's base
-images default to floating tags, so building twice can pick up two different bases, and the
-one that answered the probe is the one that goes to the registry.
+What is published is the image that was tested, not a rebuild of it: the one that answered
+the probe and passed the vulnerability scan is the one that goes to the registry.
+
+**Every image is scanned** with Trivy (`--severity HIGH,CRITICAL --ignore-unfixed`), on every
+push and pull request, and a finding fails the build. Accepted risks are listed in
+`.trivyignore`, each with its reason and a date to look at it again. CodeQL analyses the Java
+and the page scripts on every push and weekly. Dependabot proposes updates weekly for the
+Gradle dependencies, the base images and the workflow actions — all of which are pinned, the
+images by digest and the actions by commit.
 
 Or build it yourself:
 
@@ -302,16 +310,10 @@ kilobytes and changes on every commit.
 It is built on **Red Hat's Universal Base Image** — `ubi9/openjdk-21` to build and
 `ubi9/openjdk-21-runtime` to run. UBI is freely redistributable and needs no subscription
 to pull or to run, and it is what a RHEL or OpenShift estate already has a patching story
-for, which inside an accredited network is worth more than a smaller image. Both tags are
-build arguments, so a real build pins them and a move to UBI 10 is an argument rather than
-an edit:
-
-```bash
-docker build \
-  --build-arg UBI_JDK_IMAGE=registry.access.redhat.com/ubi9/openjdk-21:1.23-1 \
-  --build-arg UBI_JRE_IMAGE=registry.access.redhat.com/ubi9/openjdk-21-runtime:1.23-1 \
-  -t cert-alert:latest .
-```
+for, which inside an accredited network is worth more than a smaller image. Both are
+pinned by digest on the `FROM` lines (the tag is kept to say which release), so a build is
+reproducible and patched bases arrive as Dependabot pull requests; moving to UBI 10 is an
+edit of those lines.
 
 It runs as the image's own uid 185 rather than a user of its own making, with everything
 owned by that uid and group 0 and the group given the owner's permissions — which is what
@@ -2758,6 +2760,28 @@ gpg --verify SHA256SUMS.asc SHA256SUMS       # and SHA256SUMS is the one ENS sig
 then `tar xzf cert-alert-<version>.tar.gz` and follow the `README.md` inside: `./install.sh`
 for a first install, `./upgrade.sh --from ../cert-alert-<old version>` to move to a new one.
 Or install `cert-alert-<version>.tgz` with Helm (see `deploy/helm/cert-alert/README.md`).
+
+**Signed images and charts.** On a release tag the image and the Helm chart are signed with
+cosign, keylessly - the signature is a certificate naming this repository's workflow, issued
+through GitHub's OIDC, with no key to keep - always by digest, and the image's SPDX SBOM is
+attached to it as an attestation. The job summary prints the digests. To check them:
+
+```bash
+cosign verify ghcr.io/winllc/cert-alert@<digest> \
+  --certificate-identity-regexp 'https://github.com/winllc/cert-alert/.github/workflows/.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+cosign verify-attestation --type spdxjson ghcr.io/winllc/cert-alert@<digest> \
+  --certificate-identity-regexp 'https://github.com/winllc/cert-alert/.github/workflows/.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+cosign verify ghcr.io/winllc/charts/cert-alert@<digest> \
+  --certificate-identity-regexp 'https://github.com/winllc/cert-alert/.github/workflows/.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+`docker buildx imagetools inspect ghcr.io/winllc/cert-alert:<version>` gives the image's
+digest; `helm pull` prints the chart's.
 
 **The Helm chart** is checked on every push and pull request by the `helm` job:
 `helm lint --strict` and `helm template` with each `deploy/helm/cert-alert/ci/*.yaml`, the

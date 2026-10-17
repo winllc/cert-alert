@@ -18,25 +18,74 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
         with:
           java-version: "21"
           distribution: temurin
 
       - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
 
       - name: Build and test
         run: ./gradlew build --no-daemon
 
       - name: Upload test report
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: test-results
+          path: build/reports/tests/test
+
+  test-postgres:
+    # The whole test suite again, on PostgreSQL rather than the in-memory H2 the build uses:
+    # production runs on PostgreSQL, and this is what runs every Flyway migration against it
+    # and holds the queries to its dialect. The test profile's datasource is replaced from
+    # the environment, which outranks it.
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17.11-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+        env:
+          POSTGRES_DB: certalert
+          POSTGRES_USER: certalert
+          POSTGRES_PASSWORD: certalert
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U certalert -d certalert"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/certalert
+      SPRING_DATASOURCE_USERNAME: certalert
+      SPRING_DATASOURCE_PASSWORD: certalert
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          java-version: "21"
+          distribution: temurin
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+
+      - name: Test on PostgreSQL
+        run: ./gradlew test --no-daemon
+
+      - name: Upload test report
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-results-postgres
           path: build/reports/tests/test
 
   helm:
@@ -50,10 +99,10 @@ jobs:
       KUBECONFORM_SHA256: 95f14e87aa28c09d5941f11bd024c1d02fdc0303ccaa23f61cef67bc92619d73
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
         with:
           version: v3.16.4
 
@@ -91,19 +140,28 @@ jobs:
           done
 
   image:
-    # Builds the container image on every push, and publishes what it just proved starts.
-    # Nothing is published from a pull request: a fork's token cannot write packages, and
-    # an image built from code nobody has reviewed is not one to leave in a registry.
+    # Builds the container image on every push, scans it, and publishes what it just proved
+    # starts and passes the scan. Nothing is published from a pull request: a fork's token
+    # cannot write packages, and an image built from code nobody has reviewed is not one to
+    # leave in a registry. On a release tag the image and the chart are signed with cosign
+    # (keyless, by this workflow's GitHub identity) and the image's SBOM attached as an
+    # attestation.
     runs-on: ubuntu-latest
     needs: build
 
     permissions:
       contents: read
       packages: write
+      # Keyless signing: cosign exchanges the workflow's OIDC token for a Fulcio certificate.
+      id-token: write
 
     env:
       # The customer release bundle (see "Release bundle" below and the README's Releases).
       PRODUCT_ID: cert-alert
+      # The image scan gate. Pinned, and checked against the release's own checksum.
+      TRIVY_VERSION: 0.75.0
+      TRIVY_SHA256: c6e65abddb348e25f10549df887045629cf28cc72453cd1c63acb717316b3f3f
+      COSIGN_VERSION: v3.1.3
       IMAGE_NAME: ghcr.io/${{ github.repository }}
       # Secrets cannot be tested in a step's `if:`, so whether they are set is mapped here.
       HAS_GPG: ${{ secrets.RELEASE_GPG_PRIVATE_KEY != '' }}
@@ -113,14 +171,14 @@ jobs:
       RELEASE_S3_REGION: ${{ vars.RELEASE_S3_REGION || 'us-east-1' }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Work out the tags
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
@@ -131,7 +189,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build the image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           push: false
@@ -167,9 +225,27 @@ jobs:
           docker rm -f cert-alert
           exit 1
 
+      - name: Install Trivy
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/trivy.tar.gz" \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          echo "$TRIVY_SHA256  $RUNNER_TEMP/trivy.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/trivy.tar.gz" -C "$RUNNER_TEMP" trivy
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Scan the image for HIGH and CRITICAL vulnerabilities
+        run: |
+          # Fails the build on any HIGH or CRITICAL finding that has a fix available, in the
+          # OS packages or the jars. Accepted risks are in .trivyignore, each with a reason
+          # and a date to look at it again.
+          trivy image --no-progress --scanners vuln \
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
+            --ignorefile .trivyignore \
+            cert-alert:ci
+
       - name: Sign in to the registry
         if: github.event_name == 'push'
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -180,10 +256,9 @@ jobs:
         env:
           TAGS: ${{ steps.meta.outputs.tags }}
         run: |
-          # Tagging and pushing the image that was just started, rather than building it
-          # again for the registry. The Dockerfile's base images default to floating tags,
-          # so a second build can pick up a different base than the one that passed above -
-          # and what is published has to be what was tested.
+          # Tagging and pushing the image that was just started and scanned, rather than
+          # building it again for the registry: what is published has to be what was tested,
+          # down to the layer digests the signature will name.
           for tag in $TAGS; do
             echo "pushing $tag"
             docker tag cert-alert:ci "$tag"
@@ -238,11 +313,11 @@ jobs:
       - name: Install syft
         id: syft
         if: steps.release.outputs.enabled == 'true'
-        uses: anchore/sbom-action/download-syft@v0
+        uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
 
       - name: Set up Helm
         if: steps.release.outputs.enabled == 'true'
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
         with:
           version: v3.16.4
 
@@ -281,8 +356,45 @@ jobs:
           CHART_REPO: oci://ghcr.io/${{ github.repository_owner }}/charts
         run: |
           echo "$GITHUB_TOKEN" | helm registry login ghcr.io -u "$ACTOR" --password-stdin
-          helm push "$OUT_DIR/$PRODUCT_ID-$VERSION.tgz" "$CHART_REPO"
+          helm push "$OUT_DIR/$PRODUCT_ID-$VERSION.tgz" "$CHART_REPO" 2>&1 | tee "$RUNNER_TEMP/helm-push.txt"
           echo "Chart: \`$CHART_REPO/$PRODUCT_ID --version $VERSION\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install cosign
+        if: steps.release.outputs.enabled == 'true' && steps.release.outputs.release == 'true'
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: ${{ env.COSIGN_VERSION }}
+
+      - name: Sign the image and the chart, and attest the image's SBOM
+        if: steps.release.outputs.enabled == 'true' && steps.release.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          OUT_DIR: ${{ steps.release.outputs.out_dir }}
+          CHART_REPO: ghcr.io/${{ github.repository_owner }}/charts
+        run: |
+          # Keyless: the signature names this workflow, on this repository, at this tag.
+          # Always by digest - a tag can be moved, a digest cannot.
+          image=$(docker inspect --format '{{ index .RepoDigests 0 }}' "$IMAGE_NAME:$VERSION")
+          case "$image" in "$IMAGE_NAME"@sha256:*) ;; *) echo "::error::no registry digest for $IMAGE_NAME:$VERSION"; exit 1 ;; esac
+          cosign sign --yes "$image"
+          cosign attest --yes --type spdxjson --predicate "$OUT_DIR/sbom-$PRODUCT_ID.spdx.json" "$image"
+
+          chart_digest=$(sed -n 's/^Digest: *//p' "$RUNNER_TEMP/helm-push.txt" | head -1)
+          [ -n "$chart_digest" ] || { echo "::error::helm push printed no digest"; exit 1; }
+          cosign sign --yes "$CHART_REPO/$PRODUCT_ID@$chart_digest"
+          {
+            echo "### Signed"
+            echo
+            echo "Image \`$image\` (with an SPDX SBOM attestation)"
+            echo "Chart \`$CHART_REPO/$PRODUCT_ID@$chart_digest\`"
+            echo
+            echo "Verify:"
+            echo '```'
+            echo "cosign verify $image \\"
+            echo "  --certificate-identity-regexp 'https://github.com/${{ github.repository }}/.github/workflows/.*' \\"
+            echo "  --certificate-oidc-issuer https://token.actions.githubusercontent.com"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Sign the checksums
         id: sign
@@ -341,7 +453,7 @@ jobs:
 
       - name: Keep the bundle as a workflow artifact
         if: steps.release.outputs.enabled == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-${{ env.PRODUCT_ID }}-${{ steps.release.outputs.version }}
           path: ${{ steps.release.outputs.out_dir }}

@@ -13,17 +13,17 @@
 # patching story for - which for a deployment inside an accredited network is worth more
 # than a smaller image.
 #
-# The tags are arguments rather than literals for two reasons: a real build should pin to
-# a digest or a dated tag rather than to a stream, and moving to UBI 10 - whose OpenJDK
-# images are the same shape - is then a build argument rather than an edit. The floating
-# stream is the default so that an unpinned build keeps getting patched bases.
-ARG UBI_JDK_IMAGE=registry.access.redhat.com/ubi9/openjdk-21:latest
-ARG UBI_JRE_IMAGE=registry.access.redhat.com/ubi9/openjdk-21-runtime:latest
+# The base images are pinned by digest, with the tag kept to say which release it is: a
+# build is reproducible, and what CI scanned is what ships. Dependabot keeps the digests
+# current (.github/dependabot.yml), which is how patched bases arrive - as a reviewed pull
+# request rather than silently. Written out on the FROM lines rather than as build
+# arguments, because that is what Dependabot reads; moving to UBI 10, whose OpenJDK images
+# are the same shape, is an edit of these three lines.
 
 # ---------------------------------------------------------------------------------------
 # 1. Build
 # ---------------------------------------------------------------------------------------
-FROM ${UBI_JDK_IMAGE} AS build
+FROM registry.access.redhat.com/ubi9/openjdk-21:1.24@sha256:bd995811a45eb587f97a105796f8f43df466a4269411a2a1642f0f9799f885db AS build
 
 # These images run as uid 185 and their home is not writable for a Gradle build; nothing
 # built here is shipped, so the build stage is root and the runtime stage is not.
@@ -71,7 +71,7 @@ RUN set -eu; \
 # ---------------------------------------------------------------------------------------
 # 2. Split into layers
 # ---------------------------------------------------------------------------------------
-FROM ${UBI_JDK_IMAGE} AS extract
+FROM registry.access.redhat.com/ubi9/openjdk-21:1.24@sha256:bd995811a45eb587f97a105796f8f43df466a4269411a2a1642f0f9799f885db AS extract
 
 USER root
 WORKDIR /extract
@@ -86,13 +86,10 @@ RUN java -Djarmode=tools -jar application.jar extract \
 # ---------------------------------------------------------------------------------------
 # 3. Runtime
 # ---------------------------------------------------------------------------------------
-FROM ${UBI_JRE_IMAGE}
+FROM registry.access.redhat.com/ubi9/openjdk-21-runtime:1.24@sha256:856ee6542b8fdf09a065fd5439309fc3f3c821fb8efac48aa6191c93635dd907
 
 USER root
 
-# Re-declared: an argument set before the first FROM reaches the FROM lines and nothing
-# else, so the label below would otherwise read as empty.
-ARG UBI_JRE_IMAGE
 ARG VERSION=0.0.1-SNAPSHOT
 ARG REVISION=unknown
 LABEL org.opencontainers.image.title="cert-alert" \
@@ -100,8 +97,10 @@ LABEL org.opencontainers.image.title="cert-alert" \
       org.opencontainers.image.source="https://github.com/winllc/cert-alert" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${REVISION}" \
-      org.opencontainers.image.licenses="MIT" \
-      org.opencontainers.image.base.name="${UBI_JRE_IMAGE}" \
+      org.opencontainers.image.vendor="ENS Solutions" \
+      org.opencontainers.image.licenses="LicenseRef-ENS-Commercial" \
+      com.enssolutions.license.terms="https://github.com/winllc/cert-alert/blob/main/LICENSE" \
+      org.opencontainers.image.base.name="registry.access.redhat.com/ubi9/openjdk-21-runtime" \
       com.enssolutions.license.path="/var/lib/ens/certalert/license.lic"
 
 # curl is for the health check below. The minimal UBI these images are built on ships
