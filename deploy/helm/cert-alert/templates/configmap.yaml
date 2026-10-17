@@ -45,6 +45,22 @@ data:
   CERT_ALERT_TRUSTSTORE: {{ printf "file:/etc/cert-alert/tls/truststore/%s" $v.tls.truststore.key | quote }}
   CERT_ALERT_TRUSTSTORE_TYPE: {{ $v.tls.truststore.type | quote }}
   {{- end }}
+  # Client-certificate sign-in (the proxy secret and CA are files from Secrets).
+  ENS_X509_SOURCE: {{ $v.x509.source | quote }}
+  {{- include "cert-alert.envLine" (dict "name" "ENS_X509_HEADER" "value" $v.x509.header) }}
+  {{- include "cert-alert.envLine" (dict "name" "ENS_X509_TRUSTED_PROXIES" "value" $v.x509.trustedProxies) }}
+  {{- if include "cert-alert.x509ProxySecretConfigured" . }}
+  ENS_X509_PROXY_SECRET_FILE: "/etc/cert-alert/x509-proxy/proxy-secret"
+  {{- end }}
+  {{- if include "cert-alert.x509CaConfigured" . }}
+  ENS_X509_TRUSTED_CA_FILE: "/etc/cert-alert/x509-ca/ca.pem"
+  {{- end }}
+  ENS_X509_REVOCATION: {{ $v.x509.revocation | toString | quote }}
+  {{- include "cert-alert.envLine" (dict "name" "ENS_X509_OCSP_RESPONDER_URL" "value" $v.x509.ocspResponderUrl) }}
+  {{- include "cert-alert.envLine" (dict "name" "ENS_X509_REVOCATION_FAIL" "value" $v.x509.revocationFail) }}
+  {{- include "cert-alert.envLine" (dict "name" "ENS_X509_REVOCATION_CACHE" "value" $v.x509.revocationCache) }}
+  {{- include "cert-alert.envLine" (dict "name" "ENS_X509_ALLOWED_ISSUERS" "value" $v.x509.allowedIssuers) }}
+  {{- include "cert-alert.envLine" (dict "name" "ENS_X509_USER_FILTER" "value" $v.x509.userFilter) }}
   # Email (the password is in a Secret).
   {{- include "cert-alert.envLine" (dict "name" "SPRING_MAIL_HOST" "value" $v.mail.host) }}
   {{- include "cert-alert.envLine" (dict "name" "SPRING_MAIL_PORT" "value" $v.mail.port) }}

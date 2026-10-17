@@ -38,11 +38,18 @@ import org.springframework.transaction.annotation.Transactional;
  * The cache has: a certificate it knows to be revoked, or whose dates say it is not good
  * now, is refused here whatever the directory still publishes.
  *
+ * <p>Before any of that, every certificate - published or not - is held to the ENS
+ * baseline's checks ({@link ClientCertificateChecks}): an issuer on
+ * {@code ENS_X509_ALLOWED_ISSUERS} where that is set, and not revoked where
+ * {@code ENS_X509_REVOCATION} asks.
+ *
  * <p>Falling back to subject and subject-alternative names is available for directories
  * whose people hold certificates they do not publish, but it is off by default because it
  * trusts a name rather than a key. Even then only a uid or an address is matched, against
  * what the directory publishes for a person - never a common name, and never an address
- * added in this application.
+ * added in this application. Where {@code ENS_X509_USER_FILTER} is set, that filter - with
+ * the certificate's UPN, EDIPI, address or FASC-N UUID filled in - is what finds them
+ * instead ({@link CertificateMapping}), and it has to find exactly one.
  */
 @Service
 public class X509DirectoryUserDetailsService
@@ -53,16 +60,22 @@ public class X509DirectoryUserDetailsService
     private final CachedCertificateRepository certificateRepository;
     private final DirectoryPrincipalResolver resolver;
     private final SecurityProperties properties;
+    private final ClientCertificateChecks checks;
+    private final CertificateMapping mapping;
     private final Clock clock;
 
     public X509DirectoryUserDetailsService(
             CachedCertificateRepository certificateRepository,
             DirectoryPrincipalResolver resolver,
             SecurityProperties properties,
+            ClientCertificateChecks checks,
+            CertificateMapping mapping,
             Clock clock) {
         this.certificateRepository = certificateRepository;
         this.resolver = resolver;
         this.properties = properties;
+        this.checks = checks;
+        this.mapping = mapping;
         this.clock = clock;
     }
 
@@ -71,6 +84,7 @@ public class X509DirectoryUserDetailsService
     public UserDetails loadUserDetails(PreAuthenticatedAuthenticationToken token) {
         X509Certificate certificate = certificateOf(token);
         String subject = certificate.getSubjectX500Principal().getName();
+        checks.check(certificate, chainOf(token, certificate));
 
         Optional<DirectoryUser> byFingerprint = byPublishedCertificate(certificate, subject);
         if (byFingerprint.isPresent()) {
@@ -82,6 +96,16 @@ public class X509DirectoryUserDetailsService
         if (properties.getX509().isRequireKnownCertificate()) {
             log.warn("Rejecting client certificate '{}': the directory publishes no such certificate", subject);
             throw new UsernameNotFoundException("Certificate is not published by the directory");
+        }
+
+        if (mapping.isConfigured()) {
+            return mapping.find(certificate)
+                    .map(user -> {
+                        log.debug("Client certificate '{}' mapped to directory entry '{}' by ENS_X509_USER_FILTER",
+                                subject, user.getDn());
+                        return (UserDetails) resolver.principalFor(user, DirectoryPrincipal.AuthenticationMethod.X509);
+                    })
+                    .orElseThrow(() -> new UsernameNotFoundException("ENS_X509_USER_FILTER found nobody for this certificate"));
         }
 
         Set<String> identifiers = X509Identifiers.of(certificate);
@@ -140,6 +164,16 @@ public class X509DirectoryUserDetailsService
             throw new RefusedCertificateException(RefusedCertificateException.Reason.NOT_YET_VALID, fingerprint);
         }
         return Optional.of(cached.getUser());
+    }
+
+    /** The chain that came with it, where the filter recorded one; the certificate alone otherwise. */
+    private static List<X509Certificate> chainOf(PreAuthenticatedAuthenticationToken token, X509Certificate certificate) {
+        if (token.getDetails() instanceof ClientCertificateDetails details
+                && !details.chain().isEmpty()
+                && details.chain().getFirst().equals(certificate)) {
+            return details.chain();
+        }
+        return List.of(certificate);
     }
 
     /**

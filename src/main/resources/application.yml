@@ -570,6 +570,33 @@ ens:
     # suggests 3.
     max-per-user: ${ENS_SESSION_MAX_PER_USER:0}
 
+  # Client-certificate sign-in, on top of cert-alert.security.x509: revocation at sign-in,
+  # the issuers accepted, mapping a certificate the directory does not publish, and
+  # certificates forwarded by a TLS-terminating proxy. See the README's "A client
+  # certificate" section.
+  x509:
+    # off, ocsp, crl or ocsp-then-crl.
+    revocation: ${ENS_X509_REVOCATION:off}
+    ocsp-responder-url: ${ENS_X509_OCSP_RESPONDER_URL:}
+    # CRL files (DER or PEM), re-read when they change; with it set nothing is fetched.
+    crl-dir: ${ENS_X509_CRL_DIR:}
+    # closed refuses a certificate whose status cannot be found; open allows it, warning.
+    revocation-fail: ${ENS_X509_REVOCATION_FAIL:closed}
+    revocation-cache: ${ENS_X509_REVOCATION_CACHE:10m}
+    # Issuer DNs, separated by semicolons (a DN has commas of its own). Empty: any the
+    # trust store accepts.
+    allowed-issuers: ${ENS_X509_ALLOWED_ISSUERS:}
+    # An LDAP filter with {upn}, {edipi}, {email} and {uuid}, for a certificate the directory
+    # does not publish (only with require-known-certificate off).
+    user-filter: ${ENS_X509_USER_FILTER:}
+    # servlet (this application terminates TLS) or header (a proxy does, and forwards it).
+    source: ${ENS_X509_SOURCE:servlet}
+    header: ${ENS_X509_HEADER:X-SSL-Client-Cert}
+    trusted-proxies: ${ENS_X509_TRUSTED_PROXIES:127.0.0.1/32,::1/128}
+    proxy-secret: ${ENS_X509_PROXY_SECRET:}
+    proxy-secret-file: ${ENS_X509_PROXY_SECRET_FILE:}
+    trusted-ca-file: ${ENS_X509_TRUSTED_CA_FILE:}
+
   consent-banner:
     enabled: ${ENS_CONSENT_BANNER_ENABLED:false}
     title: ${ENS_CONSENT_BANNER_TITLE:}

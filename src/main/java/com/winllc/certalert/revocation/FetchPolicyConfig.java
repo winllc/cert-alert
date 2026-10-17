@@ -1,6 +1,7 @@
 package com.winllc.certalert.revocation;
 
 import com.winllc.certalert.config.RevocationProperties;
+import com.winllc.certalert.security.EnsX509Properties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -12,10 +13,13 @@ import org.springframework.context.annotation.Configuration;
 public class FetchPolicyConfig {
 
     @Bean
-    public FetchPolicy revocationFetchPolicy(RevocationProperties revocation) {
-        // The responder and list configured here are somebody's decision, not a
+    public FetchPolicy revocationFetchPolicy(RevocationProperties revocation, EnsX509Properties x509) {
+        // The responders and list configured here are somebody's decision, not a
         // certificate's, so their hosts are allowed whatever else is.
         return FetchPolicy.of(
-                revocation.getAllowedHosts(), revocation.getDefaultOcspUrl(), revocation.getDefaultCrlUrl());
+                revocation.getAllowedHosts(),
+                revocation.getDefaultOcspUrl(),
+                revocation.getDefaultCrlUrl(),
+                x509.getOcspResponderUrl());
     }
 }

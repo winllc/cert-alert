@@ -173,11 +173,12 @@ security:
 # ---------------------------------------------------------------------------------------
 # TLS in the pod, and with it X.509 client-certificate sign-in
 # ---------------------------------------------------------------------------------------
-# Client certificates reach the application only when it terminates TLS itself: it reads
-# the certificate from the TLS handshake and accepts no forwarded-certificate header. So
-# certificate sign-in needs TLS passthrough to the pod (ingress-nginx ssl-passthrough, an
-# OpenShift Route with termination: passthrough, or a LoadBalancer Service). With TLS
-# terminated at an ingress, password sign-in still works.
+# Client certificates reach the application one of two ways (x509.source, below): from the
+# TLS handshake when the pod terminates TLS itself - TLS passthrough to the pod
+# (ingress-nginx ssl-passthrough, an OpenShift Route with termination: passthrough, or a
+# LoadBalancer Service) - or, with x509.source=header, in a header from an ingress that
+# terminates TLS and verifies the client certificate. With TLS terminated at an ingress and
+# no header, password sign-in still works.
 tls:
   # CERT_ALERT_TLS_ENABLED. The application then serves HTTPS on the same port (8080).
   enabled: false
@@ -200,6 +201,54 @@ tls:
     password: ""
     passwordExistingSecret: ""
     passwordExistingSecretKey: truststore-password
+
+# ---------------------------------------------------------------------------------------
+# Client-certificate (CAC/PIV) sign-in - the ENS_X509_* settings
+# ---------------------------------------------------------------------------------------
+x509:
+  # ENS_X509_SOURCE. servlet: the certificate from the pod's own TLS handshake (tls.enabled,
+  # with passthrough). header: from a header set by a TLS-terminating proxy - the ingress
+  # controller - which verified the client certificate. Header mode needs proxySecret and
+  # trustedCa below, or the chart refuses to render (and the application to start).
+  source: servlet
+  # ENS_X509_HEADER. Empty: X-SSL-Client-Cert. ingress-nginx with
+  # nginx.ingress.kubernetes.io/auth-tls-pass-certificate-to-upstream: "true" sends
+  # "ssl-client-cert" (URL-encoded PEM).
+  header: ""
+  # ENS_X509_TRUSTED_PROXIES: the addresses (CIDRs) the header is accepted from - the
+  # ingress controller's pods, so the pod network.
+  trustedProxies: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+  # The shared secret the proxy sends in X-ENS-Proxy-Secret (ENS_X509_PROXY_SECRET_FILE):
+  # at least 32 characters, e.g. openssl rand -hex 32. A Secret of your own, or the value
+  # (rendered into the chart's Secret). The proxy has to send the same value, e.g. with
+  # ingress-nginx: proxy_set_header X-ENS-Proxy-Secret "<secret>"; in a configuration
+  # snippet, or the controller's proxy-set-headers ConfigMap.
+  proxySecret:
+    existingSecret: ""
+    existingSecretKey: proxy-secret
+    value: ""
+  # The CA certificates (PEM) a forwarded certificate must chain to
+  # (ENS_X509_TRUSTED_CA_FILE). Also searched for an issuer when checking revocation.
+  trustedCa:
+    existingSecret: ""
+    existingSecretKey: ca.pem
+    value: ""
+  # ENS_X509_REVOCATION: off, ocsp, crl or ocsp-then-crl. The STIG requires it on.
+  revocation: "off"
+  # ENS_X509_OCSP_RESPONDER_URL: ask here instead of the certificate's own responder.
+  ocspResponderUrl: ""
+  # ENS_X509_REVOCATION_FAIL: closed (refuse when unknown) or open.
+  revocationFail: closed
+  # ENS_X509_REVOCATION_CACHE, e.g. 10m. Empty: the application default.
+  revocationCache: ""
+  # ENS_X509_ALLOWED_ISSUERS: issuer DNs separated by semicolons. Empty: any trusted issuer.
+  allowedIssuers: ""
+  # ENS_X509_USER_FILTER, e.g. (uid={edipi}): finds the holder of a certificate the
+  # directory does not publish (with {upn}, {edipi}, {email}, {uuid}). Only used with
+  # CERT_ALERT_SECURITY_X509_REQUIRE_KNOWN_CERTIFICATE=false (extraEnv).
+  userFilter: ""
+  # For ENS_X509_CRL_DIR (the air-gapped CRL option), mount the CRLs with extraVolumes and
+  # pass the path in extraEnv.
 
 # A trust store for outbound TLS: an ldaps:// directory, SMTP server or Splunk whose
 # certificate comes from a private CA. Added to JAVA_OPTS as -Djavax.net.ssl.trustStore*.

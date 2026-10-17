@@ -330,6 +330,80 @@
         }
       }
     },
+    "x509": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": [
+            "servlet",
+            "header"
+          ]
+        },
+        "header": {
+          "type": "string"
+        },
+        "trustedProxies": {
+          "type": "string"
+        },
+        "proxySecret": {
+          "type": "object",
+          "properties": {
+            "existingSecret": {
+              "type": "string"
+            },
+            "existingSecretKey": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          }
+        },
+        "trustedCa": {
+          "type": "object",
+          "properties": {
+            "existingSecret": {
+              "type": "string"
+            },
+            "existingSecretKey": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          }
+        },
+        "revocation": {
+          "type": "string",
+          "enum": [
+            "off",
+            "ocsp",
+            "crl",
+            "ocsp-then-crl"
+          ]
+        },
+        "ocspResponderUrl": {
+          "type": "string"
+        },
+        "revocationFail": {
+          "type": "string",
+          "enum": [
+            "closed",
+            "open"
+          ]
+        },
+        "revocationCache": {
+          "type": "string"
+        },
+        "allowedIssuers": {
+          "type": "string"
+        },
+        "userFilter": {
+          "type": "string"
+        }
+      }
+    },
     "caTruststore": {
       "type": "object",
       "properties": {

@@ -94,6 +94,11 @@ public class IssuerCertificates {
         return named != null && named.size() == 1 ? Optional.of(named.getFirst()) : Optional.empty();
     }
 
+    /** Every certificate loaded, for a caller that has a certificate rather than a cached row. */
+    public List<X509Certificate> all() {
+        return bySubject.values().stream().flatMap(List::stream).toList();
+    }
+
     /** Whoever signed this CRL, by the name it carries. */
     public Optional<X509Certificate> issuerNamed(String subjectDn) {
         List<X509Certificate> named = bySubject.get(subjectDn);

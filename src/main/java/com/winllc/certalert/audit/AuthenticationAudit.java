@@ -7,6 +7,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.security.authentication.AccountStatusException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.InternalAuthenticationServiceException;
+import org.springframework.security.authentication.ProviderNotFoundException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.authentication.event.AbstractAuthenticationFailureEvent;
 import org.springframework.security.authentication.event.AuthenticationSuccessEvent;
@@ -65,6 +66,12 @@ public class AuthenticationAudit {
 
     @EventListener
     public void failed(AbstractAuthenticationFailureEvent event) {
+        if (event.getException() instanceof ProviderNotFoundException) {
+            // The parent authentication manager saying it has no provider for a certificate,
+            // after this chain's own has already refused it - and published that, with the
+            // real reason. Recording it as well would make every refusal two.
+            return;
+        }
         Authentication attempt = event.getAuthentication();
         String method = methodOf(attempt);
         String attempted = attempt == null ? null : attempt.getName();

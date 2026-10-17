@@ -773,9 +773,8 @@ was given. A certificate the [revocation check](#revocation) has found revoked, 
 validity dates do not cover the present moment, is refused even though the directory
 publishes it, and the refusal is recorded as a failed `auth.login` whose reason says which
 (`certificate revoked`, `certificate expired`, `certificate not yet valid`) with the
-certificate's fingerprint — at `alert` severity for a revoked one. A certificate whose
-revocation has not been checked, or could not be, still signs in; this is the cache's
-answer, not a live OCSP or CRL query at the handshake.
+certificate's fingerprint — at `alert` severity for a revoked one. That is the cache's
+answer; the live check at sign-in is below.
 
 Setting `cert-alert.security.x509.require-known-certificate: false` falls back to matching
 the `uid` and email address in the certificate's subject, and its `rfc822Name` alternative
@@ -783,6 +782,76 @@ names, against the uid and addresses the directory publishes for a person. That 
 name rather than a key, so it is off by default. The subject's common name is never
 matched — any authority in the truststore can issue a certificate to any name — and a
 certificate whose values name more than one person signs in nobody.
+
+A certificate is checked on every request it is presented with, not remembered by the
+session: removing it from the directory, or its authority revoking it, takes effect at once.
+
+#### CAC/PIV: revocation at sign-in, issuers, and mapping (ENS baseline)
+
+The same settings, with the same meanings, in every ENS product that signs in with
+certificates.
+
+| Setting | Default | |
+|---|---|---|
+| `ENS_X509_REVOCATION` | `off` | `off`, `ocsp`, `crl` or `ocsp-then-crl`: checked live, for every certificate presented, before it is matched to anybody |
+| `ENS_X509_OCSP_RESPONDER_URL` | — | Ask this responder instead of the one the certificate names — a local OCSP relay on an air-gapped network |
+| `ENS_X509_CRL_DIR` | — | A directory of CRL files (DER or PEM), re-read when they change. With it set, no distribution point is fetched over the network: the air-gapped option |
+| `ENS_X509_REVOCATION_FAIL` | `closed` | `closed`: when the status cannot be found, refuse. `open`: allow, and log a warning |
+| `ENS_X509_REVOCATION_CACHE` | `10m` | How long a good or revoked answer is reused, per issuer and serial number. No answer is reused for 30 seconds |
+| `ENS_X509_ALLOWED_ISSUERS` | — | Issuer DNs, separated by `;`. When set, a certificate from any other issuer is refused even if the trust store accepts it. Compared as names (RFC 4514), so spacing and case do not matter |
+| `ENS_X509_USER_FILTER` | — | An LDAP filter that finds the holder of a certificate the directory does not publish, with `{upn}`, `{edipi}`, `{email}` and `{uuid}` filled in — e.g. `(uid={edipi})`. Used instead of the uid/address matching above, and only with `require-known-certificate: false` |
+
+- **Revocation** needs the certificate's issuer: it is taken from the chain the browser
+  presented, `ENS_X509_TRUSTED_CA_FILE`, `cert-alert.revocation.issuer-directory` or the TLS
+  trust store, whichever has a certificate whose key verifies it. OCSP answers are checked
+  by the platform's path validator; a CRL counts only if it is signed by the issuer and not
+  past its next update. Fetches have 5 s to connect and 10 s to answer, follow redirects to
+  http and https only, and never go to link-local or metadata addresses
+  (`cert-alert.revocation.allowed-hosts` applies here too). A refusal is a failed
+  `auth.login` with reason `certificate revoked` or `revocation unknown`. **The default is
+  `off`, for upgrades** — and with certificate sign-in on and revocation off, a warning at
+  startup says the STIG requires it.
+- **`{upn}`** is the SAN otherName UserPrincipalName; **`{edipi}`** the digits of a
+  `1234567890@mil` UPN, or else the trailing number of a `LAST.FIRST.MI.1234567890` common
+  name; **`{email}`** the rfc822Name SAN, or else the subject's emailAddress; **`{uuid}`** the
+  `urn:uuid:` SAN URI (the PIV FASC-N UUID). Every value is LDAP-escaped where it is put in.
+  A filter naming a value the certificate does not carry is not searched with, and a search
+  that finds no entry or more than one — or one this application has not synced — signs
+  nobody in. Published-certificate fingerprint matching stays the first and preferred way.
+- **An issuer not on the allowlist** is refused with reason `issuer not allowed`.
+
+#### Behind a TLS-terminating proxy (header mode)
+
+By default (`ENS_X509_SOURCE=servlet`) a certificate is read from the TLS handshake the
+application terminates itself. With `ENS_X509_SOURCE=header`, a proxy in front terminates
+TLS, verifies the client certificate, and forwards it:
+
+| Setting | Default | |
+|---|---|---|
+| `ENS_X509_SOURCE` | `servlet` | `servlet` or `header` |
+| `ENS_X509_HEADER` | `X-SSL-Client-Cert` | The header, URL-encoded PEM as nginx's `$ssl_client_escaped_cert` sends it (ingress-nginx: `ssl-client-cert`) |
+| `ENS_X509_TRUSTED_PROXIES` | `127.0.0.1/32,::1/128` | Addresses (CIDRs) the header is accepted from: the proxy's |
+| `ENS_X509_PROXY_SECRET_FILE` / `ENS_X509_PROXY_SECRET` | — | At least 32 characters, which the proxy sends in `X-ENS-Proxy-Secret`; compared in constant time. The file wins |
+| `ENS_X509_TRUSTED_CA_FILE` | — | PEM certificates of the CAs a forwarded certificate must chain to |
+
+The header is believed only when the connection itself comes from a trusted proxy address
+(never an address a forwarded-for header claims) **and** carries the secret, and the
+certificate then chains to a CA in the file, is in date and is not restricted to some use
+other than client authentication. Anything else is refused and recorded as a failed
+`auth.login` (`certificate header not from a trusted proxy`, `certificate not trusted`). In
+header mode a certificate from the application's own TLS handshake is ignored. **The
+application refuses to start** in header mode without a secret of 32 characters or more,
+without the CA file, or with `SERVER_FORWARD_HEADERS_STRATEGY=native` (use `framework`).
+
+The proxy must set both headers itself and drop any copy a client sends. With nginx:
+
+```nginx
+ssl_verify_client optional;              # or on
+ssl_client_certificate /etc/nginx/dod-cas.pem;
+proxy_set_header X-SSL-Client-Cert  $ssl_client_escaped_cert;
+proxy_set_header X-ENS-Proxy-Secret "<the secret>";
+proxy_set_header X-Forwarded-Proto  $scheme;
+```
 
 ### A directory password
 

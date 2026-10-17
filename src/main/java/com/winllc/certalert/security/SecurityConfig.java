@@ -13,6 +13,7 @@ import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.authentication.AuthenticationEventPublisher;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.DefaultAuthenticationEventPublisher;
 import org.springframework.security.authentication.event.AuthenticationFailureBadCredentialsEvent;
@@ -81,12 +82,19 @@ public class SecurityConfig {
             AccessDenials denials,
             EnsSecurityProperties ens,
             ConsentBanner consentBanner,
-            SessionPolicy sessionPolicy)
+            SessionPolicy sessionPolicy,
+            EnsX509Properties x509,
+            ForwardedCertificates forwardedCertificates,
+            AuthenticationEventPublisher authenticationEvents)
             throws Exception {
 
         SecurityHeaders.apply(http, ens.getCsp().isReportOnly());
         // Ahead of every sign-in filter, so nothing signs anybody in before they have agreed.
         http.addFilterBefore(new ConsentFilter(consentBanner), X509AuthenticationFilter.class);
+        // Then where the certificate comes from: the TLS handshake, or a trusted proxy's header.
+        http.addFilterBefore(
+                new ClientCertificateHeaderFilter(x509, forwardedCertificates, authenticationEvents),
+                X509AuthenticationFilter.class);
         // After every sign-in filter, before anything is authorised: idle, absolute and
         // concurrent limits, the same whichever way somebody signed in.
         http.addFilterBefore(new SessionPolicyFilter(sessionPolicy), ExceptionTranslationFilter.class);
@@ -175,9 +183,11 @@ public class SecurityConfig {
                 .authenticated());
 
         if (properties.getX509().isEnabled()) {
-            http.x509(x509 -> x509
+            http.x509(certificates -> certificates
                     // Names the principal for logs; the real resolution is by fingerprint.
                     .x509PrincipalExtractor(new SubjectX500PrincipalExtractor())
+                    // Keeps the whole chain, which the revocation check needs for the issuer.
+                    .authenticationDetailsSource(ClientCertificateDetails::new)
                     .authenticationUserDetailsService(x509UserDetailsService));
         }
 
