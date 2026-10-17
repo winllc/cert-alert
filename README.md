@@ -1661,6 +1661,16 @@ window rather than quietly reporting the same thirty days. The two are separate 
 the threshold is what the tables and the page alerts call expiring, and this is how far ahead
 the email looks.
 
+**What one run reads.** The certificates about to expire, and — with
+`cert-alert.notifications.digest.include-expired`, on by default — those already expired,
+are read separately, each up to `cert-alert.notifications.digest.scan-limit` (10,000), and
+the ones about to expire first. However many old certificates a directory goes on
+publishing, they cannot push next week's out of the round-up. An expired certificate on an
+entry that holds a current one is left out by the read itself, so the leftovers of renewals
+use none of the limit; of what remains, a capped read keeps the most recently expired. A run
+that reaches the limit logs a warning naming which of the two it was, and leaves earlier
+round-ups in place rather than clearing ones it may simply not have reached.
+
 Email is off until `cert-alert.notifications.email.enabled` is set and `spring.mail.*` is
 configured. The notifications are written and shown on the page either way.
 

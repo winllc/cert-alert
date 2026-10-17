@@ -434,6 +434,10 @@ cert-alert:
       # Clearing the row the page writes (notification_setting) comes back to this.
       window: 30d
       include-expired: true
+      # The most certificates one run reads of each kind - about to expire, and already
+      # expired but still depended on - each to its own limit, the first read first. A
+      # run that reaches either says which in a warning; raise this if it does.
+      scan-limit: 10000
     email:
       # Off by default, and needs spring.mail.* configured. This writes to the contact of
       # the certificate rather than to a fixed list. The message is rendered from the
