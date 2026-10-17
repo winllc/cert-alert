@@ -2,16 +2,20 @@ package com.winllc.certalert.security;
 
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import com.winllc.certalert.audit.AccessDenials;
 import com.winllc.certalert.audit.AuditingAccessDeniedHandler;
 import com.winllc.certalert.demo.DemoMode;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationProvider;
+import org.springframework.security.authentication.DefaultAuthenticationEventPublisher;
+import org.springframework.security.authentication.event.AuthenticationFailureBadCredentialsEvent;
 import org.springframework.security.authorization.AuthenticatedAuthorizationManager;
 import org.springframework.security.authorization.AuthorityAuthorizationManager;
 import org.springframework.security.authorization.AuthorizationManager;
@@ -175,6 +179,21 @@ public class SecurityConfig {
                         .accessDeniedHandler(new AuditingAccessDeniedHandler(new AccessDeniedHandlerImpl(), denials)));
 
         return http.build();
+    }
+
+    /**
+     * Spring Boot's publisher, plus the one failure of ours it would otherwise not publish.
+     *
+     * <p>It maps exceptions to failure events by exact class, and has no event for one it
+     * does not know - so a revoked or expired certificate being refused would leave no
+     * {@code auth.login} failure in the audit trail at all.
+     */
+    @Bean
+    public DefaultAuthenticationEventPublisher authenticationEventPublisher(ApplicationEventPublisher publisher) {
+        DefaultAuthenticationEventPublisher events = new DefaultAuthenticationEventPublisher(publisher);
+        events.setAdditionalExceptionMappings(
+                Map.of(RefusedCertificateException.class, AuthenticationFailureBadCredentialsEvent.class));
+        return events;
     }
 
     /**

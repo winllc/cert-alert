@@ -309,8 +309,11 @@ cert-alert:
   security:
     # Turning this off leaves the application open. Local development only.
     enabled: true
-    # Any value the directory knows a person by: an address, a uid, a common name.
-    # Everyone else who signs in can read the tables but cannot trigger jobs.
+    # Who administers, by an address the directory publishes for them, their uid, or the
+    # DN of their entry. Not a common or display name: two people can share one, and the
+    # directory lets anybody be called anything. Not an address added in this application
+    # either - one of these cannot be added as one. Everyone else who signs in can read the
+    # tables but cannot trigger jobs.
     admin-identifiers: []
 
     # Who may edit a server's points of contact: ADMIN or AUTHENTICATED. A contact decides
@@ -322,8 +325,9 @@ cert-alert:
     x509:
       enabled: true
       # Match the presented certificate against the ones the directory publishes, by
-      # fingerprint. Turning this off falls back to matching its subject and subject
-      # alternative names against directory entries, which trusts a name rather than a key.
+      # fingerprint. Turning this off falls back to matching the uid and addresses in its
+      # subject and subject alternative names against what the directory publishes for a
+      # person, which trusts a name rather than a key. Its common name is never matched.
       require-known-certificate: true
 
     ldap:
@@ -431,6 +435,10 @@ cert-alert:
       # Clearing the row the page writes (notification_setting) comes back to this.
       window: 30d
       include-expired: true
+      # The most certificates one run reads of each kind - about to expire, and already
+      # expired but still depended on - each to its own limit, the first read first. A
+      # run that reaches either says which in a warning; raise this if it does.
+      scan-limit: 10000
     email:
       # Off by default, and needs spring.mail.* configured. This writes to the contact of
       # the certificate rather than to a fixed list. The message is rendered from the

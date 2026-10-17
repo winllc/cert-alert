@@ -694,9 +694,21 @@ no certificate and the password fallback becomes unreachable. Being in the trust
 gets a certificate as far as the application; it still has to be one the directory
 publishes.
 
+Being published is not enough on its own, because a directory goes on publishing what it
+was given. A certificate the [revocation check](#revocation) has found revoked, or whose
+validity dates do not cover the present moment, is refused even though the directory
+publishes it, and the refusal is recorded as a failed `auth.login` whose reason says which
+(`certificate revoked`, `certificate expired`, `certificate not yet valid`) with the
+certificate's fingerprint — at `alert` severity for a revoked one. A certificate whose
+revocation has not been checked, or could not be, still signs in; this is the cache's
+answer, not a live OCSP or CRL query at the handshake.
+
 Setting `cert-alert.security.x509.require-known-certificate: false` falls back to matching
-the certificate's subject and `rfc822Name` alternative names against directory entries.
-That trusts a name rather than a key, so it is off by default.
+the `uid` and email address in the certificate's subject, and its `rfc822Name` alternative
+names, against the uid and addresses the directory publishes for a person. That trusts a
+name rather than a key, so it is off by default. The subject's common name is never
+matched — any authority in the truststore can issue a certificate to any name — and a
+certificate whose values name more than one person signs in nobody.
 
 ### A directory password
 
@@ -725,18 +737,28 @@ nothing else, and there will be no password path at all.
 | `ROLE_ADMIN` | Also trigger the jobs and reach the management endpoints   |
 
 Everyone who authenticates gets `ROLE_USER`. `ROLE_ADMIN` comes from
-`cert-alert.security.admin-identifiers`, matched against **any** value the directory knows
-a person by — an address, a uid, a common name:
+`cert-alert.security.admin-identifiers`, matched against what the directory says identifies
+a person — any address it publishes for them, their uid, or the DN of their entry:
 
 ```yaml
 cert-alert:
   security:
-    admin-identifiers: [alice@intelink.ic.gov]
+    admin-identifiers:
+      - alice@intelink.ic.gov
+      - uid=bob,ou=people,dc=example,dc=gov
 ```
 
-On a fresh deployment the cache is empty, so roles for someone signing in with a password
-are resolved from the directory entry they just bound against. Otherwise nobody could
-trigger the first sync.
+A common name, display name or preferred name is never matched: two people can share one,
+and the directory lets anybody be called anything. A DN has commas in it, so name one as a
+block-style list item as above: not in a flow list (`[...]`), and not in the comma-separated
+`CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS`, both of which split it at its commas. From the
+environment, use indexed variables instead (`CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS_0`,
+`CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS_1`, …), with `CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS` unset.
+
+A password sign-in is resolved to the cached person at the DN it bound as, and to nobody
+else. On a fresh deployment the cache is empty, so roles for someone signing in with a
+password are resolved from the directory entry they just bound against — its DN, uid and
+addresses, and the username typed. Otherwise nobody could trigger the first sync.
 
 `/actuator/health` stays open so the thing can be monitored. Everything else requires
 authentication; an unauthenticated API call gets a 401 rather than a login page, because a
@@ -1094,6 +1116,13 @@ after a list has no contact at all as far as the directory is concerned.
 So a person's details page carries **addresses added here** alongside the published ones.
 An address added there joins the set a `serverPOC` is matched against, and the servers
 named after it become theirs immediately — not at the next sweep.
+
+That is all it does. An address added here never makes anybody an administrator:
+`admin-identifiers` is matched only against what the directory publishes. And an address
+`admin-identifiers` names cannot be added at all — the request is refused with a 400 saying
+so — because where `contact-editors: AUTHENTICATED` lets anyone signed in add addresses,
+that would be somebody naming themselves after an administrator. One added before this was
+refused stays, still binds servers, and grants nothing.
 
 A **group address** is one several people answer, which is what a distribution list is.
 Each of them carries their own row for it, and each of them is a contact for the servers
@@ -1644,6 +1673,16 @@ window rather than quietly reporting the same thirty days. The two are separate 
 the threshold is what the tables and the page alerts call expiring, and this is how far ahead
 the email looks.
 
+**What one run reads.** The certificates about to expire, and — with
+`cert-alert.notifications.digest.include-expired`, on by default — those already expired,
+are read separately, each up to `cert-alert.notifications.digest.scan-limit` (10,000), and
+the ones about to expire first. However many old certificates a directory goes on
+publishing, they cannot push next week's out of the round-up. An expired certificate on an
+entry that holds a current one is left out by the read itself, so the leftovers of renewals
+use none of the limit; of what remains, a capped read keeps the most recently expired. A run
+that reaches the limit logs a warning naming which of the two it was, and leaves earlier
+round-ups in place rather than clearing ones it may simply not have reached.
+
 Email is off until `cert-alert.notifications.email.enabled` is set and `spring.mail.*` is
 configured. The notifications are written and shown on the page either way.
 
@@ -2192,7 +2231,7 @@ the documentation site: [audit-logging.md](https://github.com/winllc/ens-apps-do
 
 | Category | Actions |
 |---|---|
-| authentication | `auth.login` (success and failure; `details.method` `x509` or `ldap`, the attempted name as an `anonymous` actor on failure, `alert` severity after repeated failures for one name), `auth.logout` |
+| authentication | `auth.login` (success and failure; `details.method` `x509` or `ldap`, the attempted name as an `anonymous` actor on failure, `alert` severity after repeated failures for one name; a published client certificate refused as revoked, expired or not yet valid carries that as its reason and `details.fingerprint`, and a revoked one is `alert`), `auth.logout` |
 | authorization | `access.denied` for every 403: a role refused, `license_required`, `license_read_only`, `feature_not_licensed`, a CSRF failure — with method, path and reason code; identical refusals within 60 s are one event with `details.count` |
 | account | `project.admin-added`, `project.admin-removed` (the one role this application grants) |
 | configuration | `settings.changed` (the round-up's lead days, `<field>.old`/`.new`), `server-attribute.defined`, `.changed`, `.retired` |

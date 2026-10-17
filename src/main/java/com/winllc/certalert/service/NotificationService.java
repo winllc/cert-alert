@@ -5,6 +5,7 @@ import com.winllc.certalert.config.CredentialProperties;
 import com.winllc.certalert.config.NotificationProperties;
 import com.winllc.certalert.domain.AuditEvent;
 import com.winllc.certalert.domain.CachedCertificate;
+import com.winllc.certalert.domain.CertificateStatus;
 import com.winllc.certalert.domain.DirectoryEntry;
 import com.winllc.certalert.domain.DirectoryServer;
 import com.winllc.certalert.domain.DirectoryUser;
@@ -49,9 +50,6 @@ import org.springframework.transaction.annotation.Transactional;
 public class NotificationService {
 
     private static final Logger log = LoggerFactory.getLogger(NotificationService.class);
-
-    /** A digest reads a page of certificates at a time; this is a bound, not a target. */
-    private static final int DIGEST_SCAN_LIMIT = 10_000;
 
     /** How many built messages a dry run hands back, so a large estate cannot return a book. */
     private static final int DRY_RUN_PREVIEW_LIMIT = 25;
@@ -228,17 +226,31 @@ public class NotificationService {
         // further than the window certificates are marked EXPIRING_SOON in.
         int leadDays = settings.leadDays();
         Instant horizon = now.plus(Duration.ofDays(leadDays));
-        // Nothing has a notAfter before this, so it excludes nothing; the current instant in
-        // its place is what leaves out what has already expired.
-        Instant floor = digestSettings.isIncludeExpired() ? Instant.EPOCH : now;
 
-        List<CachedCertificate> expiring =
-                certificates.findExpiringBetween(floor, horizon, PageRequest.of(0, DIGEST_SCAN_LIMIT));
+        // Two reads, each to its own limit, and what is about to expire first. Read as one,
+        // soonest first, the expired came first: a directory publishing more old
+        // certificates than the limit filled the read with them, and what expires next week
+        // was never reached - the one thing a round-up is for.
+        int limit = Math.clamp(digestSettings.getScanLimit(), 1, Integer.MAX_VALUE - 1);
+        Scan upcoming = Scan.of(certificates.findExpiringBetween(now, horizon, PageRequest.of(0, limit + 1)), limit);
+        Scan lapsed = digestSettings.isIncludeExpired()
+                // Nothing has a notAfter before the epoch, so it excludes nothing.
+                ? Scan.of(certificates.findLapsedBetween(
+                                Instant.EPOCH, now, CertificateStatus.EXPIRED, PageRequest.of(0, limit + 1)),
+                        limit)
+                : Scan.NONE;
+        warnIfCutShort(upcoming, lapsed, limit, leadDays);
+        boolean complete = !upcoming.truncated() && !lapsed.truncated();
+
+        // In the order the single read used to give, soonest to expire first: the lapsed
+        // ones were read most recent first so a cap keeps those, and are turned around here.
+        List<CachedCertificate> expiring = new ArrayList<>(lapsed.certificates().reversed());
+        expiring.addAll(upcoming.certificates());
         if (expiring.isEmpty()) {
             log.debug("Expiry digest: nothing expiring in the next {} day(s)", leadDays);
             // Nothing expiring means nobody's round-up still says anything true.
             if (!dryRun && !properties.getEmail().isDryRun()) {
-                clearRoundUpsExcept(Set.of(), 0);
+                clearRoundUpsExcept(Set.of(), complete);
             }
             return nothing(dryRun, "Nothing is expiring in the next " + leadDays + " day(s)");
         }
@@ -315,7 +327,7 @@ public class NotificationService {
             }
         }
         if (!rehearsing) {
-            clearRoundUpsExcept(standing, expiring.size());
+            clearRoundUpsExcept(standing, complete);
         }
         // Asked of the mailer rather than counted here: one person can be owed two messages,
         // and "how many emails" is a question about messages.
@@ -382,13 +394,14 @@ public class NotificationService {
      * outlives the state is worse than no report, since somebody reading it goes looking for
      * work that is already done.
      */
-    private void clearRoundUpsExcept(Set<Long> keep, int scanned) {
-        if (scanned >= DIGEST_SCAN_LIMIT) {
-            // The scan stopped at its limit, so "this run did not write it" does not mean
+    private void clearRoundUpsExcept(Set<Long> keep, boolean complete) {
+        if (!complete) {
+            // A read stopped at its limit, so "this run did not write it" does not mean
             // "there is nothing to report" - it may mean the certificate never came up.
             // Taking somebody's round-up away on that basis would hide real work.
-            log.warn("Expiry digest stopped at {} certificate(s); round-ups that no longer apply were left "
-                    + "in place, since this run cannot tell them from ones it never reached", DIGEST_SCAN_LIMIT);
+            log.warn("Expiry digest: round-ups that no longer apply were left in place, since a run that "
+                    + "stopped at cert-alert.notifications.digest.scan-limit cannot tell them from ones it "
+                    + "never reached");
             return;
         }
         int removed = keep.isEmpty()
@@ -456,6 +469,37 @@ public class NotificationService {
                     + "(cert-alert.notifications.email.max-per-run)";
         }
         return "Nothing was built, and nothing here says why - the log will have it";
+    }
+
+    /**
+     * Says which read stopped at its limit, if either did, and what was left out by it - the
+     * certificates furthest from expiring, or the longest expired.
+     */
+    private void warnIfCutShort(Scan upcoming, Scan lapsed, int limit, int leadDays) {
+        if (upcoming.truncated()) {
+            log.warn("Expiry digest: more than {} certificate(s) expire in the next {} day(s); this round-up "
+                            + "reports the {} soonest and the rest wait for a later run. Raise "
+                            + "cert-alert.notifications.digest.scan-limit to report them all",
+                    limit, leadDays, limit);
+        }
+        if (lapsed.truncated()) {
+            log.warn("Expiry digest: more than {} expired certificate(s) are still published by entries holding "
+                            + "nothing current; this round-up reports the {} most recently expired and leaves out "
+                            + "older ones. Raise cert-alert.notifications.digest.scan-limit to report them all, "
+                            + "or clear what has been finished with out of the directory",
+                    limit, limit);
+        }
+    }
+
+    /** What one read of the digest returned, and whether it stopped at its limit. */
+    private record Scan(List<CachedCertificate> certificates, boolean truncated) {
+
+        static final Scan NONE = new Scan(List.of(), false);
+
+        /** From a read asked for one more than the limit, which is how it knows there were more. */
+        static Scan of(List<CachedCertificate> read, int limit) {
+            return read.size() > limit ? new Scan(read.subList(0, limit), true) : new Scan(read, false);
+        }
     }
 
     private DigestResult nothing(boolean dryRun, String note) {

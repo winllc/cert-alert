@@ -40,14 +40,15 @@ public interface CachedCertificateRepository extends JpaRepository<CachedCertifi
     List<CachedCertificate> findByFingerprint(@Param("fingerprint") String fingerprint);
 
     /**
-     * What the digest reports: everything expiring between the floor and the horizon, owner
+     * What the digest reports as about to expire: everything whose notAfter is after the
+     * floor - the present, when the digest asks - and by the horizon, soonest first, owner
      * attached so the round-up can name what it is about.
      *
      * <p>Dates rather than cached statuses, because how far ahead the round-up looks is set
      * from the UI and may be further than the window a certificate is marked EXPIRING_SOON
      * in. Asking for status would then quietly report nothing beyond that window, whatever
-     * the setting said. The floor is what leaves already-expired certificates out: pass the
-     * current instant to exclude them, and something before any certificate to keep them.
+     * the setting said. What has already expired is {@link #findLapsedBetween}'s, read on
+     * its own so that it cannot take this read's place.
      */
     @Query("""
             select c from CachedCertificate c
@@ -60,6 +61,42 @@ public interface CachedCertificateRepository extends JpaRepository<CachedCertifi
             """)
     List<CachedCertificate> findExpiringBetween(
             @Param("floor") Instant floor, @Param("horizon") Instant horizon, Pageable pageable);
+
+    /**
+     * What the digest reports as already expired: certificates whose notAfter is between
+     * the floor and {@code before}, owner attached, most recently expired first - so a
+     * capped read keeps the ones somebody is likeliest still to be relying on.
+     *
+     * <p>Without the ones the entry has plainly moved on from. A directory keeps publishing
+     * a certificate after it has been renewed, so in a directory of any age most expired
+     * certificates are leftovers beside a current one, and reading them all only to drop
+     * them after would spend the read on nothing. The rule is the first half of
+     * {@link com.winllc.certalert.domain.DirectoryEntry#standingCertificates()}: a
+     * certificate marked expired is passed over when its entry holds another that is not.
+     * The rest of that question - which of several a server stands on, and whether one has
+     * been reissued - is the caller's, because it compares subjects and names.
+     */
+    @Query("""
+            select c from CachedCertificate c
+            left join fetch c.user
+            left join fetch c.server
+            where c.notAfter is not null
+              and c.notAfter <= :before
+              and c.notAfter > :floor
+              and (c.status <> :expired
+                   or ((c.user is null or not exists (
+                            select o.id from CachedCertificate o
+                            where o.user = c.user and o.id <> c.id and o.status <> :expired))
+                       and (c.server is null or not exists (
+                            select o.id from CachedCertificate o
+                            where o.server = c.server and o.id <> c.id and o.status <> :expired))))
+            order by c.notAfter desc, c.id desc
+            """)
+    List<CachedCertificate> findLapsedBetween(
+            @Param("floor") Instant floor,
+            @Param("before") Instant before,
+            @Param("expired") CertificateStatus expired,
+            Pageable pageable);
 
     long countByStatus(CertificateStatus status);
 

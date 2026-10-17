@@ -7,6 +7,7 @@ import com.winllc.certalert.domain.EmailAddresses;
 import com.winllc.certalert.domain.UserEmailAlias;
 import com.winllc.certalert.repository.DirectoryUserRepository;
 import com.winllc.certalert.repository.UserEmailAliasRepository;
+import com.winllc.certalert.security.DirectoryPrincipalResolver;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
@@ -25,6 +26,11 @@ import org.springframework.transaction.annotation.Transactional;
  * theirs straight away rather than at the next sweep, and removing one takes them back -
  * but only if the directory does not publish that address too, which is why the set is
  * rebuilt from both sources rather than having the one value struck out of it.
+ *
+ * <p>What it does not do is change who somebody is. Administrator rights are decided from
+ * what the directory publishes alone (see {@link DirectoryPrincipalResolver}), so an
+ * address added here never grants them - and one that {@code admin-identifiers} names is
+ * refused outright, rather than accepted and left to look as if it might.
  */
 @Service
 public class UserEmailAliasService {
@@ -35,16 +41,19 @@ public class UserEmailAliasService {
     private final DirectoryUserRepository userRepository;
     private final UserEmailAliasRepository aliasRepository;
     private final AuditService auditService;
+    private final DirectoryPrincipalResolver principals;
     private final Clock clock;
 
     public UserEmailAliasService(
             DirectoryUserRepository userRepository,
             UserEmailAliasRepository aliasRepository,
             AuditService auditService,
+            DirectoryPrincipalResolver principals,
             Clock clock) {
         this.userRepository = userRepository;
         this.aliasRepository = aliasRepository;
         this.auditService = auditService;
+        this.principals = principals;
         this.clock = clock;
     }
 
@@ -60,6 +69,16 @@ public class UserEmailAliasService {
         String normalised = normalise(address);
         if (normalised == null || !EmailAddresses.isAddress(normalised)) {
             throw new IllegalArgumentException("'%s' is not an email address".formatted(address));
+        }
+        if (principals.isAdminIdentifier(normalised)) {
+            // Where anybody signed in may add addresses, this is somebody naming themselves
+            // after an administrator. It would grant nothing, but it is refused rather than
+            // kept: an address list that reads as if it might is not one to leave lying about.
+            log.warn("Refused to add {} to {} for {}: it is named in cert-alert.security.admin-identifiers",
+                    normalised, user.getDn(), addedBy);
+            throw new IllegalArgumentException(("%s is an administrator's identifier "
+                    + "(cert-alert.security.admin-identifiers), so it cannot be added as an address here. "
+                    + "Administrator rights come from the directory alone.").formatted(normalised));
         }
         if (aliasRepository.existsByUserIdAndAddress(userId, normalised)) {
             throw new AlreadyExistsException(

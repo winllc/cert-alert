@@ -66,6 +66,19 @@ public class NotificationProperties {
         /** Whether already-expired certificates are included. They usually still matter. */
         private boolean includeExpired = true;
 
+        /**
+         * The most certificates one run reads of each kind: those about to expire, and,
+         * with {@link #includeExpired}, those already expired that their entry still
+         * depends on. A bound on one run's memory, not a target.
+         *
+         * <p>Each kind has its own, and the ones about to expire are read first, so however
+         * many expired certificates a directory goes on publishing they cannot push next
+         * week's out of the round-up. Reaching it is logged as a warning naming which kind
+         * was cut short; that run then leaves earlier round-ups in place rather than
+         * clearing ones it may simply not have reached.
+         */
+        private int scanLimit = 10_000;
+
         public boolean isEnabled() {
             return enabled;
         }
@@ -96,6 +109,14 @@ public class NotificationProperties {
 
         public void setIncludeExpired(boolean includeExpired) {
             this.includeExpired = includeExpired;
+        }
+
+        public int getScanLimit() {
+            return scanLimit;
+        }
+
+        public void setScanLimit(int scanLimit) {
+            this.scanLimit = scanLimit;
         }
     }
 

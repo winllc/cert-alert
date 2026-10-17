@@ -18,6 +18,10 @@ import org.slf4j.LoggerFactory;
  *
  * <p>Used only when a certificate is not one the directory publishes, as the weaker
  * fallback to matching it by fingerprint.
+ *
+ * <p>Its uid and its addresses, and not its common name. A CN is a name, and nothing makes
+ * a name unique: any authority in the truststore can issue a certificate to "Jane Smith",
+ * and matching on it would sign the holder in as whichever Jane Smith the cache held.
  */
 final class X509Identifiers {
 
@@ -25,8 +29,8 @@ final class X509Identifiers {
 
     private static final int SAN_TYPE_RFC822_NAME = 1;
 
-    /** Subject attributes that plausibly name a person rather than describe them. */
-    private static final Set<String> NAMING_ATTRIBUTES = Set.of("cn", "uid", "emailaddress", "e", "mail");
+    /** Subject attributes that identify one person, rather than name or describe them. */
+    private static final Set<String> NAMING_ATTRIBUTES = Set.of("uid", "emailaddress", "e", "mail");
 
     private X509Identifiers() {}
 

@@ -12,6 +12,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.unboundid.ldap.sdk.Attribute;
+import com.unboundid.ldap.sdk.Entry;
+import com.winllc.certalert.audit.AuditStore;
+import com.winllc.certalert.audit.AuthenticationAudit;
+import com.winllc.certalert.audit.StoredEvent;
+import com.winllc.certalert.domain.CachedCertificate;
+import com.winllc.certalert.domain.RevocationMethod;
+import com.winllc.certalert.domain.RevocationStatus;
+import com.winllc.certalert.repository.CachedCertificateRepository;
 import com.winllc.certalert.repository.DirectoryUserRepository;
 import com.winllc.certalert.service.DirectorySyncService;
 import com.winllc.certalert.support.EmbeddedDirectory;
@@ -19,6 +28,7 @@ import com.winllc.certalert.support.TestCertificates;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -56,6 +66,25 @@ class AuthenticationTest {
     /** Published, but by a server: identifies a machine, not somebody who holds a session. */
     private static X509Certificate serverCertificate;
 
+    /**
+     * Can bind, and is never cached: not an icOrgPerson, so outside the sweep's filter - as
+     * an account in a part of the tree the sweep does not read would be. Shares a common
+     * name with the administrator and with somebody else the cache holds.
+     */
+    private static final String NEWCOMER_DN = "uid=ada.newcomer," + EmbeddedDirectory.PEOPLE_DN;
+
+    /** Also never cached, and called by the administrator's address. */
+    private static final String NAMESAKE_DN = "uid=namesake," + EmbeddedDirectory.PEOPLE_DN;
+
+    /** Published, and in date; each test that needs it revoked says so. */
+    private static byte[] revocableCertificate;
+
+    /** Published, and past its notAfter. */
+    private static byte[] expiredCertificate;
+
+    /** Published, and not valid for another week. */
+    private static byte[] earlyCertificate;
+
     @Autowired
     private WebApplicationContext context;
 
@@ -67,6 +96,18 @@ class AuthenticationTest {
 
     @Autowired
     private X509DirectoryUserDetailsService x509UserDetailsService;
+
+    @Autowired
+    private DirectoryPrincipalResolver resolver;
+
+    @Autowired
+    private CachedCertificateRepository certificateRepository;
+
+    @Autowired
+    private AuditStore auditStore;
+
+    @Autowired
+    private AuthenticationAudit authenticationAudit;
 
     private MockMvc mockMvc;
 
@@ -82,6 +123,19 @@ class AuthenticationTest {
 
         // The administrator, named in cert-alert.security.admin-identifiers for this profile.
         directory.addUser("admin", "Ada Admin", "admin@example.gov");
+        // Somebody else of the same name, cached alongside.
+        directory.addUser("ada.other", "Ada Admin", "ada.other@example.gov");
+        directory.add(uncachedPerson(NEWCOMER_DN, "ada.newcomer", "Ada Admin"));
+        directory.add(uncachedPerson(NAMESAKE_DN, "namesake", "admin@example.gov"));
+
+        revocableCertificate = TestCertificates.der("revoked@example.gov", now.minus(Duration.ofDays(30)),
+                now.plus(Duration.ofDays(365)));
+        directory.addUser("revoked", "Rev Oked", "revoked@example.gov", revocableCertificate);
+        expiredCertificate = TestCertificates.expired("expired@example.gov", Duration.ofDays(2));
+        directory.addUser("expired", "Ex Pired", "expired@example.gov", expiredCertificate);
+        earlyCertificate = TestCertificates.der("early@example.gov", now.plus(Duration.ofDays(7)),
+                now.plus(Duration.ofDays(365)));
+        directory.addUser("early", "Ear Ly", "early@example.gov", earlyCertificate);
 
         byte[] server = TestCertificates.der("web01.example.gov", now.minus(Duration.ofDays(30)),
                 now.plus(Duration.ofDays(365)));
@@ -90,6 +144,17 @@ class AuthenticationTest {
 
         strangerCertificate = TestCertificates.certificate("stranger@elsewhere.gov",
                 now.minus(Duration.ofDays(1)), now.plus(Duration.ofDays(365)));
+    }
+
+    private static Entry uncachedPerson(String dn, String uid, String commonName) {
+        return new Entry(
+                dn,
+                new Attribute("objectClass", "top", "person", "organizationalPerson", "inetOrgPerson"),
+                new Attribute("uid", uid),
+                new Attribute("userPassword", "password"),
+                new Attribute("cn", commonName),
+                new Attribute("displayName", commonName),
+                new Attribute("sn", "Person"));
     }
 
     @AfterAll
@@ -194,6 +259,72 @@ class AuthenticationTest {
                 .containsExactly(DirectoryPrincipalResolver.ROLE_USER);
     }
 
+    // --- a published certificate still has to be good --------------------------------
+
+    /**
+     * Revoked by its authority, still published by the directory - which keeps what it was
+     * given. Refused, and recorded as an alert with the reason and the certificate.
+     */
+    @Test
+    void aRevokedCertificateIsRefusedAndAudited() throws Exception {
+        markRevocation(revocableCertificate, RevocationStatus.REVOKED);
+        authenticationAudit.flush();
+        long head = auditStore.headSeq();
+        try {
+            mockMvc.perform(get("/users").with(x509(TestCertificates.certificateOf(revocableCertificate))))
+                    .andExpect(unauthenticated());
+            authenticationAudit.flush();
+
+            List<StoredEvent> refused = auditStore.after(head, 1000).stream()
+                    .filter(event -> "auth.login".equals(event.action()))
+                    .filter(event -> event.line().contains("\"reason\":\"certificate revoked\""))
+                    .toList();
+            assertThat(refused).hasSize(1);
+            assertThat(refused.getFirst().line()).contains(
+                    "\"outcome\":\"failure\"", "\"severity\":\"alert\"", "\"method\":\"x509\"",
+                    "\"fingerprint\":\"" + TestCertificates.sha256(revocableCertificate) + "\"");
+        } finally {
+            markRevocation(revocableCertificate, RevocationStatus.NOT_CHECKED);
+        }
+    }
+
+    /** The same certificate, before anybody revoked it, is fine: it is the revocation that refuses it. */
+    @Test
+    void theSameCertificateNotRevokedSignsIn() throws Exception {
+        markRevocation(revocableCertificate, RevocationStatus.GOOD);
+        mockMvc.perform(get("/users").with(x509(TestCertificates.certificateOf(revocableCertificate))))
+                .andExpect(status().isOk())
+                .andExpect(authenticated().withUsername("revoked@example.gov"));
+    }
+
+    @Test
+    void anExpiredCertificateIsRefusedThoughTheDirectoryStillPublishesIt() {
+        assertThatRefused(expiredCertificate, RefusedCertificateException.Reason.EXPIRED);
+    }
+
+    @Test
+    void aCertificateNotYetValidIsRefused() {
+        assertThatRefused(earlyCertificate, RefusedCertificateException.Reason.NOT_YET_VALID);
+    }
+
+    private void assertThatRefused(byte[] der, RefusedCertificateException.Reason reason) {
+        X509Certificate certificate = TestCertificates.certificateOf(der);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> x509UserDetailsService.loadUserDetails(
+                        new PreAuthenticatedAuthenticationToken(
+                                certificate.getSubjectX500Principal().getName(), certificate)))
+                .isInstanceOfSatisfying(RefusedCertificateException.class,
+                        refused -> assertThat(refused.getReason()).isEqualTo(reason));
+    }
+
+    private void markRevocation(byte[] der, RevocationStatus status) {
+        for (CachedCertificate cached : certificateRepository.findByFingerprint(TestCertificates.sha256(der))) {
+            cached.recordRevocation(status, RevocationMethod.OCSP,
+                    status == RevocationStatus.REVOKED ? Instant.now().minus(Duration.ofDays(1)) : null,
+                    status == RevocationStatus.REVOKED ? "keyCompromise" : null, null, Instant.now());
+            certificateRepository.save(cached);
+        }
+    }
+
     // --- LDAP fallback -----------------------------------------------------------------
 
     @Test
@@ -225,6 +356,71 @@ class AuthenticationTest {
                         .withAuthentication(authentication -> assertThat(authentication.getAuthorities())
                                 .extracting(GrantedAuthority::getAuthority)
                                 .contains(DirectoryPrincipalResolver.ROLE_USER)));
+    }
+
+    // --- a password signs in the entry it bound as --------------------------------------
+
+    /**
+     * Two people the cache holds under one common name, one of them the administrator, and
+     * a third account of the same name that the cache has never seen. The sign-in search
+     * covers more than the sweep does, so the third binds - and has to come out as
+     * themselves, not as whichever of the others a lookup by name found first.
+     */
+    @Test
+    void anAccountTheCacheDoesNotHoldIsNotTheCachedPersonOfTheSameName() throws Exception {
+        assertThat(userRepository.findByIdentifier("ada admin")).hasSize(2);
+        assertThat(userRepository.findByDn(NEWCOMER_DN)).isEmpty();
+
+        mockMvc.perform(formLogin().user("ada.newcomer").password("password"))
+                .andExpect(authenticated()
+                        .withUsername("ada.newcomer")
+                        .withAuthentication(authentication -> {
+                            DirectoryPrincipal principal = (DirectoryPrincipal) authentication.getPrincipal();
+                            assertThat(principal.getDirectoryUserId()).isNull();
+                            assertThat(principal.getDirectoryDn()).isEqualTo(NEWCOMER_DN);
+                            assertThat(authentication.getAuthorities())
+                                    .extracting(GrantedAuthority::getAuthority)
+                                    .contains(DirectoryPrincipalResolver.ROLE_USER)
+                                    .doesNotContain(DirectoryPrincipalResolver.ROLE_ADMIN);
+                        }));
+    }
+
+    /** And the cached one of the same name is themselves, not the administrator. */
+    @Test
+    void aCachedPersonSharingTheAdministratorsNameIsThemselves() throws Exception {
+        mockMvc.perform(formLogin().user("ada.other").password("password"))
+                .andExpect(authenticated()
+                        .withUsername("ada.other@example.gov")
+                        .withAuthentication(authentication -> assertThat(authentication.getAuthorities())
+                                .extracting(GrantedAuthority::getAuthority)
+                                .doesNotContain(DirectoryPrincipalResolver.ROLE_ADMIN)));
+    }
+
+    /**
+     * A common name is whatever the entry says it is. One that happens to be an
+     * administrator's address names nobody, and grants nothing.
+     */
+    @Test
+    void aCommonNameThatIsAnAdministratorsIdentifierGrantsNothing() throws Exception {
+        mockMvc.perform(formLogin().user("namesake").password("password"))
+                .andExpect(authenticated()
+                        .withUsername("namesake")
+                        .withAuthentication(authentication -> {
+                            DirectoryPrincipal principal = (DirectoryPrincipal) authentication.getPrincipal();
+                            assertThat(principal.getDirectoryUserId()).isNull();
+                            assertThat(authentication.getAuthorities())
+                                    .extracting(GrantedAuthority::getAuthority)
+                                    .doesNotContain(DirectoryPrincipalResolver.ROLE_ADMIN);
+                        }));
+    }
+
+    /** The directory compares names without regard to case, so the lookup does too. */
+    @Test
+    void theCachedEntryIsFoundWhicheverWayItsNameIsCased() {
+        assertThat(resolver.findByDn("UID=Alice,OU=People," + EmbeddedDirectory.BASE_DN.toUpperCase()))
+                .get()
+                .extracting(user -> user.getDn())
+                .isEqualTo("uid=alice," + EmbeddedDirectory.PEOPLE_DN);
     }
 
     // --- roles -------------------------------------------------------------------------

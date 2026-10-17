@@ -22,9 +22,11 @@ public class SecurityProperties {
     private boolean enabled = true;
 
     /**
-     * Identifiers granted the admin role: any value the directory knows a person by - an
-     * address, a uid, a common name. Everyone else who authenticates can read the tables
-     * but cannot trigger jobs or reach the management endpoints.
+     * Identifiers granted the admin role: an address the directory publishes for a person,
+     * their uid, or the DN of their entry. Never a common or display name, which two people
+     * can share, and never an address added in this application, which refuses these.
+     * Everyone else who authenticates can read the tables but cannot trigger jobs or reach
+     * the management endpoints.
      */
     private List<String> adminIdentifiers = new ArrayList<>();
 
@@ -92,8 +94,9 @@ public class SecurityProperties {
          * <p>On by default, and it is the point of the whole arrangement: the application
          * already caches every certificate in the directory, so a client certificate can be
          * recognised by its fingerprint rather than by pattern-matching a subject name.
-         * Turning it off falls back to matching the certificate's subject and subject
-         * alternative names against the people in the directory, which is weaker.
+         * Turning it off falls back to matching the uid and addresses in the certificate's
+         * subject and subject alternative names against the people in the directory, which
+         * is weaker. A common name is never matched.
          */
         private boolean requireKnownCertificate = true;
 
