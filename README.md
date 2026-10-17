@@ -665,6 +665,36 @@ element and put what follows into the page as markup.
 One trade-off worth knowing: generated content is announced by screen readers but is not
 selectable text, so the marking cannot be copied out of the page.
 
+## FIPS 140-3
+
+CertAlert implements no cryptography of its own. Every hash, signature check, key exchange
+and cipher - TLS to the browser, the directory, the mail server, Splunk and syslog; the SHA-256
+fingerprints and audit chain; CRL and OCSP verification; the license's Ed25519 signature -
+goes through the Java platform's security providers (JCA/JSSE). FIPS 140-3 therefore comes
+from the platform: run the image, which is built on Red Hat's UBI 9 OpenJDK, on a RHEL host
+or OpenShift cluster booted in FIPS mode, where Red Hat's OpenJDK switches itself to the
+validated cryptographic modules (the `fips` security profile; see Red Hat's *Configuring
+OpenJDK on RHEL with FIPS*). The application needs no setting of its own for that.
+
+Not appropriate on a FIPS system, and off by default:
+
+- `ENS_AUDIT_SPLUNK_INSECURE=true` - skips TLS verification to Splunk (a warning is logged).
+- `cert-alert.revocation.allow-unverified-crl` (default `true`) - believes a CRL whose
+  signature could not be checked; set `false` and configure `issuer-directory`.
+- Plain `ldap://`, plain syslog (`udp`/`tcp`), and SMTP without `STARTTLS`.
+- `ENS_X509_REVOCATION_FAIL=open`, and `ENS_X509_REVOCATION=off` (the default).
+
+Notes: the server-endpoint probe deliberately trusts every chain, because it reads and reports
+certificates rather than relying on them. OCSP requests name the certificate by SHA-1 hashes,
+as RFC 6960 has them - a non-signature use of SHA-1 that FIPS 140-3 permits. Key and trust
+stores have to be in a format the FIPS-mode providers can open (in RHEL's FIPS mode, PKCS#12
+created with approved algorithms, or the NSS database).
+
+### FIPS test results for the license library
+
+*To be added:* the results of running the ENS license library's tests (Ed25519 verification)
+under the FIPS-mode providers.
+
 ## Metrics, health and logs
 
 The ENS platform baseline:
