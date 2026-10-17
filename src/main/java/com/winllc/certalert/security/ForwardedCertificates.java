@@ -1,5 +1,6 @@
 package com.winllc.certalert.security;
 
+import com.winllc.certalert.net.AddressRange;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -31,7 +32,6 @@ import jakarta.servlet.ServletRequestWrapper;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.security.web.util.matcher.IpAddressMatcher;
 import org.springframework.stereotype.Component;
 
 /**
@@ -150,7 +150,8 @@ public class ForwardedCertificates {
         }
         for (String range : settings.trustedProxyList()) {
             try {
-                if (new IpAddressMatcher(range).matches(address)) {
+                // Within its own address family only: an IPv6 peer is never "in" 10.0.0.0/8.
+                if (AddressRange.parse(range).matches(address)) {
                     return true;
                 }
             } catch (IllegalArgumentException e) {

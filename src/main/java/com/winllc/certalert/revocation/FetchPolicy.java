@@ -1,8 +1,8 @@
 package com.winllc.certalert.revocation;
 
+import com.winllc.certalert.net.AddressRange;
 import java.io.IOException;
 import java.net.Inet4Address;
-import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
@@ -14,7 +14,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
-import org.springframework.security.web.util.matcher.IpAddressMatcher;
 
 /**
  * Where revocation data may be fetched from.
@@ -56,24 +55,24 @@ public final class FetchPolicy {
      * Instance metadata services. 169.254.169.254 (AWS, Azure, GCP, OpenStack, Oracle) is
      * link-local and refused as that; these are the ones that are not.
      */
-    private static final List<IpAddressMatcher> METADATA = List.of(
-            new IpAddressMatcher("fd00:ec2::254/128"),
-            new IpAddressMatcher("100.100.100.200/32"),
+    private static final List<AddressRange> METADATA = List.of(
+            AddressRange.parse("fd00:ec2::254/128"),
+            AddressRange.parse("100.100.100.200/32"),
             // "This network": 0.0.0.0 reaches the local host on Linux.
-            new IpAddressMatcher("0.0.0.0/8"));
+            AddressRange.parse("0.0.0.0/8"));
 
     /** NAT64's well-known prefix, which carries an IPv4 address in its last 32 bits. */
-    private static final IpAddressMatcher NAT64 = new IpAddressMatcher("64:ff9b::/96");
+    private static final AddressRange NAT64 = AddressRange.parse("64:ff9b::/96");
 
     private final List<String> names;
     private final List<String> suffixes;
-    private final List<IpAddressMatcher> ranges;
+    private final List<AddressRange> ranges;
     private final Set<String> configuredHosts;
 
     private FetchPolicy(Collection<String> allowed, Collection<String> configuredUrls) {
         List<String> names = new ArrayList<>();
         List<String> suffixes = new ArrayList<>();
-        List<IpAddressMatcher> ranges = new ArrayList<>();
+        List<AddressRange> ranges = new ArrayList<>();
         for (String entry : allowed) {
             String value = entry == null ? "" : entry.trim().toLowerCase(Locale.ROOT);
             if (value.isEmpty()) {
@@ -82,7 +81,7 @@ public final class FetchPolicy {
             if (value.startsWith("*.")) {
                 suffixes.add(value.substring(1));
             } else if (value.contains("/") || isAddressLiteral(value)) {
-                ranges.add(new IpAddressMatcher(stripBrackets(value)));
+                ranges.add(AddressRange.parse(value));
             } else {
                 names.add(value);
             }
@@ -191,8 +190,8 @@ public final class FetchPolicy {
     }
 
     private boolean inRange(InetAddress address) {
-        for (IpAddressMatcher range : ranges) {
-            if (range.matches(address.getHostAddress())) {
+        for (AddressRange range : ranges) {
+            if (range.matches(address)) {
                 return true;
             }
         }
@@ -204,13 +203,12 @@ public final class FetchPolicy {
         if (address.isLinkLocalAddress() || address.isAnyLocalAddress() || address.isMulticastAddress()) {
             return true;
         }
-        String literal = address.getHostAddress();
-        for (IpAddressMatcher metadata : METADATA) {
-            if (metadata.matches(literal)) {
+        for (AddressRange metadata : METADATA) {
+            if (metadata.matches(address)) {
                 return true;
             }
         }
-        if (address instanceof Inet6Address && NAT64.matches(literal)) {
+        if (NAT64.matches(address)) {
             byte[] bytes = address.getAddress();
             try {
                 InetAddress embedded = Inet4Address.getByAddress(Arrays.copyOfRange(bytes, 12, 16));

@@ -43,6 +43,22 @@ class FetchPolicyTest {
 
         assertAllowed(FetchPolicy.of(List.of("localhost")), "http://localhost:8080/ca.crl");
         assertAllowed(FetchPolicy.of(List.of("127.0.0.0/8")), "http://127.0.0.1/ca.crl");
+        // IPv6 loopback is loopback, not "this network": 0.0.0.0/8 holds no IPv6 address.
+        // (Where localhost also resolves to ::1, as on most hosts, the line naming localhost
+        // above depends on exactly this.)
+        assertAllowed(FetchPolicy.of(List.of("[::1]")), "http://[::1]/ca.crl");
+        assertThatThrownBy(() -> open.check(URI.create("http://[::1]/ca.crl")))
+                .hasMessageContaining("loopback");
+    }
+
+    @Test
+    void anIpv4RangeAllowsNoIpv6Address() {
+        FetchPolicy policy = FetchPolicy.of(List.of("10.0.0.0/8", "127.0.0.0/8"));
+
+        assertAllowed(policy, "http://10.1.2.3/ca.crl");
+        // Same leading bits, other family: not in the range anybody wrote down.
+        assertRefused(policy, "http://[a00::1]/ca.crl");
+        assertRefused(policy, "http://[7f00::1]/ca.crl");
     }
 
     @Test
