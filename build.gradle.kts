@@ -80,6 +80,10 @@ tasks.withType<JavaCompile>().configureEach {
 
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
+    // Gradle's default for a test JVM is 512MB. The run keeps up to eight application
+    // contexts (src/test/resources/spring.properties), about 300MB live at the most, and G1
+    // with that little headroom spends its time failing evacuations and collecting in full.
+    maxHeapSize = "1g"
     testLogging {
         events("passed", "skipped", "failed")
     }

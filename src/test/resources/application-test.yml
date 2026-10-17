@@ -4,6 +4,12 @@ spring:
     username: sa
     password: ""
     driver-class-name: org.h2.Driver
+    # Each cached test context has a pool of its own (see spring.properties for how many
+    # are kept), and the PostgreSQL CI job runs against a server allowing 100 connections.
+    # Eight contexts at five apiece stays well inside that; no test needs more at once.
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 1
 
 cert-alert:
   revocation:
