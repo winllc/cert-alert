@@ -67,6 +67,26 @@ spring:
     #
     #   base-environment:
     #     java.naming.ldap.attributes.binary: myCertificateAttribute
+    #
+    # And the two that keep a directory that stops answering from stopping everything with
+    # it: how long to wait for a connection, and for each answer - one page of a sweep, a
+    # sign-in's bind. Milliseconds, because that is what the provider reads. A directory that
+    # takes longer than a minute to return one page of a search needs the second raised.
+    base-environment:
+      "[com.sun.jndi.ldap.connect.timeout]": ${CERT_ALERT_LDAP_CONNECT_TIMEOUT_MS:10000}
+      "[com.sun.jndi.ldap.read.timeout]": ${CERT_ALERT_LDAP_READ_TIMEOUT_MS:60000}
+
+  # The mail server itself is configured with spring.mail.host and friends (see the README).
+  # These are the waits: JavaMail's own default for each is forever, and a mail server that
+  # accepts a connection and then says nothing would hold whatever was sending.
+  mail:
+    properties:
+      "[mail.smtp.connectiontimeout]": ${CERT_ALERT_MAIL_CONNECT_TIMEOUT_MS:30000}
+      "[mail.smtp.timeout]": ${CERT_ALERT_MAIL_READ_TIMEOUT_MS:30000}
+      "[mail.smtp.writetimeout]": ${CERT_ALERT_MAIL_WRITE_TIMEOUT_MS:30000}
+      "[mail.smtps.connectiontimeout]": ${CERT_ALERT_MAIL_CONNECT_TIMEOUT_MS:30000}
+      "[mail.smtps.timeout]": ${CERT_ALERT_MAIL_READ_TIMEOUT_MS:30000}
+      "[mail.smtps.writetimeout]": ${CERT_ALERT_MAIL_WRITE_TIMEOUT_MS:30000}
 
 server:
   port: 8080
@@ -486,6 +506,19 @@ cert-alert:
     retention:
       enabled: false
       after: 90d
+
+  # Every email - round-ups and alerts - is written to an outbox in the transaction that
+  # decided to send it, and sent once that commits. One that cannot be sent is tried again,
+  # retry-initial later and then twice as long each time up to retry-max, until it is
+  # give-up-after old. A newer round-up for the same address replaces one still waiting.
+  mail:
+    outbox:
+      poll-interval: 30s
+      retry-initial: 1m
+      retry-max: 1h
+      give-up-after: 3d
+      # Sent, given-up and replaced messages are deleted after this.
+      keep: 7d
 
   alerts:
     logging:

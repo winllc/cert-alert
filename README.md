@@ -1760,6 +1760,27 @@ question of its own.
 An entry whose certificates have *all* lapsed is the case that most needs telling, and it
 still is: with nothing standing, nothing has been replaced.
 
+#### When the mail server is down
+
+Nothing is sent from inside a database transaction. A round-up's messages, and the alert
+channel's, are written to an outbox table (`outbound_email`) in the same transaction as the
+notifications or the sweep that produced them, and sent once that has committed — the
+round-up straight away, so the page can say what went; an alert by a background thread a
+moment later. A mail server that is slow therefore holds no transaction open, and one that is
+down loses nothing:
+
+- a message that cannot be sent stays queued and is tried again a minute later, then two,
+  four and so on up to an hour apart (`cert-alert.mail.outbox.retry-initial` / `retry-max`),
+  each failure logged as a warning with the mail server's reason;
+- a newer round-up to the same address replaces one still waiting, so a mail server that comes
+  back after a weekend delivers today's round-up rather than three;
+- after three days (`give-up-after`) a message is given up on, with an error in the log;
+- a notification is marked emailed when its message actually goes, not when it is queued.
+
+A round-up run while the mail server is down says so on the notifications page — "could not
+be sent and are queued to try again", with the reason — rather than reporting them as sent.
+An alert is recorded as `alert.sent` once it is safely queued.
+
 #### A dry run
 
 What a round-up would do, asked without doing it. **Dry run** on the notifications page
@@ -2380,6 +2401,31 @@ Scraping, under `cert-alert.ldap`:
 | `changelog.full-sync-on-first-run` | `true` | Import the directory on the first start, before following |
 | `changelog.full-sync-on-gap` | `true` | Sweep when the changelog has been trimmed past the cursor |
 | `user.*`, `server.*` | FSD names | Search base, filter, and attribute names      |
+
+Waiting on the directory and the mail server. Without these, a directory or mail server that
+accepts a connection and then says nothing holds whatever was talking to it for good:
+
+| Environment variable | Default | Purpose |
+|---|---|---|
+| `CERT_ALERT_LDAP_CONNECT_TIMEOUT_MS` | `10000` | Reaching the directory (every connection: the sweeps, the changelog, sign-in) |
+| `CERT_ALERT_LDAP_READ_TIMEOUT_MS` | `60000` | Each answer from it - one page of a sweep, one bind. Raise it for a directory that takes longer than a minute to return one page |
+| `CERT_ALERT_MAIL_CONNECT_TIMEOUT_MS` | `30000` | Reaching the mail server (`mail.smtp.connectiontimeout`, and `smtps`) |
+| `CERT_ALERT_MAIL_READ_TIMEOUT_MS` | `30000` | Each answer from it (`mail.smtp.timeout`) |
+| `CERT_ALERT_MAIL_WRITE_TIMEOUT_MS` | `30000` | Each write to it (`mail.smtp.writetimeout`) |
+
+They are `spring.ldap.base-environment` and `spring.mail.properties` entries, so either map can
+also be set directly.
+
+Email that cannot be sent yet, under `cert-alert.mail.outbox` (see [When the mail server is
+down](#when-the-mail-server-is-down)):
+
+| Property | Default | Purpose |
+|---|---|---|
+| `poll-interval` | `30s` | How often waiting mail is looked at |
+| `retry-initial` | `1m` | Wait after the first failure; it doubles after each one after |
+| `retry-max` | `1h` | Longest wait between two attempts |
+| `give-up-after` | `3d` | How long a message keeps being tried before it is given up on and an error logged |
+| `keep` | `7d` | How long sent, given-up and replaced messages stay in the table |
 
 What counts as one issuance, under `cert-alert.credentials`:
 

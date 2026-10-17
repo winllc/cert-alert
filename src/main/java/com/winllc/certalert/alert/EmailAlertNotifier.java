@@ -1,11 +1,13 @@
 package com.winllc.certalert.alert;
 
+import com.winllc.certalert.domain.OutboundEmail;
 import com.winllc.certalert.license.Licensing;
+import com.winllc.certalert.service.MailOutbox;
+import java.time.Clock;
+import java.time.Instant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.mail.SimpleMailMessage;
-import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Component;
 
 /**
@@ -14,6 +16,10 @@ import org.springframework.stereotype.Component;
  * Email delivery is a licensed feature ({@code notifications}): without it, or while the
  * license is not in full effect, the channel stands aside and the other channels still
  * deliver.
+ *
+ * <p>The message is queued in the {@link MailOutbox}, in the transaction of the sweep that
+ * raised the alert, and sent once that commits: an alert is "sent" here when it is safely
+ * queued, and a mail server that is down delays it rather than losing it.
  */
 @Component
 @ConditionalOnProperty(prefix = "cert-alert.alerts.email", name = "enabled", havingValue = "true")
@@ -21,15 +27,17 @@ public class EmailAlertNotifier implements AlertNotifier {
 
     private static final Logger log = LoggerFactory.getLogger(EmailAlertNotifier.class);
 
-    private final JavaMailSender mailSender;
+    private final MailOutbox outbox;
     private final EmailAlertProperties properties;
     private final Licensing licensing;
+    private final Clock clock;
 
     public EmailAlertNotifier(
-            JavaMailSender mailSender, EmailAlertProperties properties, Licensing licensing) {
-        this.mailSender = mailSender;
+            MailOutbox outbox, EmailAlertProperties properties, Licensing licensing, Clock clock) {
+        this.outbox = outbox;
         this.properties = properties;
         this.licensing = licensing;
+        this.clock = clock;
     }
 
     @Override
@@ -44,13 +52,17 @@ public class EmailAlertNotifier implements AlertNotifier {
                     alert.ownerName());
             return;
         }
-        SimpleMailMessage message = new SimpleMailMessage();
-        message.setFrom(properties.getFrom());
-        message.setTo(properties.getTo().toArray(String[]::new));
-        message.setSubject(properties.getSubjectPrefix() + alert.ownerName() + " - " + alert.status());
-        message.setText(body(alert));
-        mailSender.send(message);
-        log.info("Emailed alert for '{}' to {} recipient(s)", alert.ownerName(), properties.getTo().size());
+        outbox.queue(new OutboundEmail(
+                OutboundEmail.Kind.ALERT,
+                properties.getFrom(),
+                properties.getTo(),
+                properties.getSubjectPrefix() + alert.ownerName() + " - " + alert.status(),
+                body(alert),
+                null,
+                null,
+                null,
+                Instant.now(clock)));
+        log.info("Queued an email alert for '{}' to {} recipient(s)", alert.ownerName(), properties.getTo().size());
     }
 
     private String body(CertificateAlert alert) {

@@ -17,6 +17,12 @@ cert-alert:
       user-search-base: ou=people
       user-search-filter: "(uid={0})"
 
+  # Tests send queued mail themselves (MailOutbox.deliver / deliverDue); nothing in the
+  # background picks up another test's messages.
+  mail:
+    outbox:
+      background: false
+
   ldap:
     # Deliberately tiny, so even a handful of fixture entries cross page and batch
     # boundaries and the streaming path is what the tests actually exercise.

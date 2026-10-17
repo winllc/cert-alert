@@ -32,7 +32,9 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Tells people about their certificates.
@@ -45,6 +47,10 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p>Nobody is told the same thing twice inside {@code repeat-after}. A nightly sweep and a
  * certificate that stays expiring for a month would otherwise mean thirty notifications.
+ *
+ * <p>The round-up is worked out and its messages queued in one transaction, and sent once
+ * that has committed (see {@link MailOutbox}): a mail server that is slow or down neither
+ * holds the transaction open nor loses the messages.
  */
 @Service
 public class NotificationService {
@@ -61,6 +67,8 @@ public class NotificationService {
     private final NotificationSettingsService settings;
     private final NotificationProperties properties;
     private final CredentialProperties credentialProperties;
+    private final MailOutbox outbox;
+    private final TransactionTemplate transactions;
     private final Clock clock;
 
     public NotificationService(
@@ -71,6 +79,8 @@ public class NotificationService {
             NotificationSettingsService settings,
             NotificationProperties properties,
             CredentialProperties credentialProperties,
+            MailOutbox outbox,
+            PlatformTransactionManager transactionManager,
             Clock clock) {
         this.notifications = notifications;
         this.certificates = certificates;
@@ -79,6 +89,8 @@ public class NotificationService {
         this.settings = settings;
         this.properties = properties;
         this.credentialProperties = credentialProperties;
+        this.outbox = outbox;
+        this.transactions = new TransactionTemplate(transactionManager);
         this.clock = clock;
     }
 
@@ -203,23 +215,96 @@ public class NotificationService {
      *
      * @return how many people were told
      */
-    @Transactional
     public DigestResult digest() {
         return digest(false);
     }
 
     /**
+     * Works out the round-up and queues its messages in one transaction, then - with that
+     * committed and no transaction held - sends them, so what comes back says what went.
+     *
      * @param dryRun build every message and send none, writing nothing down either - so the
      *     question "who would hear from this, and what would it say" can be asked of a real
      *     directory without anybody's inbox or the notifications page being the answer
      */
-    @Transactional
     public DigestResult digest(boolean dryRun) {
+        Prepared prepared = transactions.execute(status -> prepare(dryRun));
+        if (prepared.result() != null) {
+            return prepared.result();
+        }
+        int emailed;
+        List<NotificationMailer.Failure> unsent = new ArrayList<>();
+        if (prepared.rehearsing()) {
+            emailed = prepared.built();
+        } else {
+            MailOutbox.Delivery delivery = outbox.deliver(prepared.queued());
+            emailed = delivery.deferred() ? prepared.queued().size() : delivery.sent();
+            for (MailOutbox.Delivery.Failure failure : delivery.failures()) {
+                unsent.add(new NotificationMailer.Failure(
+                        String.join(", ", failure.to()), "not sent yet, queued to try again: " + failure.reason()));
+            }
+        }
+        log.info("Expiry digest{}: {} certificate(s) expiring in the next {} day(s), {} already replaced, "
+                        + "{} person(s) told, {} message(s) emailed{}",
+                prepared.rehearsing() ? " (dry run)" : "", prepared.expiring(), prepared.leadDays(),
+                prepared.superseded(), prepared.told(), emailed,
+                unsent.isEmpty() ? "" : ", " + unsent.size() + " queued to try again");
+        List<NotificationMailer.Failure> failures = new ArrayList<>(prepared.failures());
+        failures.addAll(unsent);
+        String note = emailed > 0 && failures.isEmpty()
+                ? null
+                : whyNothingWasBuilt(
+                        prepared.expiring(),
+                        prepared.superseded(),
+                        prepared.reported(),
+                        prepared.told(),
+                        prepared.unaddressed(),
+                        prepared.leadDays(),
+                        prepared.failures(),
+                        unsent,
+                        prepared.rehearsing());
+        List<NotificationMailer.Rendered> built = prepared.messages();
+        return new DigestResult(
+                prepared.reported(),
+                prepared.told(),
+                emailed,
+                prepared.rehearsing(),
+                properties.getEmail().isEnabled(),
+                note,
+                failures,
+                built.size() > DRY_RUN_PREVIEW_LIMIT ? built.subList(0, DRY_RUN_PREVIEW_LIMIT) : built);
+    }
+
+    /**
+     * What one run worked out, before anything was sent.
+     *
+     * @param result the whole answer, where the run ended before there was anything to send
+     */
+    private record Prepared(
+            DigestResult result,
+            boolean rehearsing,
+            int expiring,
+            int superseded,
+            int reported,
+            int told,
+            int unaddressed,
+            int leadDays,
+            int built,
+            List<Long> queued,
+            List<NotificationMailer.Failure> failures,
+            List<NotificationMailer.Rendered> messages) {
+
+        static Prepared finished(DigestResult result) {
+            return new Prepared(result, result.dryRun(), 0, 0, 0, 0, 0, 0, 0, List.of(), List.of(), List.of());
+        }
+    }
+
+    private Prepared prepare(boolean dryRun) {
         NotificationProperties.Digest digestSettings = properties.getDigest();
         // A run that found nothing still says which kind of run it was: a rehearsal
         // reported as a real run reads as one that went out and sent nothing.
         if (!properties.isEnabled()) {
-            return nothing(dryRun, "Notifications are switched off in the configuration");
+            return Prepared.finished(nothing(dryRun, "Notifications are switched off in the configuration"));
         }
         Instant now = Instant.now(clock);
         // How far ahead to look is somebody's decision, made in the UI, and it may be
@@ -252,7 +337,7 @@ public class NotificationService {
             if (!dryRun && !properties.getEmail().isDryRun()) {
                 clearRoundUpsExcept(Set.of(), complete);
             }
-            return nothing(dryRun, "Nothing is expiring in the next " + leadDays + " day(s)");
+            return Prepared.finished(nothing(dryRun, "Nothing is expiring in the next " + leadDays + " day(s)"));
         }
 
         // Grouped by who has to do something about it, rather than by what is expiring:
@@ -310,7 +395,6 @@ public class NotificationService {
         mailer.beginRun(dryRun);
         boolean rehearsing = mailer.isDryRun();
         for (Round round : rounds.values()) {
-            boolean went = mailer.send(round.recipient, round.entries);
             told++;
             if (round.recipient.address() == null || round.recipient.address().isBlank()) {
                 unaddressed++;
@@ -318,39 +402,33 @@ public class NotificationService {
             if (rehearsing) {
                 // Nothing saved and nothing marked: a rehearsal that left notifications
                 // behind would be answering the question by doing the thing.
+                mailer.send(round.recipient, round.entries);
                 continue;
             }
+            // The notification first, so the message knows which one it delivers: it is
+            // marked emailed when the message actually goes, not when it is queued.
             Notification notification = roundUpFor(round, now);
             standing.add(notification.getId());
-            if (went) {
-                notification.markEmailed(now);
-            }
+            mailer.send(round.recipient, round.entries, notification.getId());
         }
         if (!rehearsing) {
             clearRoundUpsExcept(standing, complete);
         }
         // Asked of the mailer rather than counted here: one person can be owed two messages,
         // and "how many emails" is a question about messages.
-        int emailed = mailer.sent();
-        int reported = expiring.size() - superseded;
-        log.info("Expiry digest{}: {} certificate(s) expiring in the next {} day(s), {} already replaced, "
-                        + "{} person(s) told, {} message(s) emailed",
-                rehearsing ? " (dry run)" : "", expiring.size(), leadDays, superseded, told, emailed);
-        List<NotificationMailer.Failure> failures = mailer.failures();
-        String note = emailed > 0 && failures.isEmpty()
-                ? null
-                : whyNothingWasBuilt(
-                        expiring.size(), superseded, reported, told, unaddressed, leadDays, failures, rehearsing);
-        List<NotificationMailer.Rendered> built = rehearsing ? mailer.rendered() : List.of();
-        return new DigestResult(
-                reported,
-                told,
-                emailed,
+        return new Prepared(
+                null,
                 rehearsing,
-                properties.getEmail().isEnabled(),
-                note,
-                failures,
-                built.size() > DRY_RUN_PREVIEW_LIMIT ? built.subList(0, DRY_RUN_PREVIEW_LIMIT) : built);
+                expiring.size(),
+                superseded,
+                expiring.size() - superseded,
+                told,
+                unaddressed,
+                leadDays,
+                mailer.sent(),
+                mailer.queued(),
+                mailer.failures(),
+                rehearsing ? mailer.rendered() : List.of());
     }
 
     /**
@@ -429,6 +507,7 @@ public class NotificationService {
             int unaddressed,
             int leadDays,
             List<NotificationMailer.Failure> failures,
+            List<NotificationMailer.Failure> unsent,
             boolean rehearsing) {
 
         // First, because it is the answer that means somebody has something to fix, and the
@@ -436,6 +515,11 @@ public class NotificationService {
         if (!failures.isEmpty()) {
             NotificationMailer.Failure first = failures.getFirst();
             return failures.size() + " message(s) could not be built: " + first.to() + " - " + first.reason();
+        }
+        if (!unsent.isEmpty()) {
+            NotificationMailer.Failure first = unsent.getFirst();
+            return unsent.size() + " message(s) could not be sent and are queued to try again: "
+                    + first.to() + " - " + first.reason();
         }
         if (reported == 0 && superseded > 0) {
             return "All " + expiring + " certificate(s) expiring in the next " + leadDays

@@ -1,10 +1,11 @@
 package com.winllc.certalert.service;
 
 import com.winllc.certalert.config.NotificationProperties;
+import com.winllc.certalert.domain.OutboundEmail;
 import com.winllc.certalert.domain.OwnerType;
 import com.winllc.certalert.license.Licensing;
-import jakarta.mail.MessagingException;
-import jakarta.mail.internet.MimeMessage;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -12,7 +13,6 @@ import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Component;
 import org.thymeleaf.TemplateEngine;
 import org.thymeleaf.context.Context;
@@ -35,6 +35,11 @@ import org.thymeleaf.context.Context;
  * <p>Absent a mail sender, or with sending switched off, this does nothing and says so
  * once. The notifications are still written and still show on the page. The same goes for
  * a license that does not include email notifications, or is not in full effect.
+ *
+ * <p>Nothing is sent from here. A built message is written to the {@link MailOutbox} in the
+ * round-up's own transaction, alongside the notification it delivers, and sent once that
+ * commits - so a mail server that is down loses nothing, and one that is slow holds no
+ * transaction open. A newer round-up for the same address replaces one still waiting.
  */
 @Component
 public class NotificationMailer {
@@ -48,32 +53,48 @@ public class NotificationMailer {
     private final TemplateEngine templates;
     private final NotificationProperties properties;
     private final Licensing licensing;
+    private final MailOutbox outbox;
+    private final Clock clock;
 
     private boolean warned;
     private int sentThisRun;
     private boolean dryRunThisRun;
     /** What a dry run built, in the order it built it. Empty on a run that really sent. */
     private final List<Rendered> renderedThisRun = new ArrayList<>();
-    /** What could not be built or sent, and why. */
+    /** What could not be built, and why. */
     private final List<Failure> failuresThisRun = new ArrayList<>();
+    /** What this run put in the outbox, for the caller to send once its transaction is done. */
+    private final List<Long> queuedThisRun = new ArrayList<>();
 
     public NotificationMailer(
             Optional<JavaMailSender> mailSender,
             TemplateEngine templates,
             NotificationProperties properties,
-            Licensing licensing) {
+            Licensing licensing,
+            MailOutbox outbox,
+            Clock clock) {
         this.mailSender = mailSender;
         this.templates = templates;
         this.properties = properties;
         this.licensing = licensing;
+        this.outbox = outbox;
+        this.clock = clock;
+    }
+
+    /** Writes to one person about everything of theirs that is expiring. */
+    public boolean send(NotificationRecipients.Recipient recipient, List<ExpiryDigest.Entry> entries) {
+        return send(recipient, entries, null);
     }
 
     /**
-     * Writes to one person about everything of theirs that is expiring.
+     * Writes to one person about everything of theirs that is expiring: builds the messages
+     * and queues them.
      *
-     * @return whether anything went out, so the caller can record that it did
+     * @param notificationId the round-up these deliver, marked emailed when they go
+     * @return whether anything was queued (or, on a dry run, built)
      */
-    public boolean send(NotificationRecipients.Recipient recipient, List<ExpiryDigest.Entry> entries) {
+    public boolean send(
+            NotificationRecipients.Recipient recipient, List<ExpiryDigest.Entry> entries, Long notificationId) {
         NotificationProperties.Email settings = properties.getEmail();
         if (entries.isEmpty()) {
             return false;
@@ -107,7 +128,7 @@ public class NotificationMailer {
                 warnOnce("Notification email stopped at " + settings.getMaxPerRun() + " messages for this run");
                 break;
             }
-            sent |= send(settings, recipient.address(), digest);
+            sent |= send(settings, recipient.address(), digest, notificationId);
         }
         return sent;
     }
@@ -140,10 +161,16 @@ public class NotificationMailer {
         dryRunThisRun = dryRun || properties.getEmail().isDryRun();
         renderedThisRun.clear();
         failuresThisRun.clear();
+        queuedThisRun.clear();
+    }
+
+    /** What this run queued, by outbox id. */
+    public List<Long> queued() {
+        return List.copyOf(queuedThisRun);
     }
 
     /**
-     * How many messages this run has handed over - or built and dropped, on a dry run.
+     * How many messages this run has queued - or built and dropped, on a dry run.
      *
      * <p>Not the same as the number of people written to: somebody who holds an expiring
      * certificate and looks after an expiring server gets one message about each, and "how
@@ -197,7 +224,8 @@ public class NotificationMailer {
      */
     public record Failure(String to, String reason) {}
 
-    private boolean send(NotificationProperties.Email settings, String address, ExpiryDigest digest) {
+    private boolean send(
+            NotificationProperties.Email settings, String address, ExpiryDigest digest, Long notificationId) {
         String template = digest.getOwnerType() == OwnerType.USER ? USER_TEMPLATE : SERVER_TEMPLATE;
         try {
             Context context = new Context(Locale.ENGLISH);
@@ -215,19 +243,25 @@ public class NotificationMailer {
                 return true;
             }
 
-            MimeMessage message = mailSender.get().createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
-            helper.setFrom(settings.getFrom());
-            helper.setTo(address);
-            helper.setSubject(subject);
-            // Text first, HTML second: the order MimeMessageHelper wants for an alternative.
-            helper.setText(text, html);
-
-            mailSender.get().send(message);
+            // One round-up of each kind per address is worth sending: a newer one replaces
+            // whatever is still waiting from an earlier run.
+            String supersedes = "digest:" + digest.getOwnerType() + ":" + address.toLowerCase(Locale.ROOT);
+            queuedThisRun.add(outbox.queue(
+                    new OutboundEmail(
+                            OutboundEmail.Kind.DIGEST,
+                            settings.getFrom(),
+                            List.of(address),
+                            subject,
+                            text,
+                            html,
+                            supersedes,
+                            notificationId,
+                            Instant.now(clock)),
+                    false));
             sentThisRun++;
             return true;
-        } catch (MessagingException | RuntimeException e) {
-            log.error("Could not email the expiry round-up to {}", address, e);
+        } catch (RuntimeException e) {
+            log.error("Could not build the expiry round-up for {}", address, e);
             failuresThisRun.add(new Failure(address, describe(e)));
             return false;
         }
