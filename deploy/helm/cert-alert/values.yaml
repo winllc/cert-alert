@@ -326,6 +326,15 @@ revocation:
   # link-local and cloud metadata addresses (never) and loopback (only when named).
   allowedHosts: []
 
+# The DoD notice-and-consent banner, shown and agreed to before any sign-in (DISA STIG):
+# ENS_CONSENT_BANNER_ENABLED / _TITLE / _TEXT. Empty title and text mean the standard USG
+# title and DoD text. For ENS_CONSENT_BANNER_FILE, mount the file with extraVolumes and pass
+# it in extraEnv.
+consentBanner:
+  enabled: false
+  title: ""
+  text: ""
+
 # Classification bars across the top and bottom of every page.
 banner:
   # CERT_ALERT_BANNER_ENABLED / _TEXT / _TEXT_COLOR / _BACKGROUND / _HEIGHT.

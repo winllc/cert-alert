@@ -12,9 +12,14 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class EnsSecurityProperties {
 
     private final Csp csp = new Csp();
+    private final ConsentBanner consentBanner = new ConsentBanner();
 
     public Csp getCsp() {
         return csp;
+    }
+
+    public ConsentBanner getConsentBanner() {
+        return consentBanner;
     }
 
     /** The Content-Security-Policy every response carries. */
@@ -34,6 +39,61 @@ public class EnsSecurityProperties {
 
         public void setReportOnly(boolean reportOnly) {
             this.reportOnly = reportOnly;
+        }
+    }
+
+    /**
+     * The notice-and-consent banner a DoD system shows before sign-in (DISA STIG). Off by
+     * default; while on, nobody signs in by any means until their browser session has
+     * acknowledged it. See {@code ConsentBanner}.
+     */
+    public static class ConsentBanner {
+
+        /** {@code ENS_CONSENT_BANNER_ENABLED}. */
+        private boolean enabled = false;
+
+        /** {@code ENS_CONSENT_BANNER_TITLE}; empty means the standard USG title. */
+        private String title;
+
+        /**
+         * {@code ENS_CONSENT_BANNER_TEXT}: plain text, blank lines between paragraphs, and
+         * lines starting "- " a list. Empty means the standard DoD notice and consent text.
+         */
+        private String text;
+
+        /** {@code ENS_CONSENT_BANNER_FILE}: the text from a file instead; wins over {@link #text}. */
+        private String file;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getTitle() {
+            return title;
+        }
+
+        public void setTitle(String title) {
+            this.title = title;
+        }
+
+        public String getText() {
+            return text;
+        }
+
+        public void setText(String text) {
+            this.text = text;
+        }
+
+        public String getFile() {
+            return file;
+        }
+
+        public void setFile(String file) {
+            this.file = file;
         }
     }
 }

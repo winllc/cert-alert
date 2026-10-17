@@ -694,6 +694,29 @@ The ENS platform baseline, the same in every ENS product:
 - **PostgreSQL**: reach a database outside the bundle's internal network over TLS, with
   `sslmode=verify-full` in the JDBC URL (the chart's `database.params`).
 
+## Notice and consent banner
+
+The DoD notice-and-consent banner (DISA STIG), shown before sign-in. Off by default.
+
+| Setting | Default | |
+|---|---|---|
+| `ENS_CONSENT_BANNER_ENABLED` | `false` | Show the banner before sign-in |
+| `ENS_CONSENT_BANNER_TITLE` | `U.S. Government (USG) Information System (IS) Notice and Consent` | |
+| `ENS_CONSENT_BANNER_TEXT` | the standard DoD notice-and-consent text | Plain text: blank lines separate paragraphs, lines starting `- ` make a list. Shown as written, never as markup |
+| `ENS_CONSENT_BANNER_FILE` | — | Read the text from a file instead; wins over `_TEXT`. Read at startup, and a file that cannot be read stops the application starting |
+
+**Enforced on the server, not just shown.** While it is on, every request from a browser
+session that has not pressed **I agree** is sent to `/consent` — before any sign-in filter
+runs, so no sign-in of any kind succeeds first: not the form, not a client certificate. An
+API call (`/api/**`) gets a 401 instead. The agreement is kept in the session, so signing out
+shows the banner again before the next sign-in. It is audited as `auth.consent-acknowledged`
+(category `authentication`, success, with the client's address).
+
+Exempt, because they are not browser sessions or are what the banner is made of: `/consent`
+itself, `/css/**`, `/js/**`, `/img/**`, `/webjars/**`, `/favicon.ico`, `/error`, the health
+endpoints (`/actuator/health/**`, `/livez`, `/readyz`), `/actuator/prometheus` on the
+management port, and the SIEM pull API (`/api/audit/**`, bearer tokens).
+
 ## Signing in
 
 Two ways in, in order of preference.

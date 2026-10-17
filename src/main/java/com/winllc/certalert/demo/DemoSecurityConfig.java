@@ -19,6 +19,8 @@ import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.authentication.AuthenticationProvider;
 import com.winllc.certalert.license.Licensing;
+import com.winllc.certalert.security.ConsentBanner;
+import com.winllc.certalert.security.ConsentFilter;
 import com.winllc.certalert.security.EnsSecurityProperties;
 import com.winllc.certalert.security.SecurityHeaders;
 import com.winllc.certalert.security.SignedInDirectoryUser;
@@ -28,6 +30,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -65,7 +68,7 @@ public class DemoSecurityConfig {
 
     /** Served before anybody signs in - the sign-in page itself, and what it is made of. */
     private static final String[] PUBLIC_PATHS = {
-        "/login", "/css/**", "/js/**", "/img/**", "/webjars/**", "/favicon.ico", "/error"
+        "/login", ConsentFilter.PATH, "/css/**", "/js/**", "/img/**", "/webjars/**", "/favicon.ico", "/error"
     };
 
     /**
@@ -108,13 +111,15 @@ public class DemoSecurityConfig {
             ObjectMapper json,
             Licensing licensing,
             AccessDenials denials,
-            EnsSecurityProperties ens)
+            EnsSecurityProperties ens,
+            ConsentBanner consentBanner)
             throws Exception {
         log.warn("DEMO MODE: every account in this directory is published on the sign-in page with "
                 + "its password. Nothing can be changed, but everything the directory holds can be "
                 + "read by anyone who can reach this application.");
 
         SecurityHeaders.apply(http, ens.getCsp().isReportOnly());
+        http.addFilterBefore(new ConsentFilter(consentBanner), UsernamePasswordAuthenticationFilter.class);
 
         http.authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(PUBLIC_PATHS)

@@ -552,6 +552,15 @@ ens:
     # escape hatch for a page the tests missed, not a way to run.
     report-only: ${ENS_CSP_REPORT_ONLY:false}
 
+  # The DoD notice-and-consent banner, before any sign-in (DISA STIG). Empty title and text
+  # mean the standard USG title and DoD text; a file wins over the text. Plain text: blank
+  # lines separate paragraphs, lines starting "- " make a list.
+  consent-banner:
+    enabled: ${ENS_CONSENT_BANNER_ENABLED:false}
+    title: ${ENS_CONSENT_BANNER_TITLE:}
+    text: ${ENS_CONSENT_BANNER_TEXT:}
+    file: ${ENS_CONSENT_BANNER_FILE:}
+
   # The shared ENS audit trail (ens-audit/1): one JSON line per event, chained by SHA-256,
   # stored in the database and, optionally, sent on. Every product reads the same ENS_AUDIT_*
   # variables; see the README's "Audit logging" section.

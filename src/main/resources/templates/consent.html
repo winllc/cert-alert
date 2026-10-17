@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Notice and consent')}"></head>
+<body class="d-flex flex-column bg-surface-secondary">
+
+<!--/* The notice-and-consent banner, shown before any sign-in while
+       ENS_CONSENT_BANNER_ENABLED is on. The text is the operator's, or the standard DoD
+       text, and is always escaped: it is shown as written, never interpreted as markup. */-->
+<div class="page page-center">
+    <div class="container container-narrow py-4">
+        <div class="text-center mb-4">
+            <img th:src="@{/img/logo.png}" alt="CertAlert" class="logo logo-lg">
+        </div>
+
+        <div class="card card-md">
+            <div class="card-body">
+                <h2 class="h3 mb-3" id="consent-title" th:text="${banner.title}">Notice and consent</h2>
+                <div id="consent-text">
+                    <th:block th:each="block : ${banner.blocks}">
+                        <p th:unless="${block.list}" th:text="${block.paragraph}">Paragraph</p>
+                        <ul th:if="${block.list}">
+                            <li th:each="item : ${block.items}" th:text="${item}">Item</li>
+                        </ul>
+                    </th:block>
+                </div>
+                <form method="post" th:action="@{/consent}" class="mt-4">
+                    <button type="submit" class="btn btn-primary w-100" id="consent-agree">I agree</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>

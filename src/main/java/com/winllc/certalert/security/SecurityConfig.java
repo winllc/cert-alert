@@ -28,6 +28,7 @@ import org.springframework.security.web.authentication.DelegatingAuthenticationE
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
 import org.springframework.security.web.authentication.preauth.x509.SubjectX500PrincipalExtractor;
+import org.springframework.security.web.authentication.preauth.x509.X509AuthenticationFilter;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.access.intercept.RequestAuthorizationContext;
 import org.springframework.security.web.util.matcher.RequestMatcher;
@@ -59,8 +60,8 @@ public class SecurityConfig {
 
     private static final String[] PUBLIC_PATHS = {
         // The images among them: the sign-in page carries the logo, and nobody has signed
-        // in when it is served.
-        "/login", "/css/**", "/js/**", "/img/**", "/webjars/**", "/favicon.ico", "/error"
+        // in when it is served. The notice-and-consent banner comes before signing in too.
+        "/login", ConsentFilter.PATH, "/css/**", "/js/**", "/img/**", "/webjars/**", "/favicon.ico", "/error"
     };
 
     /** Administrators, or anyone signed in, depending on how the application is configured. */
@@ -77,10 +78,13 @@ public class SecurityConfig {
             X509DirectoryUserDetailsService x509UserDetailsService,
             List<AuthenticationProvider> authenticationProviders,
             AccessDenials denials,
-            EnsSecurityProperties ens)
+            EnsSecurityProperties ens,
+            ConsentBanner consentBanner)
             throws Exception {
 
         SecurityHeaders.apply(http, ens.getCsp().isReportOnly());
+        // Ahead of every sign-in filter, so nothing signs anybody in before they have agreed.
+        http.addFilterBefore(new ConsentFilter(consentBanner), X509AuthenticationFilter.class);
 
         http.authorizeHttpRequests(authorize -> authorize
                 .requestMatchers(PUBLIC_PATHS)
