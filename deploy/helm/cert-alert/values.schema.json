@@ -567,6 +567,27 @@
         }
       }
     },
+    "session": {
+      "type": "object",
+      "properties": {
+        "idleTimeout": {
+          "type": "string"
+        },
+        "adminIdleTimeout": {
+          "type": "string"
+        },
+        "absoluteTimeout": {
+          "type": "string"
+        },
+        "maxPerUser": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
     "consentBanner": {
       "type": "object",
       "properties": {

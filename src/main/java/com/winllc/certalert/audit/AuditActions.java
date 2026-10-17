@@ -13,7 +13,7 @@ public final class AuditActions {
     /** Everything other than the entry changes, which {@link AuditAction} lists. */
     public static final List<String> RECORDED = List.of(
             // authentication
-            "auth.login", "auth.logout", "auth.consent-acknowledged",
+            "auth.login", "auth.logout", "auth.consent-acknowledged", "auth.session-expired",
             // authorization
             "access.denied",
             // configuration

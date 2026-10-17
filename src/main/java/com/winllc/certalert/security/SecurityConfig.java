@@ -24,6 +24,7 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.access.AccessDeniedHandlerImpl;
+import org.springframework.security.web.access.ExceptionTranslationFilter;
 import org.springframework.security.web.authentication.DelegatingAuthenticationEntryPoint;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
@@ -79,12 +80,16 @@ public class SecurityConfig {
             List<AuthenticationProvider> authenticationProviders,
             AccessDenials denials,
             EnsSecurityProperties ens,
-            ConsentBanner consentBanner)
+            ConsentBanner consentBanner,
+            SessionPolicy sessionPolicy)
             throws Exception {
 
         SecurityHeaders.apply(http, ens.getCsp().isReportOnly());
         // Ahead of every sign-in filter, so nothing signs anybody in before they have agreed.
         http.addFilterBefore(new ConsentFilter(consentBanner), X509AuthenticationFilter.class);
+        // After every sign-in filter, before anything is authorised: idle, absolute and
+        // concurrent limits, the same whichever way somebody signed in.
+        http.addFilterBefore(new SessionPolicyFilter(sessionPolicy), ExceptionTranslationFilter.class);
 
         http.authorizeHttpRequests(authorize -> authorize
                 .requestMatchers(PUBLIC_PATHS)
@@ -179,7 +184,10 @@ public class SecurityConfig {
         authenticationProviders.forEach(http::authenticationProvider);
 
         http.formLogin(form -> form.loginPage("/login").permitAll())
-                .logout(logout -> logout.logoutSuccessUrl("/login?logout").permitAll())
+                .logout(logout -> logout
+                        .addLogoutHandler(sessionPolicy::loggingOut)
+                        .logoutSuccessUrl("/login?logout")
+                        .permitAll())
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(authenticationEntryPoint())
                         // Every 403 the chain answers is recorded as access.denied.

@@ -37,6 +37,9 @@
                 <div th:if="${param.logout}" class="alert alert-success" role="alert">
                     You have been signed out.
                 </div>
+                <div th:if="${param.expired}" class="alert alert-warning" role="alert">
+                    Your session has ended. Sign in again to carry on.
+                </div>
 
                 <form method="post" th:action="@{/login}" autocomplete="off">
                     <div class="mb-3">

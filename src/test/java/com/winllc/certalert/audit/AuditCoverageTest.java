@@ -44,6 +44,9 @@ class AuditCoverageTest {
 
     private static EmbeddedDirectory directory;
 
+    /** Synced once per class, whatever the shared database already holds under the same names. */
+    private static boolean synced;
+
     @Autowired
     private WebApplicationContext context;
 
@@ -101,7 +104,8 @@ class AuditCoverageTest {
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
                 .apply(SecurityMockMvcConfigurers.springSecurity())
                 .build();
-        if (users.findByDn("uid=alice," + EmbeddedDirectory.PEOPLE_DN).isEmpty()) {
+        if (!synced || users.findByDn("uid=alice," + EmbeddedDirectory.PEOPLE_DN).isEmpty()) {
+            synced = true;
             syncService.syncUsers();
         }
         denials.flush();

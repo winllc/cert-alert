@@ -64,6 +64,10 @@ data:
   {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_DEFAULT_OCSP_URL" "value" $v.revocation.defaultOcspUrl) }}
   {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_DEFAULT_CRL_URL" "value" $v.revocation.defaultCrlUrl) }}
   {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_REVOCATION_ALLOWED_HOSTS" "value" (join "," $v.revocation.allowedHosts)) }}
+  {{- include "cert-alert.envLine" (dict "name" "ENS_SESSION_IDLE_TIMEOUT" "value" $v.session.idleTimeout) }}
+  {{- include "cert-alert.envLine" (dict "name" "ENS_SESSION_ADMIN_IDLE_TIMEOUT" "value" $v.session.adminIdleTimeout) }}
+  {{- include "cert-alert.envLine" (dict "name" "ENS_SESSION_ABSOLUTE_TIMEOUT" "value" $v.session.absoluteTimeout) }}
+  {{- include "cert-alert.envLine" (dict "name" "ENS_SESSION_MAX_PER_USER" "value" $v.session.maxPerUser) }}
   ENS_CONSENT_BANNER_ENABLED: {{ $v.consentBanner.enabled | quote }}
   {{- include "cert-alert.envLine" (dict "name" "ENS_CONSENT_BANNER_TITLE" "value" $v.consentBanner.title) }}
   {{- include "cert-alert.envLine" (dict "name" "ENS_CONSENT_BANNER_TEXT" "value" $v.consentBanner.text) }}

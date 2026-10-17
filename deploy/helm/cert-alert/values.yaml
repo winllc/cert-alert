@@ -326,6 +326,15 @@ revocation:
   # link-local and cloud metadata addresses (never) and loopback (only when named).
   allowedHosts: []
 
+# Session limits: ENS_SESSION_IDLE_TIMEOUT / _ADMIN_IDLE_TIMEOUT / _ABSOLUTE_TIMEOUT /
+# _MAX_PER_USER. Empty (or null) keeps the application's default: 30m, the same as idle, 12h
+# and 0 (no limit). The STIG suggests adminIdleTimeout 15m and maxPerUser 3.
+session:
+  idleTimeout: ""
+  adminIdleTimeout: ""
+  absoluteTimeout: ""
+  maxPerUser: null
+
 # The DoD notice-and-consent banner, shown and agreed to before any sign-in (DISA STIG):
 # ENS_CONSENT_BANNER_ENABLED / _TITLE / _TEXT. Empty title and text mean the standard USG
 # title and DoD text. For ENS_CONSENT_BANNER_FILE, mount the file with extraVolumes and pass

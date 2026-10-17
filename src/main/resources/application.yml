@@ -99,6 +99,9 @@ server:
 
   servlet:
     session:
+      # Before sign-in, and for anything that does not say otherwise. Set from
+      # ENS_SESSION_IDLE_TIMEOUT; SERVER_SERVLET_SESSION_TIMEOUT still works and wins.
+      timeout: ${ENS_SESSION_IDLE_TIMEOUT:30m}
       cookie:
         # Never readable from script, and not sent on cross-site requests other than a
         # top-level navigation. Secure is set by the container on any request that arrived
@@ -555,6 +558,18 @@ ens:
   # The DoD notice-and-consent banner, before any sign-in (DISA STIG). Empty title and text
   # mean the standard USG title and DoD text; a file wins over the text. Plain text: blank
   # lines separate paragraphs, lines starting "- " make a list.
+  # How long a signed-in session lasts, and how many one person may hold. An ended session
+  # goes back to the sign-in page (an API call gets a 401) and is audited as
+  # auth.session-expired with its reason: idle, absolute or concurrent.
+  session:
+    idle-timeout: ${server.servlet.session.timeout}
+    # Unset means the same as idle-timeout. The STIG suggests 15m.
+    admin-idle-timeout: ${ENS_SESSION_ADMIN_IDLE_TIMEOUT:}
+    absolute-timeout: ${ENS_SESSION_ABSOLUTE_TIMEOUT:12h}
+    # 0 is no limit; beyond it, signing in ends the person's oldest session. The STIG
+    # suggests 3.
+    max-per-user: ${ENS_SESSION_MAX_PER_USER:0}
+
   consent-banner:
     enabled: ${ENS_CONSENT_BANNER_ENABLED:false}
     title: ${ENS_CONSENT_BANNER_TITLE:}

@@ -694,6 +694,26 @@ The ENS platform baseline, the same in every ENS product:
 - **PostgreSQL**: reach a database outside the bundle's internal network over TLS, with
   `sslmode=verify-full` in the JDBC URL (the chart's `database.params`).
 
+## Session controls
+
+| Setting | Default | |
+|---|---|---|
+| `ENS_SESSION_IDLE_TIMEOUT` | `30m` | A session nobody has used for this long ends. `SERVER_SERVLET_SESSION_TIMEOUT` still works as the same setting, and wins if both are set |
+| `ENS_SESSION_ADMIN_IDLE_TIMEOUT` | same as idle | The same for an administrator's session (the STIG suggests `15m`) |
+| `ENS_SESSION_ABSOLUTE_TIMEOUT` | `12h` | A session ends this long after sign-in, however busy |
+| `ENS_SESSION_MAX_PER_USER` | `0` (no limit) | Sessions one person may hold at once. Signing in beyond it ends their **oldest** session - the earliest sign-in (the STIG suggests `3`) |
+
+Durations are Spring durations: `15m`, `12h`, `90s`. An ended session goes back to the
+sign-in page (`/login?expired`, which says so); an API call in one gets a 401. Each is
+audited as `auth.session-expired` with its reason — `idle`, `absolute` or `concurrent` — and
+the person and session it belonged to. A sign-out is `auth.logout`, not an expiry.
+
+The limits apply however somebody signed in. A client certificate is checked on every
+request rather than remembered by the session, so for its holder an ended session means a new
+one on the next request — and, with the consent banner on, agreeing to it again. The first
+signed-in request of every session also gives it a new id. The register of who holds which
+sessions is in memory, like the sessions themselves: one instance, as the chart requires.
+
 ## Notice and consent banner
 
 The DoD notice-and-consent banner (DISA STIG), shown before sign-in. Off by default.

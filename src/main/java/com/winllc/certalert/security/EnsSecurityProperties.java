@@ -1,5 +1,6 @@
 package com.winllc.certalert.security;
 
+import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
@@ -13,6 +14,7 @@ public class EnsSecurityProperties {
 
     private final Csp csp = new Csp();
     private final ConsentBanner consentBanner = new ConsentBanner();
+    private final Session session = new Session();
 
     public Csp getCsp() {
         return csp;
@@ -20,6 +22,10 @@ public class EnsSecurityProperties {
 
     public ConsentBanner getConsentBanner() {
         return consentBanner;
+    }
+
+    public Session getSession() {
+        return session;
     }
 
     /** The Content-Security-Policy every response carries. */
@@ -94,6 +100,68 @@ public class EnsSecurityProperties {
 
         public void setFile(String file) {
             this.file = file;
+        }
+    }
+
+    /** How long a signed-in session lasts, and how many one person may hold. See {@code SessionPolicy}. */
+    public static class Session {
+
+        /**
+         * {@code ENS_SESSION_IDLE_TIMEOUT}: a session nobody has used for this long ends.
+         * {@code SERVER_SERVLET_SESSION_TIMEOUT} still works, as the same thing.
+         */
+        private Duration idleTimeout = Duration.ofMinutes(30);
+
+        /**
+         * {@code ENS_SESSION_ADMIN_IDLE_TIMEOUT}: the same for an administrator's session; unset
+         * means {@link #idleTimeout}. The STIG suggests 15 minutes.
+         */
+        private Duration adminIdleTimeout;
+
+        /** {@code ENS_SESSION_ABSOLUTE_TIMEOUT}: a session ends this long after sign-in, however busy. */
+        private Duration absoluteTimeout = Duration.ofHours(12);
+
+        /**
+         * {@code ENS_SESSION_MAX_PER_USER}: sessions one person may hold at once; signing in
+         * beyond it ends their oldest. 0 is no limit. The STIG suggests 3.
+         */
+        private int maxPerUser = 0;
+
+        public Duration getIdleTimeout() {
+            return idleTimeout;
+        }
+
+        public void setIdleTimeout(Duration idleTimeout) {
+            this.idleTimeout = idleTimeout;
+        }
+
+        public Duration getAdminIdleTimeout() {
+            return adminIdleTimeout;
+        }
+
+        public void setAdminIdleTimeout(Duration adminIdleTimeout) {
+            this.adminIdleTimeout = adminIdleTimeout;
+        }
+
+        /** The administrators' idle timeout, which is the ordinary one unless set. */
+        public Duration effectiveAdminIdleTimeout() {
+            return adminIdleTimeout == null || adminIdleTimeout.isZero() ? idleTimeout : adminIdleTimeout;
+        }
+
+        public Duration getAbsoluteTimeout() {
+            return absoluteTimeout;
+        }
+
+        public void setAbsoluteTimeout(Duration absoluteTimeout) {
+            this.absoluteTimeout = absoluteTimeout;
+        }
+
+        public int getMaxPerUser() {
+            return maxPerUser;
+        }
+
+        public void setMaxPerUser(int maxPerUser) {
+            this.maxPerUser = Math.max(0, maxPerUser);
         }
     }
 }

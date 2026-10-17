@@ -22,6 +22,8 @@ import com.winllc.certalert.license.Licensing;
 import com.winllc.certalert.security.ConsentBanner;
 import com.winllc.certalert.security.ConsentFilter;
 import com.winllc.certalert.security.EnsSecurityProperties;
+import com.winllc.certalert.security.SessionPolicy;
+import com.winllc.certalert.security.SessionPolicyFilter;
 import com.winllc.certalert.security.SecurityHeaders;
 import com.winllc.certalert.security.SignedInDirectoryUser;
 import org.springframework.security.core.Authentication;
@@ -30,6 +32,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
+import org.springframework.security.web.access.ExceptionTranslationFilter;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -112,7 +115,8 @@ public class DemoSecurityConfig {
             Licensing licensing,
             AccessDenials denials,
             EnsSecurityProperties ens,
-            ConsentBanner consentBanner)
+            ConsentBanner consentBanner,
+            SessionPolicy sessionPolicy)
             throws Exception {
         log.warn("DEMO MODE: every account in this directory is published on the sign-in page with "
                 + "its password. Nothing can be changed, but everything the directory holds can be "
@@ -120,6 +124,7 @@ public class DemoSecurityConfig {
 
         SecurityHeaders.apply(http, ens.getCsp().isReportOnly());
         http.addFilterBefore(new ConsentFilter(consentBanner), UsernamePasswordAuthenticationFilter.class);
+        http.addFilterBefore(new SessionPolicyFilter(sessionPolicy), ExceptionTranslationFilter.class);
 
         http.authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(PUBLIC_PATHS)
@@ -164,7 +169,10 @@ public class DemoSecurityConfig {
                         .access((authentication, context) -> new AuthorizationDecision(
                                 signedIn(authentication.get()) && isRead(context.getRequest()))))
                 .formLogin(form -> form.loginPage("/login").permitAll())
-                .logout(logout -> logout.logoutSuccessUrl("/login?logout").permitAll())
+                .logout(logout -> logout
+                        .addLogoutHandler(sessionPolicy::loggingOut)
+                        .logoutSuccessUrl("/login?logout")
+                        .permitAll())
                 // A denial from the authorization filter never reaches the controller
                 // advice - it is translated further down the chain - so the wording has to
                 // be put on the response here.
