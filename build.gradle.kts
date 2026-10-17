@@ -48,7 +48,7 @@ dependencies {
     // Tabler (MIT) is the admin template the UI is built on; it bundles the Bootstrap 5
     // it is built from, so no separate Bootstrap dependency. Its icon package is 6.8MB of
     // individual SVGs, so the handful of glyphs used here are inlined as a sprite instead.
-    runtimeOnly("org.webjars.npm:tabler__core:1.5.1")
+    runtimeOnly("org.webjars.npm:tabler__core:1.6.1")
 
     developmentOnly("org.springframework.boot:spring-boot-devtools")
     // Backs the dev profile's embedded sample directory and the demo's generated one.
