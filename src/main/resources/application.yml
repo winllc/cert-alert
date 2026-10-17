@@ -311,7 +311,8 @@ cert-alert:
     enabled: true
     # Who administers, by an address the directory publishes for them, their uid, or the
     # DN of their entry. Not a common or display name: two people can share one, and the
-    # directory lets anybody be called anything. Everyone else who signs in can read the
+    # directory lets anybody be called anything. Not an address added in this application
+    # either - one of these cannot be added as one. Everyone else who signs in can read the
     # tables but cannot trigger jobs.
     admin-identifiers: []
 

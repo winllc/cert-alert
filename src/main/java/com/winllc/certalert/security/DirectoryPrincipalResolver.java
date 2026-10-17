@@ -182,6 +182,14 @@ public class DirectoryPrincipalResolver {
         return identifiers;
     }
 
+    /**
+     * Whether {@code admin-identifiers} names this value, compared the way roles are
+     * decided - so an address that would be one can be refused where it is not allowed.
+     */
+    public boolean isAdminIdentifier(String value) {
+        return adminIdentifiers().contains(normalise(value));
+    }
+
     private Collection<GrantedAuthority> authoritiesFor(Collection<String> identifiers) {
         Set<GrantedAuthority> authorities = new LinkedHashSet<>();
         authorities.add(new SimpleGrantedAuthority(ROLE_USER));

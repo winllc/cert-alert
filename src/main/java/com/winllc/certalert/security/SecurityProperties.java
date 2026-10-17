@@ -24,8 +24,9 @@ public class SecurityProperties {
     /**
      * Identifiers granted the admin role: an address the directory publishes for a person,
      * their uid, or the DN of their entry. Never a common or display name, which two people
-     * can share. Everyone else who authenticates can read the tables but cannot trigger
-     * jobs or reach the management endpoints.
+     * can share, and never an address added in this application, which refuses these.
+     * Everyone else who authenticates can read the tables but cannot trigger jobs or reach
+     * the management endpoints.
      */
     private List<String> adminIdentifiers = new ArrayList<>();
 

@@ -1112,6 +1112,13 @@ So a person's details page carries **addresses added here** alongside the publis
 An address added there joins the set a `serverPOC` is matched against, and the servers
 named after it become theirs immediately — not at the next sweep.
 
+That is all it does. An address added here never makes anybody an administrator:
+`admin-identifiers` is matched only against what the directory publishes. And an address
+`admin-identifiers` names cannot be added at all — the request is refused with a 400 saying
+so — because where `contact-editors: AUTHENTICATED` lets anyone signed in add addresses,
+that would be somebody naming themselves after an administrator. One added before this was
+refused stays, still binds servers, and grants nothing.
+
 A **group address** is one several people answer, which is what a distribution list is.
 Each of them carries their own row for it, and each of them is a contact for the servers
 named after it. The badge says how many others share it.

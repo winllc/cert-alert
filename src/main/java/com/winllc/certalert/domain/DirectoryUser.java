@@ -31,8 +31,11 @@ import java.util.stream.Stream;
  * {@link #getEmail()} holding whichever the configured precedence picked as primary.
  *
  * <p>{@link #getIdentifiers()} is the set of values by which a server might name this
- * person in its {@code serverPOC} attribute - every address plus every form of their name.
- * That set is the join between people and the servers they are responsible for.
+ * person in its {@code serverPOC} attribute - every address plus every form of their name,
+ * and the addresses added in this application. That set is the join between people and the
+ * servers they are responsible for. It is not who they are: names are shared, and an
+ * address added here is whatever somebody typed, so signing in and roles go by the DN, uid
+ * and published addresses alone.
  */
 @Entity
 @Table(
