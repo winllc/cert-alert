@@ -393,9 +393,18 @@ cert-alert:
     workers: 8
     allow-unverified-crl: true
     crl-cache-ttl: 6h
+    # Counted as it downloads; a list over this is dropped there and then.
     max-crl-bytes: 16777216
     connect-timeout: 10s
     read-timeout: 30s
+    # The whole of one download, redirects included.
+    max-fetch-time: 60s
+    # Where lists and responders may be fetched from, when set: host names, *.domain, or
+    # addresses and ranges (10.20.0.0/16). Empty: wherever the certificates say - except
+    # link-local and cloud metadata addresses, which are never fetched from, and loopback,
+    # which is only fetched from when named here. The hosts of default-ocsp-url and
+    # default-crl-url are always allowed. Redirects are followed to http and https only.
+    allowed-hosts: ${CERT_ALERT_REVOCATION_ALLOWED_HOSTS:}
 
   # Asking a server's endpoint what it is actually serving, from its page. The one
   # outbound connection here that is not to the directory or the mail server, and the only

@@ -317,6 +317,10 @@ revocation:
   # certificate that names no responder or distribution point of its own.
   defaultOcspUrl: ""
   defaultCrlUrl: ""
+  # CERT_ALERT_REVOCATION_ALLOWED_HOSTS: the only hosts CRLs and OCSP answers are fetched
+  # from (names, *.domain, addresses or CIDRs). Empty: wherever the certificates say, except
+  # link-local and cloud metadata addresses (never) and loopback (only when named).
+  allowedHosts: []
 
 # Classification bars across the top and bottom of every page.
 banner:

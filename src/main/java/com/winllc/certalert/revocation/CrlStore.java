@@ -3,28 +3,16 @@ package com.winllc.certalert.revocation;
 import com.winllc.certalert.config.RevocationProperties;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.security.GeneralSecurityException;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509CRL;
 import java.security.cert.X509Certificate;
 import java.time.Instant;
-import java.util.Hashtable;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import javax.naming.Context;
-import javax.naming.NamingException;
-import javax.naming.directory.Attribute;
-import javax.naming.directory.Attributes;
-import javax.naming.directory.DirContext;
-import javax.naming.directory.InitialDirContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -47,11 +35,11 @@ public class CrlStore {
 
     private static final Logger log = LoggerFactory.getLogger(CrlStore.class);
 
-    /** The attribute a directory publishes a CRL in; the option asks for it as bytes. */
-    private static final String CRL_ATTRIBUTE = "certificateRevocationList;binary";
+    private static final String ACCEPT = "application/pkix-crl, application/x-pkcs7-crl, */*";
 
     private final RevocationProperties properties;
-    private final HttpClient http;
+    /** What the scheduled check fetches with; sign-in brings its own, with shorter timeouts. */
+    private final RevocationFetcher fetcher;
     /**
      * By distribution point. The value is the answer rather than the list, so that a second
      * caller arriving while the first is still downloading waits for it instead of starting
@@ -59,14 +47,22 @@ public class CrlStore {
      */
     private final Map<String, CompletableFuture<Held>> held = new ConcurrentHashMap<>();
 
-    public CrlStore(RevocationProperties properties) {
+    public CrlStore(RevocationProperties properties, FetchPolicy policy) {
         this.properties = properties;
-        this.http = HttpClient.newBuilder()
-                .connectTimeout(properties.getConnectTimeout())
-                // A CRL distribution point that redirects is ordinary; one that redirects
-                // to somewhere else's idea of a CRL is caught by the signature check.
-                .followRedirects(HttpClient.Redirect.NORMAL)
-                .build();
+        // A distribution point that redirects is ordinary, and followed - to http or https
+        // only, and each hop checked against the policy. One that redirects to somewhere
+        // else's idea of a CRL is caught by the signature check.
+        this.fetcher = new RevocationFetcher(
+                policy,
+                properties.getConnectTimeout(),
+                properties.getReadTimeout(),
+                properties.getMaxFetchTime(),
+                properties.getMaxCrlBytes());
+    }
+
+    /** The fetcher the scheduled check uses, for the responder questions it asks as well. */
+    public RevocationFetcher fetcher() {
+        return fetcher;
     }
 
     /** A CRL and what is known about it. */
@@ -80,8 +76,17 @@ public class CrlStore {
      *     null where it is not known
      */
     public Optional<Fetched> fetch(List<String> urls, X509Certificate issuer, Instant now) {
+        return fetch(urls, issuer, now, fetcher);
+    }
+
+    /**
+     * The same, downloading anything not already held with this fetcher - which is how a
+     * sign-in, with somebody waiting, asks with shorter timeouts than the nightly job while
+     * still sharing what either of them has already downloaded.
+     */
+    public Optional<Fetched> fetch(List<String> urls, X509Certificate issuer, Instant now, RevocationFetcher with) {
         for (String url : urls) {
-            Optional<Fetched> crl = fetchOne(url, issuer, now);
+            Optional<Fetched> crl = fetchOne(url, issuer, now, with);
             if (crl.isPresent()) {
                 return crl;
             }
@@ -106,7 +111,7 @@ public class CrlStore {
      * <p>A fetch that fails takes its answer back out of the map, so the next certificate
      * to name that distribution point tries again rather than inheriting the failure.
      */
-    private Optional<Fetched> fetchOne(String url, X509Certificate issuer, Instant now) {
+    private Optional<Fetched> fetchOne(String url, X509Certificate issuer, Instant now, RevocationFetcher with) {
         Held current = awaitHeld(url);
         if (current != null && current.usableAt(now)) {
             return Optional.of(verify(current.crl(), url, issuer));
@@ -123,7 +128,7 @@ public class CrlStore {
         }
 
         try {
-            byte[] bytes = read(url);
+            byte[] bytes = with.get(url, ACCEPT);
             X509CRL crl = (X509CRL) CertificateFactory.getInstance("X.509")
                     .generateCRL(new ByteArrayInputStream(bytes));
             mine.complete(new Held(crl, keepUntil(crl, now)));
@@ -132,12 +137,17 @@ public class CrlStore {
                     crl.getRevokedCertificates() == null ? 0 : crl.getRevokedCertificates().size(),
                     crl.getNextUpdate());
             return Optional.of(verify(crl, url, issuer));
-        } catch (IOException | GeneralSecurityException | RuntimeException | NamingException e) {
+        } catch (IOException | GeneralSecurityException | RuntimeException e) {
             // One unreachable distribution point is not the end of the check; the next one
             // in the certificate may answer, and an unanswered question reads as unknown.
             held.remove(url, mine);
             mine.complete(null);
-            log.info("Could not fetch a CRL from {}: {}", url, describe(e));
+            if (e instanceof FetchPolicy.RefusedDestinationException) {
+                // Not a network fault: a certificate naming somewhere this will not go.
+                log.warn("Did not fetch a CRL from {}: {}", url, describe(e));
+            } else {
+                log.info("Could not fetch a CRL from {}: {}", url, describe(e));
+            }
             return Optional.empty();
         }
     }
@@ -174,77 +184,6 @@ public class CrlStore {
             log.warn("The CRL at {} is not signed by {}: {}",
                     url, issuer.getSubjectX500Principal().getName(), describe(e));
             return new Fetched(crl, url, false);
-        }
-    }
-
-    private byte[] read(String url) throws IOException, NamingException {
-        String lower = url.toLowerCase(Locale.ROOT);
-        if (lower.startsWith("ldap://") || lower.startsWith("ldaps://")) {
-            return readFromDirectory(url);
-        }
-        return readOverHttp(url);
-    }
-
-    private byte[] readOverHttp(String url) throws IOException {
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .timeout(properties.getReadTimeout())
-                .header("Accept", "application/pkix-crl, application/x-pkcs7-crl, */*")
-                .GET()
-                .build();
-        HttpResponse<byte[]> response;
-        try {
-            response = http.send(request, HttpResponse.BodyHandlers.ofByteArray());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IOException("Interrupted while fetching " + url, e);
-        }
-        if (response.statusCode() != 200) {
-            throw new IOException("HTTP " + response.statusCode() + " from " + url);
-        }
-        byte[] body = response.body();
-        if (body.length > properties.getMaxCrlBytes()) {
-            throw new IOException("CRL at " + url + " is " + body.length + " bytes, over the configured limit");
-        }
-        return body;
-    }
-
-    /**
-     * A distribution point inside the directory, which is where a PKI that has no route to
-     * the internet publishes its lists. The URL names the host, the entry and the
-     * attribute, so it is handed to JNDI whole rather than picked apart.
-     */
-    private byte[] readFromDirectory(String url) throws NamingException, IOException {
-        Hashtable<String, Object> environment = new Hashtable<>();
-        environment.put(Context.INITIAL_CONTEXT_FACTORY, "com.sun.jndi.ldap.LdapCtxFactory");
-        environment.put(Context.PROVIDER_URL, url);
-        // Anonymous: a CRL is published to be read, and this application's directory
-        // credentials are for its own directory, which this need not be.
-        environment.put(Context.SECURITY_AUTHENTICATION, "none");
-        environment.put("java.naming.ldap.attributes.binary", "certificateRevocationList");
-        environment.put("com.sun.jndi.ldap.connect.timeout",
-                String.valueOf(properties.getConnectTimeout().toMillis()));
-        environment.put("com.sun.jndi.ldap.read.timeout", String.valueOf(properties.getReadTimeout().toMillis()));
-
-        DirContext context = new InitialDirContext(environment);
-        try {
-            Attributes attributes = context.getAttributes("", new String[] {CRL_ATTRIBUTE, "certificateRevocationList"});
-            Attribute attribute = attributes.get(CRL_ATTRIBUTE);
-            if (attribute == null) {
-                attribute = attributes.get("certificateRevocationList");
-            }
-            if (attribute == null || attribute.size() == 0) {
-                throw new IOException("No certificateRevocationList at " + url);
-            }
-            Object value = attribute.get(0);
-            if (!(value instanceof byte[] bytes)) {
-                throw new IOException("The CRL at " + url + " did not come back as bytes");
-            }
-            if (bytes.length > properties.getMaxCrlBytes()) {
-                throw new IOException("CRL at " + url + " is " + bytes.length + " bytes, over the configured limit");
-            }
-            return bytes;
-        } finally {
-            context.close();
         }
     }
 

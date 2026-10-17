@@ -5,22 +5,13 @@ import com.winllc.certalert.domain.CachedCertificate;
 import com.winllc.certalert.domain.RevocationMethod;
 import com.winllc.certalert.domain.RevocationStatus;
 import java.math.BigInteger;
-import java.security.cert.CertPath;
-import java.security.cert.CertPathValidator;
-import java.security.cert.CertPathValidatorException;
-import java.security.cert.CertificateFactory;
-import java.security.cert.CertificateRevokedException;
-import java.security.cert.PKIXParameters;
-import java.security.cert.PKIXRevocationChecker;
-import java.security.cert.TrustAnchor;
 import java.security.cert.X509CRL;
 import java.security.cert.X509CRLEntry;
 import java.security.cert.X509Certificate;
 import java.time.Instant;
-import java.util.EnumSet;
+import java.util.Date;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -49,29 +40,10 @@ public class RevocationChecker {
     private final IssuerCertificates issuers;
     private final RevocationProperties properties;
 
-    /**
-     * The platform's OCSP timeout is fifteen seconds and is read from a system property
-     * once, the first time anything asks a responder anything. Left alone, a responder that
-     * is not answering costs fifteen seconds per certificate - which on a directory of any
-     * size is the difference between a job that finishes overnight and one that does not.
-     *
-     * <p>Set from the timeout this application was already configured with, and only where
-     * nobody has set it themselves: an operator who passed {@code -Dcom.sun.security.ocsp
-     * .timeout} meant it.
-     */
-    private static final String OCSP_TIMEOUT_PROPERTY = "com.sun.security.ocsp.timeout";
-
     public RevocationChecker(CrlStore crls, IssuerCertificates issuers, RevocationProperties properties) {
         this.crls = crls;
         this.issuers = issuers;
         this.properties = properties;
-
-        if (System.getProperty(OCSP_TIMEOUT_PROPERTY) == null) {
-            // Seconds, which is what the platform reads it as.
-            long seconds = Math.max(1, properties.getReadTimeout().toSeconds());
-            System.setProperty(OCSP_TIMEOUT_PROPERTY, Long.toString(seconds));
-            log.debug("OCSP requests will time out after {}s", seconds);
-        }
     }
 
     /**
@@ -239,66 +211,18 @@ public class RevocationChecker {
     // -------------------------------------------------------------------------------------
 
     /**
-     * One question to the responder the certificate names.
-     *
-     * <p>Run through the platform's path validator rather than by building the request by
-     * hand: the request is a signed-response protocol with its own ASN.1, and a
-     * hand-rolled one that gets the issuer hashes subtly wrong would answer "unknown"
-     * forever without ever looking wrong.
-     *
-     * <p>The path is the leaf alone, anchored on its issuer, and the checker is told to
-     * look at the end entity only and not to fall back to a list - the caller does that
-     * itself, so that the list it uses is the one it has already cached.
+     * One question to the responder the certificate names, asked through the same fetcher
+     * as the lists - so it is held to the same addresses and timeouts - and answered through
+     * the platform's path validator. See {@link OcspCheck}.
      */
     private Outcome checkOverOcsp(
             CachedCertificate certificate, X509Certificate leaf, X509Certificate issuer, String responder) {
-        try {
-            CertPathValidator validator = CertPathValidator.getInstance("PKIX");
-            PKIXRevocationChecker checker = (PKIXRevocationChecker) validator.getRevocationChecker();
-            checker.setOptions(EnumSet.of(
-                    PKIXRevocationChecker.Option.ONLY_END_ENTITY, PKIXRevocationChecker.Option.NO_FALLBACK));
-            checker.setOcspResponder(java.net.URI.create(responder));
-
-            PKIXParameters parameters = new PKIXParameters(Set.of(new TrustAnchor(issuer, null)));
-            // The explicit checker does the asking; the built-in one would ask again.
-            parameters.setRevocationEnabled(false);
-            parameters.addCertPathChecker(checker);
-
-            CertPath path = CertificateFactory.getInstance("X.509").generateCertPath(List.of(leaf));
-            validator.validate(path, parameters);
-            return Outcome.good(RevocationMethod.OCSP, describeResponder(certificate, responder));
-        } catch (CertPathValidatorException e) {
-            return fromValidationFailure(certificate, e, responder);
-        } catch (java.security.GeneralSecurityException | RuntimeException e) {
-            log.debug("OCSP check failed for {}", certificate.getSha256Fingerprint(), e);
-            return Outcome.unknown("OCSP could not be asked: " + describe(e));
+        Outcome outcome = OcspCheck.ask(
+                crls.fetcher(), leaf, issuer, responder, describeResponder(certificate, responder), new Date());
+        if (outcome.status() == RevocationStatus.UNKNOWN) {
+            log.debug("OCSP check for {} at {}: {}", certificate.getSha256Fingerprint(), responder, outcome.detail());
         }
-    }
-
-    /**
-     * A validation failure is not always a revocation. The path is one certificate under
-     * its own issuer, so the other ways it can fail - the wrong issuer, an expired leaf -
-     * mean the question went unanswered rather than answered badly.
-     */
-    private Outcome fromValidationFailure(
-            CachedCertificate certificate, CertPathValidatorException e, String responder) {
-        if (e.getCause() instanceof CertificateRevokedException revoked) {
-            return Outcome.revoked(
-                    RevocationMethod.OCSP,
-                    revoked.getRevocationDate().toInstant(),
-                    revoked.getRevocationReason() == null ? null : revoked.getRevocationReason().name(),
-                    describeResponder(certificate, responder));
-        }
-        if (e.getReason() == CertPathValidatorException.BasicReason.REVOKED) {
-            return Outcome.revoked(
-                    RevocationMethod.OCSP, null, null, describeResponder(certificate, responder));
-        }
-        return Outcome.unknown("OCSP gave no usable answer: " + describe(e));
-    }
-
-    private static String describe(Exception e) {
-        String message = e.getMessage();
-        return message == null || message.isBlank() ? e.getClass().getSimpleName() : message;
+        return outcome;
     }
 
     /**

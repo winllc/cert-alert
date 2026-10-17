@@ -1339,9 +1339,9 @@ distribution points reads the directory no more than it did before.
 All of that is waiting, so it is done several at a time — `cert-alert.revocation.workers`,
 eight by default. Asked one after another at a few hundred milliseconds a round trip, a
 directory of any size does not finish overnight, and against a responder that has stopped
-answering each certificate waits out the timeout before the next one begins. That timeout is
-the platform's fifteen seconds unless told otherwise, so it is set from `read-timeout` at
-startup; an operator who passes `-Dcom.sun.security.ocsp.timeout` keeps theirs.
+answering each certificate waits out the timeout before the next one begins. Responders are
+asked with the same `connect-timeout` and `read-timeout` as the lists, through the same
+client; the platform's own OCSP client, and its process-wide timeout property, are not used.
 
 Only the asking happens off the job's own thread. Recording what came back, telling people
 and writing the audit trail all happen in order on the thread that owns the transaction, and
@@ -1410,6 +1410,26 @@ Where a certificate names neither and neither is configured, the result says so.
 certificate by, or the entry could not be read back — the result says which piece was
 missing, rather than reporting that the certificate names nowhere to ask. A deployment that
 configured a responder is owed the difference.
+
+**What a certificate can make this application fetch.** Every distribution point and
+responder address comes out of a certificate, and a certificate is something somebody else
+wrote — so every download is held to limits, and to a list of places it may not go:
+
+| Setting | Default | |
+|---|---|---|
+| `cert-alert.revocation.max-crl-bytes` | `16777216` | A list over this is dropped as it downloads — counted as it arrives, never read whole and measured afterwards. A list in a directory is held to it by the largest message the connection accepts |
+| `cert-alert.revocation.connect-timeout` / `read-timeout` | `10s` / `30s` | Each wait |
+| `cert-alert.revocation.max-fetch-time` | `60s` | The whole of one download, redirects included, so a server answering a byte at a time cannot hold a worker |
+| `cert-alert.revocation.allowed-hosts` (`CERT_ALERT_REVOCATION_ALLOWED_HOSTS`) | empty | When set, the only hosts fetched from: names, `*.example.gov` for a domain and everything under it, or addresses and ranges such as `10.20.0.0/16` |
+
+Whatever is configured, **link-local and cloud metadata addresses are never fetched from**
+(169.254.0.0/16 — which includes 169.254.169.254 — fe80::/10, fd00:ec2::254, 100.100.100.200,
+0.0.0.0/8), and **loopback only when its host is named in `allowed-hosts`**. The hosts of
+`default-ocsp-url` and `default-crl-url` are always allowed, loopback included: they are a
+decision somebody made, not one a certificate made for them. A redirect is followed — at most
+three — only to http or https, and every hop is checked the same way; an OCSP request, which
+is a POST, follows none. A refused address is logged as a warning naming the certificate's
+URL and counts as *Unknown*, never as an answer.
 
 ```
 GET  /api/v1/revocation        the counts, and whether OCSP is possible here
@@ -2377,9 +2397,11 @@ Revocation, under `cert-alert.revocation`:
 | `default-ocsp-url`     | unset               | Responder to ask about a certificate that names none; the certificate's own always wins |
 | `allow-unverified-crl` | `true`              | Believe a CRL whose signature could not be checked |
 | `crl-cache-ttl`        | `6h`                | Ceiling on how long a fetched list is reused |
-| `max-crl-bytes`        | `16777216`          | A larger list is refused rather than read    |
-| `connect-timeout`      | `10s`               | Reaching a distribution point                |
-| `read-timeout`         | `30s`               | Downloading from one                         |
+| `max-crl-bytes`        | `16777216`          | A larger list is dropped as it downloads     |
+| `connect-timeout`      | `10s`               | Reaching a distribution point or responder   |
+| `read-timeout`         | `30s`               | Each wait for one to answer                  |
+| `max-fetch-time`       | `60s`               | The whole of one download, redirects included |
+| `allowed-hosts`        | empty (anywhere)    | The only hosts lists and responders are fetched from, when set: names, `*.domain`, addresses or ranges. Link-local and metadata addresses never; loopback only when named |
 
 The endpoint probe, under `cert-alert.probe`:
 

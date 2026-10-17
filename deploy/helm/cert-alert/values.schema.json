@@ -558,6 +558,12 @@
         },
         "defaultCrlUrl": {
           "type": "string"
+        },
+        "allowedHosts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
