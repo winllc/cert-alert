@@ -668,21 +668,36 @@ selectable text, so the marking cannot be copied out of the page.
 ## FIPS 140-3
 
 CertAlert implements no cryptography of its own. Every hash, signature check, key exchange
-and cipher - TLS to the browser, the directory, the mail server, Splunk and syslog; the SHA-256
-fingerprints and audit chain; CRL and OCSP verification; the license's Ed25519 signature -
-goes through the Java platform's security providers (JCA/JSSE). FIPS 140-3 therefore comes
-from the platform: run the image, which is built on Red Hat's UBI 9 OpenJDK, on a RHEL host
-or OpenShift cluster booted in FIPS mode, where Red Hat's OpenJDK switches itself to the
-validated cryptographic modules (the `fips` security profile; see Red Hat's *Configuring
-OpenJDK on RHEL with FIPS*). The application needs no setting of its own for that.
+and cipher - TLS to the browser (1.2 and 1.3 only), the directory, the mail server,
+PostgreSQL, Splunk and syslog; the SHA-256 fingerprints and the audit chain; CRL and OCSP
+verification; the license signature - goes through the Java platform's security providers
+(JCA/JSSE). FIPS 140-3 therefore comes from the platform: run the image, which is built on
+Red Hat's UBI 9 OpenJDK, on a RHEL host or OpenShift cluster booted in FIPS mode, where Red
+Hat's OpenJDK switches itself to the validated cryptographic modules (the `fips` security
+profile; see Red Hat's *Configuring OpenJDK on RHEL with FIPS*). The application has no
+setting of its own for that, and claims no validation of its own: the validated module is the
+platform's.
+
+**The license check is not yet supported in FIPS mode.** An ENS license is signed with
+Ed25519, which CertAlert verifies through the platform's providers like everything else. It
+has not been tested whether a host in FIPS mode offers Ed25519 to it; where it does not,
+CertAlert can refuse a valid license (as one whose signature could not be checked) or fail
+to start. Version 1.1.0 of the ENS license library adds an ECDSA P-256 co-signature so that a
+license can be checked with the FIPS-mode providers; CertAlert does not use that version yet.
+Until a release says otherwise here, do not rely on CertAlert accepting its license on a host
+in FIPS mode.
 
 Not appropriate on a FIPS system, and off by default:
 
 - `ENS_AUDIT_SPLUNK_INSECURE=true` - skips TLS verification to Splunk (a warning is logged).
 - `cert-alert.revocation.allow-unverified-crl` (default `true`) - believes a CRL whose
   signature could not be checked; set `false` and configure `issuer-directory`.
-- Plain `ldap://`, plain syslog (`udp`/`tcp`), and SMTP without `STARTTLS`.
+- Plain `ldap://`, plain syslog (`udp`/`tcp`), SMTP without `STARTTLS`, and a PostgreSQL
+  URL without `sslmode=verify-full`.
 - `ENS_X509_REVOCATION_FAIL=open`, and `ENS_X509_REVOCATION=off` (the default).
+- `ENS_X509_SOURCE=header`, or a Helm install whose ingress or edge/reencrypt Route
+  terminates TLS: the browser's TLS then ends at the proxy, so it is the proxy's
+  cryptographic module, not this platform's, that has to be validated.
 
 Notes: the server-endpoint probe deliberately trusts every chain, because it reads and reports
 certificates rather than relying on them. OCSP requests name the certificate by SHA-1 hashes,
@@ -692,8 +707,9 @@ created with approved algorithms, or the NSS database).
 
 ### FIPS test results for the license library
 
-*To be added:* the results of running the ENS license library's tests (Ed25519 verification)
-under the FIPS-mode providers.
+*Placeholder.* The results of running the ENS license library's tests under the FIPS-mode
+providers go here once CertAlert has moved to version 1.1.0 of the library. Until then, see
+above: the license check is not supported in FIPS mode.
 
 ## Metrics, health and logs
 
