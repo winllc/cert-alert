@@ -1,0 +1,11 @@
+# Minimal: an external PostgreSQL and a directory, secrets inline.
+ldap:
+  url: ldaps://directory.example.gov:636
+  base: dc=example,dc=gov
+  bindDn: cn=cert-alert,ou=services,dc=example,dc=gov
+  bindPassword: change-me
+database:
+  host: postgres.example.gov
+  password: change-me
+security:
+  adminIdentifiers: [pki-admin@example.gov]

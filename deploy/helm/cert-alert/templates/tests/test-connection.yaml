@@ -1,0 +1,53 @@
+{{- if .Values.tests.enabled }}
+# `helm test <release>`: the liveness endpoint answers through the Service. Runs the
+# application image, which carries curl, so no other image is needed on an air-gapped site.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "cert-alert.fullname" . }}-test
+  namespace: {{ .Release.Namespace }}
+  # Not the application's selector labels, so the Service never sends traffic here.
+  labels:
+    helm.sh/chart: {{ include "cert-alert.chart" . }}
+    app.kubernetes.io/name: {{ include "cert-alert.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: test
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  securityContext:
+    {{- include "cert-alert.securityContext" (dict "ctx" .Values.podSecurityContext "root" .) | nindent 4 }}
+  containers:
+    - name: health
+      image: {{ include "cert-alert.appImage" . }}
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      command:
+        - curl
+        - -fsS
+        {{- if .Values.tls.enabled }}
+        # The pod's certificate is issued for the public name, not the Service's.
+        - -k
+        {{- end }}
+        - --retry
+        - "5"
+        - --retry-delay
+        - "3"
+        - --retry-all-errors
+        - {{ printf "%s://%s:%v/actuator/health/liveness" (include "cert-alert.scheme" .) (include "cert-alert.fullname" .) .Values.service.port }}
+      securityContext:
+        {{- include "cert-alert.securityContext" (dict "ctx" .Values.containerSecurityContext "root" .) | nindent 8 }}
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          memory: 64Mi
+{{- end }}

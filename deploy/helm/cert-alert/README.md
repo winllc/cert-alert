@@ -1,0 +1,400 @@
+# cert-alert Helm chart
+
+Installs CertAlert, which reads the certificates your LDAP directory publishes and tells the
+right people before they expire. The chart runs the application (one replica) and, if you ask
+for it, an evaluation-only PostgreSQL. The directory and the mail server are yours, outside
+the cluster.
+
+Full install guide: <https://winllc.github.io/ens-apps-documentation/cert-alert/install/>
+
+## Install
+
+The chart is published to GHCR as an OCI artifact on every release, with the same version as
+the application:
+
+```bash
+helm install cert-alert oci://ghcr.io/winllc/charts/cert-alert --version X.Y.Z \
+  --namespace cert-alert --create-namespace \
+  -f my-values.yaml
+```
+
+It is also in each release download as `cert-alert-X.Y.Z.tgz`, covered by `SHA256SUMS` and its
+signature (see the Releases page of the docs): `helm install cert-alert ./cert-alert-X.Y.Z.tgz ...`.
+
+What you must set: `ldap.url`, `ldap.base`, and either `database.host` (an external PostgreSQL)
+or `database.embedded.enabled=true` (evaluation only). Set `security.adminIdentifiers` too, or
+nobody can reach the license screen or run the first sync.
+
+## The license
+
+CertAlert needs an ENS license from the ENS licensing portal (an evaluation, or the license
+issued against your order; product `certalert`). Until one is installed only sign-in and the
+license screen (`/admin/license`) work.
+
+- **Upload it** on the license screen after installing. It takes effect at once.
+- **Or give it to the chart**: `--set-file license.file=./license.lic`, or a Secret of your own
+  with key `license.lic` in `license.existingSecret`. An init container copies it into the
+  license volume **only if no license is installed there yet**, exactly as the release bundle's
+  `install.sh` does. A newer license uploaded on the license screen is never overwritten by a
+  later `helm upgrade`; to replace an installed license, upload the new one on the screen.
+
+**The license volume.** A PVC (`cert-alert-license` for a release named `cert-alert`; 100Mi, mounted at `/var/lib/ens`)
+holds the license, this installation's id and the license revisions seen. The installation id
+is what a bound license is tied to, so **keep this PVC**:
+
+- `helm upgrade` keeps it.
+- `helm uninstall` deletes it with the release, and a reinstall gets a new installation id (a
+  bound license must then be re-bound on the portal). To keep it across uninstalls, create the
+  PVC yourself and pass `persistence.license.existingClaim`.
+
+The license screen shows the installation id; after the first sign-in it is also in
+`/var/lib/ens/certalert/installation-id` in the pod.
+
+## Values
+
+### Image, workload, pod
+
+| Value | Default | Description |
+|---|---|---|
+| `global.imageRegistry` | `""` | Mirror registry replacing the registry part of every image (app, license init, embedded PostgreSQL) |
+| `image.repository` | `ghcr.io/winllc/cert-alert` | Application image |
+| `image.tag` | `""` | Defaults to the chart's `appVersion` |
+| `image.digest` | `""` | Pin by digest (`sha256:...`) instead of tag |
+| `image.pullPolicy` | `IfNotPresent` | |
+| `imagePullSecrets` | `[]` | e.g. `[{name: ghcr-pull}]` |
+| `nameOverride`, `fullnameOverride` | `""` | |
+| `replicaCount` | `1` | Only 1 is supported: the scheduled jobs and the changelog connector run in-process, and a second replica would run them twice |
+| `strategy.type` | `Recreate` | The old pod releases the license volume and stops its jobs before the new one starts |
+| `revisionHistoryLimit` | `3` | |
+| `serviceAccount.create` / `.name` / `.annotations` | `true` / `""` / `{}` | |
+| `automountServiceAccountToken` | `false` | The application uses no Kubernetes API |
+| `podAnnotations`, `podLabels` | `{}` | |
+| `podSecurityContext` | uid/gid/fsGroup `185`, `runAsNonRoot`, `seccompProfile: RuntimeDefault` | |
+| `containerSecurityContext` | no privilege escalation, drop `ALL`, `readOnlyRootFilesystem: true` | `/tmp` is an `emptyDir` |
+| `openshift.enabled` | `false` | Drops `runAsUser`, `runAsGroup` and `fsGroup` so the restricted SCC assigns them |
+| `resources` | requests `250m`/`768Mi`, limit `1536Mi` | The heap is 75% of the memory limit |
+| `nodeSelector`, `tolerations`, `affinity`, `topologySpreadConstraints`, `priorityClassName` | empty | |
+| `terminationGracePeriodSeconds` | `45` | Graceful shutdown takes up to 30s |
+| `livenessProbe.*` | `/actuator/health/liveness`, every 20s | `enabled`, `initialDelaySeconds`, `periodSeconds`, `timeoutSeconds`, `failureThreshold` |
+| `readinessProbe.*` | `/actuator/health/readiness`, every 10s | as above |
+| `startupProbe.*` | liveness, every 10s, 60 failures (10 min) | Covers first-start migrations |
+
+### Directory and sign-in
+
+| Value | Default | Environment | Description |
+|---|---|---|---|
+| `ldap.url` | **required** | `CERT_ALERT_LDAP_URL` | e.g. `ldaps://directory.example.gov:636` |
+| `ldap.base` | **required** | `CERT_ALERT_LDAP_BASE` | e.g. `dc=example,dc=gov` |
+| `ldap.bindDn` | `""` | `CERT_ALERT_LDAP_USER` | Service account DN |
+| `ldap.bindPassword` | `""` | `CERT_ALERT_LDAP_PASSWORD` | Or `ldap.existingSecret` + `ldap.existingSecretKey` (`ldap-password`) |
+| `ldap.requireEmailPoc` | `null` | `CERT_ALERT_LDAP_REQUIRE_EMAIL_POC` | `false` for a directory holding names in `serverPOC` |
+| `ldap.binaryCertificateOption` | `null` | `CERT_ALERT_LDAP_BINARY_CERTIFICATE_OPTION` | `false` for a directory with no `userCertificate;binary` |
+| `ldap.pageSize` / `ldap.paged` | `null` | `CERT_ALERT_LDAP_PAGE_SIZE` / `_PAGED` | |
+| `ldap.changelogEnabled` | `null` | `CERT_ALERT_LDAP_CHANGELOG_ENABLED` | Follow the directory's changelog |
+| `security.adminIdentifiers` | `[]` | `CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS` | Addresses, uids or common names of administrators |
+| `security.ldap.enabled` | `null` | `CERT_ALERT_SECURITY_LDAP_ENABLED` | The password fallback |
+| `security.ldap.userSearchBase` | `""` | `CERT_ALERT_SECURITY_LDAP_USER_SEARCH_BASE` | e.g. `ou=people` |
+| `security.ldap.userSearchFilter` | `""` | `CERT_ALERT_SECURITY_LDAP_USER_SEARCH_FILTER` | e.g. `(uid={0})` |
+| `security.ldap.userDnPatterns` | `[]` | `CERT_ALERT_SECURITY_LDAP_USER_DN_PATTERNS` | e.g. `[uid={0},ou=people]` |
+
+`null` and `""` mean "not passed": the application default applies.
+
+### TLS and client certificates
+
+| Value | Default | Environment | Description |
+|---|---|---|---|
+| `tls.enabled` | `false` | `CERT_ALERT_TLS_ENABLED` | The pod serves HTTPS on 8080, and reads client certificates from the handshake |
+| `tls.keystore.existingSecret` | `""` | `CERT_ALERT_KEYSTORE` | Secret holding the server key store; required with TLS |
+| `tls.keystore.key` / `.type` | `keystore.p12` / `PKCS12` | `CERT_ALERT_KEYSTORE_TYPE` | |
+| `tls.keystore.password` | `""` | `CERT_ALERT_KEYSTORE_PASSWORD` | Or `passwordExistingSecret` + `passwordExistingSecretKey` (`keystore-password`) |
+| `tls.truststore.existingSecret` | `""` | `CERT_ALERT_TRUSTSTORE` | The CAs whose client certificates are accepted; required with TLS |
+| `tls.truststore.key` / `.type` | `truststore.p12` / `PKCS12` | `CERT_ALERT_TRUSTSTORE_TYPE` | |
+| `tls.truststore.password` | `""` | `CERT_ALERT_TRUSTSTORE_PASSWORD` | Or `passwordExistingSecret` + `passwordExistingSecretKey` (`truststore-password`) |
+| `caTruststore.existingSecret` | `""` | `JAVA_OPTS` | Trust store for a private-CA `ldaps://` directory, SMTP or Splunk |
+| `caTruststore.key` / `.type` | `ca-truststore.p12` / `PKCS12` | | |
+| `caTruststore.password` | `""` | | Or `passwordExistingSecret` + `passwordExistingSecretKey` (`ca-truststore-password`) |
+
+### Database
+
+| Value | Default | Environment | Description |
+|---|---|---|---|
+| `database.host` | **required** unless embedded | `CERT_ALERT_DB_URL` | External PostgreSQL |
+| `database.port` | `5432` | | |
+| `database.name` | `certalert` | `CERT_ALERT_DB_NAME` | |
+| `database.username` | `certalert` | `CERT_ALERT_DB_USER` | |
+| `database.password` | `""` | `CERT_ALERT_DB_PASSWORD` | Or `existingSecret` + `existingSecretKey` (`db-password`). Embedded with neither: generated once, kept across upgrades |
+| `database.params` | `""` | | Appended to the JDBC URL, e.g. `sslmode=verify-full` |
+| `database.poolSize` | `null` | `CERT_ALERT_DB_POOL_SIZE` | |
+| `database.embedded.enabled` | `false` | | **Evaluation only, no backups**: one PostgreSQL pod with a PVC |
+| `database.embedded.image.*` | `docker.io/library/postgres:17.11-alpine` | | The release bundle's PostgreSQL |
+| `database.embedded.persistence.*` | `8Gi`, `ReadWriteOnce` | | `size`, `storageClass`, `accessModes` |
+| `database.embedded.resources`, `podSecurityContext`, `containerSecurityContext`, `nodeSelector`, `tolerations`, `affinity` | | | uid 70, read-only root filesystem |
+
+### Email, notifications, look
+
+| Value | Default | Environment |
+|---|---|---|
+| `mail.host` / `.port` / `.username` | `""` / `null` / `""` | `SPRING_MAIL_HOST` / `_PORT` / `_USERNAME` |
+| `mail.password` | `""` | `SPRING_MAIL_PASSWORD` (or `existingSecret` + `existingSecretKey`, `mail-password`) |
+| `mail.smtpAuth` / `mail.starttls` | `null` | `SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH` / `..._STARTTLS_ENABLE` |
+| `notifications.email.enabled` / `.from` / `.dryRun` | `null` / `""` / `null` | `CERT_ALERT_NOTIFICATIONS_EMAIL_ENABLED` / `_FROM`, `CERT_ALERT_EMAIL_DRY_RUN` |
+| `notifications.email.templatesConfigMap` | `""` | A ConfigMap of `expiring-user.html`/`.txt`, `expiring-server.html`/`.txt`; sets `CERT_ALERT_NOTIFICATIONS_EMAIL_TEMPLATE_DIRECTORY` |
+| `alerts.email.enabled` / `.from` / `.to` | `null` / `""` / `[]` | `CERT_ALERT_ALERTS_EMAIL_ENABLED` / `_FROM` / `_TO` |
+| `revocation.defaultOcspUrl` / `.defaultCrlUrl` | `""` | `CERT_ALERT_DEFAULT_OCSP_URL` / `CERT_ALERT_DEFAULT_CRL_URL` |
+| `banner.enabled` / `.text` / `.textColor` / `.background` / `.height` | unset | `CERT_ALERT_BANNER_*` |
+| `thresholds.warningDays` / `.criticalDays` | `null` | `CERT_ALERT_WARNING_THRESHOLD_DAYS` / `CERT_ALERT_CRITICAL_THRESHOLD_DAYS` |
+| `javaOpts` | `-XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError` | `JAVA_OPTS` |
+
+### Audit logging (ens-audit/1)
+
+| Value | Default | Environment |
+|---|---|---|
+| `audit.stdout` | `true` | `ENS_AUDIT_STDOUT` |
+| `audit.file.enabled` | `false` | `ENS_AUDIT_FILE=/var/log/ens/certalert/audit.jsonl` |
+| `audit.file.keep` | `30` | `ENS_AUDIT_FILE_KEEP` |
+| `audit.file.persistence.*` | disabled, `1Gi` | `enabled`, `size`, `storageClass`, `accessModes`, `existingClaim`; otherwise an `emptyDir` |
+| `audit.retentionDays` | `0` | `ENS_AUDIT_RETENTION_DAYS` |
+| `audit.splunk.url` / `.index` / `.sourcetype` / `.insecure` | `""` / `""` / `ens:audit` / `false` | `ENS_AUDIT_SPLUNK_*` |
+| `audit.splunk.token` | `""` | `ENS_AUDIT_SPLUNK_TOKEN` (or `existingSecret` + `existingSecretKey`, `splunk-hec-token`) |
+| `audit.syslog.host` / `.port` / `.protocol` / `.facility` | `""` / `null` / `tcp` / `local0` | `ENS_AUDIT_SYSLOG_*` |
+
+A release without audit logging ignores these variables.
+
+### License and persistence
+
+| Value | Default | Description |
+|---|---|---|
+| `persistence.license.enabled` | `true` | PVC at `/var/lib/ens`. `false` uses an `emptyDir`: the license and id go with the pod |
+| `persistence.license.size` / `.storageClass` / `.accessModes` | `100Mi` / `""` / `[ReadWriteOnce]` | `storageClass: "-"` means `""` (no dynamic provisioning) |
+| `persistence.license.existingClaim` | `""` | A PVC of your own, kept across uninstalls |
+| `license.existingSecret` / `.existingSecretKey` | `""` / `license.lic` | A Secret holding the license |
+| `license.file` | `""` | `--set-file license.file=./license.lic` |
+| `license.initImage.*` | the application image | The init container's image (it needs `sh`, `cp`, `mv`) |
+
+### Anything else
+
+| Value | Default | Description |
+|---|---|---|
+| `extraEnv` | `[]` | More environment variables; any documented setting works as its variable |
+| `extraEnvFrom` | `[]` | e.g. `[{secretRef: {name: cert-alert-extra}}]` |
+| `extraVolumes`, `extraVolumeMounts` | `[]` | |
+
+### Networking
+
+| Value | Default | Description |
+|---|---|---|
+| `service.type` | `ClusterIP` | `LoadBalancer` for TLS straight to the pod without an ingress |
+| `service.port` | `8080` | |
+| `service.annotations`, `loadBalancerIP`, `loadBalancerSourceRanges`, `externalTrafficPolicy`, `nodePort` | empty | |
+| `ingress.enabled` / `.className` / `.annotations` / `.hosts` / `.tls` | `false` | Standard `networking.k8s.io/v1` Ingress |
+| `route.enabled` / `.host` / `.annotations` | `false` | OpenShift Route |
+| `route.tls.termination` | `edge` | `edge`, `passthrough` (client certificates, needs `tls.enabled`) or `reencrypt` |
+| `route.tls.insecureEdgeTerminationPolicy` | `Redirect` | |
+| `route.tls.destinationCACertificate` | `""` | PEM for `reencrypt` |
+| `networkPolicy.enabled` | `false` | Ingress to 8080 only; egress to DNS, the database, LDAP, SMTP and the web |
+| `networkPolicy.ingress.from` | `[]` | Peers allowed in; empty means any |
+| `networkPolicy.egress.allowAll` | `false` | |
+| `networkPolicy.egress.dns` | `true` | |
+| `networkPolicy.egress.database.cidrs` | `[0.0.0.0/0]` | The embedded database is selected by label instead |
+| `networkPolicy.egress.ldap` / `.smtp` / `.web` | ports and `[0.0.0.0/0]` | `web` is CRL/OCSP, the endpoint probe, Splunk HEC and syslog |
+| `networkPolicy.egress.extra` | `[]` | More egress rules |
+| `tests.enabled` | `true` | `helm test` pod that curls `/actuator/health/liveness` |
+
+## Examples
+
+The `ci/` directory holds tested examples: `default-values.yaml`, `ingress-values.yaml`,
+`openshift-values.yaml`, `existing-secrets-values.yaml` and `embedded-db-values.yaml`.
+
+### Minimal
+
+```yaml
+ldap:
+  url: ldaps://directory.example.gov:636
+  base: dc=example,dc=gov
+  bindDn: cn=cert-alert,ou=services,dc=example,dc=gov
+  bindPassword: change-me
+database:
+  host: postgres.example.gov
+  password: change-me
+security:
+  adminIdentifiers: [pki-admin@example.gov]
+```
+
+```bash
+helm install cert-alert oci://ghcr.io/winllc/charts/cert-alert --version X.Y.Z -f minimal.yaml \
+  --set-file license.file=./license.lic
+kubectl port-forward svc/cert-alert 8080:8080     # then http://localhost:8080/
+```
+
+### Existing secrets
+
+```bash
+kubectl create secret generic cert-alert-secrets \
+  --from-literal=db-password=... --from-literal=ldap-password=... --from-literal=mail-password=...
+kubectl create secret generic cert-alert-license --from-file=license.lic=./license.lic
+```
+
+```yaml
+ldap:
+  url: ldaps://directory.example.gov:636
+  base: dc=example,dc=gov
+  bindDn: cn=cert-alert,ou=services,dc=example,dc=gov
+  existingSecret: cert-alert-secrets        # key ldap-password
+database:
+  host: postgres.example.gov
+  existingSecret: cert-alert-secrets        # key db-password
+mail:
+  host: smtp.example.gov
+  existingSecret: cert-alert-secrets        # key mail-password
+license:
+  existingSecret: cert-alert-license
+```
+
+With every secret supplied this way, the chart creates no Secret of its own.
+
+### Ingress with TLS (password sign-in)
+
+```yaml
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: my-issuer
+  hosts:
+    - host: cert-alert.example.gov
+      paths: [{path: /, pathType: Prefix}]
+  tls:
+    - secretName: cert-alert-tls
+      hosts: [cert-alert.example.gov]
+```
+
+TLS ends at the ingress, so no client certificate reaches CertAlert: users sign in with their
+directory password.
+
+### X.509 client-certificate sign-in (TLS passthrough)
+
+CertAlert reads the client certificate from its own TLS handshake. It does not accept a
+certificate forwarded in a header by a proxy, so certificate sign-in needs TLS passed through
+to the pod. Edge termination is not an option for certificate sign-in.
+
+```bash
+kubectl create secret generic cert-alert-tls-stores \
+  --from-file=keystore.p12 --from-file=truststore.p12
+kubectl create secret generic cert-alert-tls-passwords \
+  --from-literal=keystore-password=... --from-literal=truststore-password=...
+```
+
+```yaml
+tls:
+  enabled: true
+  keystore:
+    existingSecret: cert-alert-tls-stores
+    passwordExistingSecret: cert-alert-tls-passwords
+  truststore:
+    existingSecret: cert-alert-tls-stores     # the CAs whose client certificates are accepted
+    passwordExistingSecret: cert-alert-tls-passwords
+```
+
+Then one of:
+
+```yaml
+# ingress-nginx, with the controller started with --enable-ssl-passthrough
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: HTTPS
+  hosts:
+    - host: cert-alert.example.gov
+      paths: [{path: /, pathType: Prefix}]
+```
+
+```yaml
+# A LoadBalancer Service straight to the pod
+service:
+  type: LoadBalancer
+  port: 443
+  externalTrafficPolicy: Local    # keeps client addresses for the audit trail
+```
+
+```yaml
+# OpenShift
+route:
+  enabled: true
+  host: cert-alert.apps.example.gov
+  tls:
+    termination: passthrough
+```
+
+The key store's certificate must be issued for the name users browse to. Client
+authentication is `want`, so a browser without a certificate still reaches the password form.
+
+### OpenShift
+
+```yaml
+openshift:
+  enabled: true        # the restricted-v2 SCC assigns the uid and fsGroup
+route:
+  enabled: true
+  host: cert-alert.apps.example.gov
+  tls:
+    termination: edge  # or passthrough with tls.enabled, as above
+```
+
+The image runs as any uid in group 0, so it works under the restricted SCC unchanged. The
+embedded database is not supported on OpenShift: use an external PostgreSQL there.
+
+### Air-gapped
+
+```bash
+# On a connected host: the chart and the images
+helm pull oci://ghcr.io/winllc/charts/cert-alert --version X.Y.Z    # or use the .tgz from the release download
+docker pull ghcr.io/winllc/cert-alert:X.Y.Z
+docker pull postgres:17.11-alpine                                    # only for database.embedded
+# Push them to your mirror as registry.example.gov/winllc/cert-alert:X.Y.Z
+# (and registry.example.gov/library/postgres:17.11-alpine), then:
+helm install cert-alert ./cert-alert-X.Y.Z.tgz -f my-values.yaml \
+  --set global.imageRegistry=registry.example.gov
+```
+
+The release bundle's `images/` tar holds the same images (`docker load -i`), so a site that
+already has the download needs nothing from the internet.
+
+### Embedded database (evaluation)
+
+```yaml
+database:
+  embedded:
+    enabled: true      # EVALUATION ONLY, NO BACKUPS
+```
+
+A random database password is generated on install and kept on upgrade. `helm uninstall` leaves
+the StatefulSet's PVC (`data-cert-alert-postgresql-0` for a release named `cert-alert`) behind; delete it yourself to
+start over.
+
+### Upgrade
+
+```bash
+helm upgrade cert-alert oci://ghcr.io/winllc/charts/cert-alert --version X.Y.Z -f my-values.yaml
+```
+
+The pod is replaced (`Recreate`), the database schema is migrated on start, and the license PVC
+is kept, with the installed license and the installation id. A license given with
+`license.file` or `license.existingSecret` is not copied again while one is installed. Back up
+the database first: migrations are not undone by `helm rollback`.
+
+### Uninstall
+
+```bash
+helm uninstall cert-alert
+```
+
+This deletes the license PVC the chart created (and with it the installation id), but not an
+`existingClaim`, and not the embedded database's PVC. Back up what you need first.
+
+## Tests
+
+```bash
+helm test cert-alert       # curls /actuator/health/liveness through the Service
+```

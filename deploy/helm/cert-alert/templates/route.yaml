@@ -1,0 +1,39 @@
+{{- if .Values.route.enabled -}}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ include "cert-alert.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cert-alert.labels" . | nindent 4 }}
+  {{- with .Values.route.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.route.host }}
+  host: {{ . | quote }}
+  {{- end }}
+  to:
+    kind: Service
+    name: {{ include "cert-alert.fullname" . }}
+    weight: 100
+  port:
+    targetPort: {{ include "cert-alert.scheme" . }}
+  {{- with .Values.route.tls }}
+  {{- if .termination }}
+  tls:
+    termination: {{ .termination }}
+    {{- if ne .termination "passthrough" }}
+    insecureEdgeTerminationPolicy: {{ .insecureEdgeTerminationPolicy }}
+    {{- else }}
+    insecureEdgeTerminationPolicy: {{ ternary "None" .insecureEdgeTerminationPolicy (eq .insecureEdgeTerminationPolicy "Allow") }}
+    {{- end }}
+    {{- if and (eq .termination "reencrypt") .destinationCACertificate }}
+    destinationCACertificate: |-
+      {{- .destinationCACertificate | nindent 6 }}
+    {{- end }}
+  {{- end }}
+  {{- end }}
+  wildcardPolicy: None
+{{- end }}

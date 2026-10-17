@@ -4,7 +4,8 @@
 #
 # Three services: PostgreSQL, a stand-in 389 Directory Server loaded with generated people
 # and servers, and the application. Everything has a default password and the directory
-# serves plaintext LDAP; this is a demo, not a deployment.
+# serves plaintext LDAP; this is a demo, not a deployment. To install cert-alert, use the
+# release package or the Helm chart (deploy/helm/cert-alert) - see the README's Install.
 #
 # The directory publishes cn=changelog, so the changelog connector can be tried here:
 # set CERT_ALERT_LDAP_CHANGELOG_ENABLED=true in the application's environment.

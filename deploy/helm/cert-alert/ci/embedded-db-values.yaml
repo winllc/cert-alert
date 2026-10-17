@@ -1,0 +1,11 @@
+# Evaluation: the embedded PostgreSQL (no backups) and a generated database password.
+ldap:
+  url: ldap://directory.example.test:389
+  base: dc=example,dc=test
+  bindDn: cn=cert-alert,ou=services,dc=example,dc=test
+  bindPassword: change-me
+database:
+  embedded:
+    enabled: true
+security:
+  adminIdentifiers: [alice]

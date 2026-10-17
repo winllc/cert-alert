@@ -1,0 +1,247 @@
+{{/* Chart name. */}}
+{{- define "cert-alert.name" -}}
+{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/* Fully qualified app name, at most 63 characters. */}}
+{{- define "cert-alert.fullname" -}}
+{{- if .Values.fullnameOverride }}
+{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- $name := default .Chart.Name .Values.nameOverride }}
+{{- if contains $name .Release.Name }}
+{{- .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- define "cert-alert.chart" -}}
+{{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{- define "cert-alert.labels" -}}
+helm.sh/chart: {{ include "cert-alert.chart" . }}
+{{ include "cert-alert.selectorLabels" . }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+app.kubernetes.io/part-of: cert-alert
+{{- end }}
+
+{{- define "cert-alert.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "cert-alert.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: app
+{{- end }}
+
+{{/* The embedded database's names and labels. */}}
+{{- define "cert-alert.db.fullname" -}}
+{{- printf "%s-postgresql" (include "cert-alert.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{- define "cert-alert.db.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "cert-alert.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: database
+{{- end }}
+
+{{- define "cert-alert.db.labels" -}}
+helm.sh/chart: {{ include "cert-alert.chart" . }}
+{{ include "cert-alert.db.selectorLabels" . }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+app.kubernetes.io/part-of: cert-alert
+{{- end }}
+
+{{- define "cert-alert.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create }}
+{{- default (include "cert-alert.fullname" .) .Values.serviceAccount.name }}
+{{- else }}
+{{- default "default" .Values.serviceAccount.name }}
+{{- end }}
+{{- end }}
+
+{{/* The chart-created Secret holding inline secret values. */}}
+{{- define "cert-alert.secretName" -}}
+{{- printf "%s-secrets" (include "cert-alert.fullname" .) }}
+{{- end }}
+
+{{/*
+An image reference. Takes (dict "image" <repository/tag/digest map> "root" $ "defaultTag" <tag>).
+global.imageRegistry replaces the registry part of the repository (the first path element,
+when it looks like a host: has a dot or a colon, or is localhost); a repository with no
+registry part gets the mirror prefixed.
+*/}}
+{{- define "cert-alert.image" -}}
+{{- $repo := .image.repository -}}
+{{- $registry := .root.Values.global.imageRegistry -}}
+{{- if $registry -}}
+{{- $parts := splitList "/" $repo -}}
+{{- $first := first $parts -}}
+{{- if and (gt (len $parts) 1) (or (contains "." $first) (contains ":" $first) (eq "localhost" $first)) -}}
+{{- $repo = printf "%s/%s" (trimSuffix "/" $registry) (join "/" (rest $parts)) -}}
+{{- else -}}
+{{- $repo = printf "%s/%s" (trimSuffix "/" $registry) $repo -}}
+{{- end -}}
+{{- end -}}
+{{- if .image.digest -}}
+{{- printf "%s@%s" $repo .image.digest -}}
+{{- else -}}
+{{- printf "%s:%s" $repo (toString (default .defaultTag .image.tag)) -}}
+{{- end -}}
+{{- end }}
+
+{{- define "cert-alert.appImage" -}}
+{{- include "cert-alert.image" (dict "image" .Values.image "root" . "defaultTag" .Chart.AppVersion) }}
+{{- end }}
+
+{{- define "cert-alert.licenseInitImage" -}}
+{{- if .Values.license.initImage.repository }}
+{{- include "cert-alert.image" (dict "image" .Values.license.initImage "root" . "defaultTag" .Chart.AppVersion) }}
+{{- else }}
+{{- include "cert-alert.appImage" . }}
+{{- end }}
+{{- end }}
+
+{{- define "cert-alert.dbImage" -}}
+{{- include "cert-alert.image" (dict "image" .Values.database.embedded.image "root" . "defaultTag" "17.11-alpine") }}
+{{- end }}
+
+{{/*
+A pod or container securityContext, with runAsUser, runAsGroup and fsGroup dropped under
+openshift.enabled so the restricted SCC assigns them.
+*/}}
+{{- define "cert-alert.securityContext" -}}
+{{- $ctx := deepCopy .ctx -}}
+{{- if .root.Values.openshift.enabled -}}
+{{- $_ := unset $ctx "runAsUser" -}}
+{{- $_ := unset $ctx "runAsGroup" -}}
+{{- $_ := unset $ctx "fsGroup" -}}
+{{- end -}}
+{{- toYaml $ctx -}}
+{{- end }}
+
+{{/* http or https, following tls.enabled. */}}
+{{- define "cert-alert.scheme" -}}
+{{- if .Values.tls.enabled }}https{{ else }}http{{ end }}
+{{- end }}
+
+{{/* The database host the application connects to. */}}
+{{- define "cert-alert.db.host" -}}
+{{- if .Values.database.embedded.enabled -}}
+{{- include "cert-alert.db.fullname" . -}}
+{{- else -}}
+{{- required "database.host is required: the PostgreSQL server cert-alert uses (or set database.embedded.enabled=true for an evaluation-only database in the cluster)" .Values.database.host -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Where a secret value comes from: a dict with "name" and "key", or empty when the value is
+not set at all. Takes (dict "root" $ "inline" <value> "existing" <secret name>
+"existingKey" <key> "key" <key in the chart's Secret>).
+*/}}
+{{- define "cert-alert.secretRef" -}}
+{{- if .existing -}}
+{{- dict "name" .existing "key" .existingKey | toJson -}}
+{{- else if .inline -}}
+{{- dict "name" (include "cert-alert.secretName" .root) "key" .key | toJson -}}
+{{- end -}}
+{{- end }}
+
+{{/* The database password's Secret reference (always set: generated for the embedded one). */}}
+{{- define "cert-alert.db.passwordRef" -}}
+{{- if .Values.database.existingSecret -}}
+{{- dict "name" .Values.database.existingSecret "key" .Values.database.existingSecretKey | toJson -}}
+{{- else if or .Values.database.password .Values.database.embedded.enabled -}}
+{{- dict "name" (include "cert-alert.secretName" .) "key" "db-password" | toJson -}}
+{{- end -}}
+{{- end }}
+
+{{/* The database password for the chart's Secret: given, kept from the last release, or new. */}}
+{{- define "cert-alert.db.password" -}}
+{{- if .Values.database.password -}}
+{{- .Values.database.password -}}
+{{- else -}}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace (include "cert-alert.secretName" .) -}}
+{{- if and $existing $existing.data (hasKey $existing.data "db-password") -}}
+{{- index $existing.data "db-password" | b64dec -}}
+{{- else -}}
+{{- randAlphaNum 32 -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/* Whether a license is supplied to the chart. */}}
+{{- define "cert-alert.licenseSupplied" -}}
+{{- if or .Values.license.existingSecret .Values.license.file }}true{{ end }}
+{{- end }}
+
+{{- define "cert-alert.licenseSecretName" -}}
+{{- if .Values.license.existingSecret -}}
+{{- .Values.license.existingSecret -}}
+{{- else -}}
+{{- printf "%s-license" (include "cert-alert.fullname" .) -}}
+{{- end -}}
+{{- end }}
+
+{{- define "cert-alert.licenseClaimName" -}}
+{{- if .Values.persistence.license.existingClaim -}}
+{{- .Values.persistence.license.existingClaim -}}
+{{- else -}}
+{{- printf "%s-license" (include "cert-alert.fullname" .) -}}
+{{- end -}}
+{{- end }}
+
+{{- define "cert-alert.auditClaimName" -}}
+{{- if .Values.audit.file.persistence.existingClaim -}}
+{{- .Values.audit.file.persistence.existingClaim -}}
+{{- else -}}
+{{- printf "%s-audit" (include "cert-alert.fullname" .) -}}
+{{- end -}}
+{{- end }}
+
+{{/* JAVA_OPTS, with the outbound trust store's options when one is given. */}}
+{{- define "cert-alert.javaOpts" -}}
+{{- $opts := .Values.javaOpts -}}
+{{- if .Values.caTruststore.existingSecret -}}
+{{- $opts = printf "%s -Djavax.net.ssl.trustStore=/etc/cert-alert/ca/%s -Djavax.net.ssl.trustStoreType=%s" $opts .Values.caTruststore.key .Values.caTruststore.type -}}
+{{- if or .Values.caTruststore.password .Values.caTruststore.passwordExistingSecret -}}
+{{- $opts = printf "%s -Djavax.net.ssl.trustStorePassword=$(CA_TRUSTSTORE_PASSWORD)" $opts -}}
+{{- end -}}
+{{- end -}}
+{{- trim $opts -}}
+{{- end }}
+
+{{/* Validation that cannot be expressed in the schema. */}}
+{{- define "cert-alert.validate" -}}
+{{- if gt (int .Values.replicaCount) 1 -}}
+{{- fail "replicaCount above 1 is not supported: cert-alert runs its scheduled jobs and changelog connector in-process, and a second replica would run them twice." -}}
+{{- end -}}
+{{- if .Values.tls.enabled -}}
+{{- if not .Values.tls.keystore.existingSecret -}}
+{{- fail "tls.enabled=true needs tls.keystore.existingSecret: a Secret holding the server key store (key tls.keystore.key, default keystore.p12)." -}}
+{{- end -}}
+{{- if not .Values.tls.truststore.existingSecret -}}
+{{- fail "tls.enabled=true needs tls.truststore.existingSecret: a Secret holding the CAs whose client certificates are accepted (the application does not start without one)." -}}
+{{- end -}}
+{{- end -}}
+{{- if .Values.route.enabled -}}
+{{- $t := .Values.route.tls.termination -}}
+{{- if and (has $t (list "passthrough" "reencrypt")) (not .Values.tls.enabled) -}}
+{{- fail (printf "route.tls.termination=%s needs tls.enabled=true: the pod must serve HTTPS." $t) -}}
+{{- end -}}
+{{- if and (eq $t "edge") .Values.tls.enabled -}}
+{{- fail "route.tls.termination=edge sends plain HTTP to a pod serving HTTPS (tls.enabled=true): use passthrough (client-certificate sign-in) or reencrypt." -}}
+{{- end -}}
+{{- end -}}
+{{- if and .Values.license.existingSecret .Values.license.file -}}
+{{- fail "Set license.existingSecret or license.file, not both." -}}
+{{- end -}}
+{{- end }}
+
+{{/* A ConfigMap line, only when the value is set: "" and null leave the application's default. */}}
+{{- define "cert-alert.envLine" -}}
+{{- if not (or (kindIs "invalid" .value) (and (kindIs "string" .value) (eq .value ""))) }}
+  {{ .name }}: {{ toString .value | quote }}
+{{- end }}
+{{- end -}}

@@ -136,8 +136,10 @@ highest revision seen of each license (so an older file cannot be put back):
 | `ENS_LICENSE_STATE_DIR` | `/var/lib/ens/certalert` | `/var/lib/ens/certalert` |
 
 The image declares `VOLUME /var/lib/ens`; mount a named volume or persistent volume claim
-at `/var/lib/ens/certalert` so the license and the installation id survive upgrades (lose
-it, and the installation gets a new id, so bound licenses must be re-bound). Running from
+there so the license and the installation id survive upgrades (lose it, and the
+installation gets a new id, so bound licenses must be re-bound). The release package keeps
+it in the `ens-license` volume; the Helm chart keeps it in a PVC mounted at `/var/lib/ens`
+(`persistence.license`). Running from
 Gradle or a jar, point both variables somewhere writable, e.g.
 `ENS_LICENSE_STATE_DIR=$HOME/.ens/certalert ENS_LICENSE_FILE=$HOME/.ens/certalert/license.lic`.
 
@@ -147,8 +149,10 @@ docker run -d -p 8080:8080 -v ens-license:/var/lib/ens/certalert cert-alert:late
 docker cp license.lic <container>:/var/lib/ens/certalert/license.lic
 ```
 
-`docker compose up` keeps it in the `ens-license` volume; the release bundle's
-`install.sh` copies `license/license.lic` into that volume (see `deploy/release/README.md`).
+The release bundle's `install.sh` copies `license/license.lic` into the `ens-license`
+volume (see `deploy/release/README.md`), and the Helm chart's init container copies
+`license.file` or `license.existingSecret` into its PVC - both only when no license is
+installed there yet, so a newer one uploaded on the license screen is never replaced.
 A license is never built into the image: `.dockerignore` and `.gitignore` exclude `*.lic`.
 
 **Perpetual licenses** cover releases built up to their maintenance date. The release date
@@ -159,7 +163,88 @@ replaces the `LicenseManager` for the `test` profile, with a full license instal
 `support/TestLicenses` signs test licenses with it. Nothing signed with it is accepted by a
 build anybody runs.
 
-## Running it
+## Install
+
+There are two supported ways to install cert-alert. Both run the published, tested image
+(`ghcr.io/winllc/cert-alert:<version>`) against PostgreSQL, your LDAP directory and, if you
+want email, your SMTP server. The install guide covers both in full:
+<https://winllc.github.io/ens-apps-documentation/cert-alert/install/>
+
+- **The release package** - `cert-alert-<version>.tar.gz`, signed and checksummed (see
+  [Releases](#releases)). Docker Compose with the images inside, so it installs on a host with
+  no internet access: unpack, `./install.sh`, fill in `.env`, `./install.sh` again. Upgrades
+  with `./upgrade.sh --from <previous release directory>`. Its `README.md` (from
+  [`deploy/release/`](deploy/release/README.md)) has the details.
+- **The Helm chart** - [`deploy/helm/cert-alert`](deploy/helm/cert-alert/README.md), published
+  with every release to `oci://ghcr.io/winllc/charts/cert-alert` and included in the release
+  download as `cert-alert-<version>.tgz`:
+
+  ```bash
+  helm install cert-alert oci://ghcr.io/winllc/charts/cert-alert --version <version> \
+    --set ldap.url=ldaps://directory.example.gov:636 --set ldap.base=dc=example,dc=gov \
+    --set database.host=postgres.example.gov -f my-secrets.yaml
+  ```
+
+  One replica, a PVC for the license and installation id, an optional evaluation-only
+  PostgreSQL, Ingress or OpenShift Route, and TLS passthrough for X.509 sign-in. Every
+  setting in the release package's `env.template` has a value in the chart.
+
+Either way, an administrator then installs the ENS license on the license screen
+(`/admin/license`), or hands it to the installer (`license/license.lic` for the package,
+`--set-file license.file=...` for the chart), and presses **Sync directory**.
+
+### If entries sync but no certificates do
+
+Every attribute populated, every certificate column empty, and nothing in the log that
+looks like a failure. That is not an access-control problem - it is which name the
+certificate was asked for by.
+
+RFC 4522 says a certificate is transferred in its binary form, and a client insists on
+that by asking for `userCertificate;binary` rather than `userCertificate`. The two are
+different attribute descriptions in a search, and a request carrying the option matches
+only an attribute that carries it. Directories that implement the rule return nothing for
+the plain name, which is why the option is on by default.
+
+A virtual directory is the case where that breaks down. It presents an attribute it has
+assembled from some other store, under the plain name, and has no `userCertificate;binary`
+to give - so the request matches nothing and comes back empty, for every entry, silently.
+Radiant Logic FID 7.4 behaves this way. Turn the option off:
+`CERT_ALERT_LDAP_BINARY_CERTIFICATE_OPTION=false` in the release package's `.env`, or
+`ldap.binaryCertificateOption: false` in the Helm chart's values.
+
+Turning it off is safe against a directory that does store the binary form: a plain
+request matches an attribute whatever options it carries, so it is the qualified request
+that is narrow, not this one. If you are unsure which you have, `ldapsearch` will say -
+the first of these returns the certificate on a conforming directory, the second on
+either:
+
+```bash
+ldapsearch -H "$CERT_ALERT_LDAP_URL" -b "$CERT_ALERT_LDAP_BASE" \
+    "(uid=someone)" "userCertificate;binary"
+ldapsearch -H "$CERT_ALERT_LDAP_URL" -b "$CERT_ALERT_LDAP_BASE" \
+    "(uid=someone)" userCertificate
+```
+
+With the option off, how values arrive is left to the JNDI provider, which decides from
+the attribute's name alone. It knows the standard ones, `userCertificate` among them. If
+you have mapped the certificate to a name of your own under `cert-alert.ldap.user
+.certificate` or `cert-alert.ldap.server.certificate`, declare that name binary too or it
+arrives as text and will not parse:
+
+```yaml
+spring:
+  ldap:
+    base-environment:
+      java.naming.ldap.attributes.binary: myCertificateAttribute
+```
+
+## Development
+
+**For contributors, not an installation method.** Everything below - the `dev` profile,
+Gradle builds, `docker build` and the compose stack in the source tree - is for working on
+cert-alert. To install it, use the release package or the Helm chart ([Install](#install)).
+
+### The `dev` profile
 
 ```bash
 ./gradlew bootRun --args='--spring.profiles.active=dev'
@@ -194,7 +279,8 @@ docker pull ghcr.io/winllc/cert-alert:latest          # the default branch
 docker pull ghcr.io/winllc/cert-alert:sha-1a2b3c4     # one commit, forever
 ```
 
-Four kinds of tag. `sha-<short>` on every push, which is the one to deploy — it never moves.
+Four kinds of tag. `sha-<short>` on every push, which is the one to test a commit with — it
+never moves.
 The branch name, which does. `latest`, only from the default branch. And on a `v*` tag, the
 version and its major.minor. Nothing is published from a pull request.
 
@@ -432,53 +518,6 @@ export CERT_ALERT_DB_PASSWORD=...
 Flyway owns the schema and migrates on startup. Hibernate is set to `validate`, so a
 mapping that drifts from the migrations fails at boot rather than silently altering
 tables.
-
-### If entries sync but no certificates do
-
-Every attribute populated, every certificate column empty, and nothing in the log that
-looks like a failure. That is not an access-control problem - it is which name the
-certificate was asked for by.
-
-RFC 4522 says a certificate is transferred in its binary form, and a client insists on
-that by asking for `userCertificate;binary` rather than `userCertificate`. The two are
-different attribute descriptions in a search, and a request carrying the option matches
-only an attribute that carries it. Directories that implement the rule return nothing for
-the plain name, which is why the option is on by default.
-
-A virtual directory is the case where that breaks down. It presents an attribute it has
-assembled from some other store, under the plain name, and has no `userCertificate;binary`
-to give - so the request matches nothing and comes back empty, for every entry, silently.
-Radiant Logic FID 7.4 behaves this way. Turn the option off:
-
-```bash
-export CERT_ALERT_LDAP_BINARY_CERTIFICATE_OPTION=false
-```
-
-Turning it off is safe against a directory that does store the binary form: a plain
-request matches an attribute whatever options it carries, so it is the qualified request
-that is narrow, not this one. If you are unsure which you have, `ldapsearch` will say -
-the first of these returns the certificate on a conforming directory, the second on
-either:
-
-```bash
-ldapsearch -H "$CERT_ALERT_LDAP_URL" -b "$CERT_ALERT_LDAP_BASE" \
-    "(uid=someone)" "userCertificate;binary"
-ldapsearch -H "$CERT_ALERT_LDAP_URL" -b "$CERT_ALERT_LDAP_BASE" \
-    "(uid=someone)" userCertificate
-```
-
-With the option off, how values arrive is left to the JNDI provider, which decides from
-the attribute's name alone. It knows the standard ones, `userCertificate` among them. If
-you have mapped the certificate to a name of your own under `cert-alert.ldap.user
-.certificate` or `cert-alert.ldap.server.certificate`, declare that name binary too or it
-arrives as text and will not parse:
-
-```yaml
-spring:
-  ldap:
-    base-environment:
-      java.naming.ldap.attributes.binary: myCertificateAttribute
-```
 
 ## The two object types
 
@@ -2257,7 +2296,8 @@ class SlackAlertNotifier implements AlertNotifier {
 
 ## Releases
 
-Customers get a self-contained bundle rather than an image name: the production compose
+Customers install from one of two things, both built here from the same tested image: the
+Helm chart, or a self-contained bundle rather than an image name - the production compose
 file, an install and an upgrade script, every setting commented in `env.template`, and the
 images themselves, so an air-gapped site needs nothing else.
 
@@ -2269,10 +2309,11 @@ git tag v1.2.3 && git push origin v1.2.3
 
 The `image` job builds and smoke-tests the image as on every push, publishes it (including
 `ghcr.io/winllc/cert-alert:1.2.3`), and then, from that same image, builds the bundle with
-`scripts/release-bundle.sh`. A tag with a suffix (`v1.2.3-rc.1`) is a pre-release: built
+`scripts/release-bundle.sh`, which also packages the Helm chart at the same version; the
+chart is then pushed to `oci://ghcr.io/winllc/charts`. A tag with a suffix (`v1.2.3-rc.1`) is a pre-release: built
 and uploaded the same way, but `latest.txt` does not move. Every pull request builds the
-bundle too, as `0.0.0-pr<number>`, kept for three days as a workflow artifact and never
-uploaded - so a change that breaks the bundle shows up before the tag does.
+bundle and the chart too, as `0.0.0-pr<number>`, kept for three days as a workflow
+artifact and never uploaded or pushed - so a change that breaks the bundle shows up before the tag does.
 
 **What CI produces**, kept as the workflow artifact `release-cert-alert-<version>` (30 days)
 and uploaded to `s3://<bucket>/cert-alert/<version>/`:
@@ -2280,6 +2321,7 @@ and uploaded to `s3://<bucket>/cert-alert/<version>/`:
 | File | |
 |---|---|
 | `cert-alert-<version>.tar.gz` | the bundle: `README.md`, `VERSION`, `install.sh`, `upgrade.sh`, `docker-compose.yml` (application and PostgreSQL, pinned to this version's images; directory and SMTP are the customer's, set in `.env`), `env.template`, `license/README.txt`, and `images/cert-alert-images-<version>.tar` (`docker save` of cert-alert and postgres) |
+| `cert-alert-<version>.tgz` | the Helm chart at this version (also pushed to `oci://ghcr.io/winllc/charts/cert-alert`) |
 | `sbom-cert-alert.spdx.json`, `sbom-postgres.spdx.json` | SPDX SBOM per image (syft) |
 | `SHA256SUMS` | checksums of all of the above |
 | `SHA256SUMS.asc` | detached GPG signature of `SHA256SUMS`, when a signing key is configured |
@@ -2300,14 +2342,16 @@ skipped and the summary says so.
 | `RELEASE_S3_ENDPOINT` | variable | for Cloudflare R2 or MinIO, e.g. `https://<account>.r2.cloudflarestorage.com`; empty for AWS S3 |
 | `RELEASE_S3_REGION` | variable | default `us-east-1` (`auto` for R2) |
 
-**Building one locally** - any image tagged with the product's name will do:
+**Building one locally** (release engineering, not an install route) - any image tagged
+with the product's name will do:
 
 ```bash
 docker build -t ghcr.io/winllc/cert-alert:1.2.3 .
 scripts/release-bundle.sh 1.2.3 ghcr.io/winllc/cert-alert:1.2.3   # into dist/release-1.2.3/
 ```
 
-SBOMs are generated when `syft` is on the PATH; `POSTGRES_IMAGE` overrides the bundled
+SBOMs are generated when `syft` is on the PATH, and the chart is packaged when `helm` is;
+`POSTGRES_IMAGE` overrides the bundled
 PostgreSQL (`postgres:17.11-alpine`).
 
 **How a customer checks a download**, in the directory holding the files:
@@ -2320,6 +2364,11 @@ gpg --verify SHA256SUMS.asc SHA256SUMS       # and SHA256SUMS is the one ENS sig
 
 then `tar xzf cert-alert-<version>.tar.gz` and follow the `README.md` inside: `./install.sh`
 for a first install, `./upgrade.sh --from ../cert-alert-<old version>` to move to a new one.
+Or install `cert-alert-<version>.tgz` with Helm (see `deploy/helm/cert-alert/README.md`).
+
+**The Helm chart** is checked on every push and pull request by the `helm` job:
+`helm lint --strict` and `helm template` with each `deploy/helm/cert-alert/ci/*.yaml`, the
+output validated by kubeconform against Kubernetes 1.29.
 
 ## Project layout
 
@@ -2330,6 +2379,7 @@ docker-compose.ports.yml opt-in overlay that publishes them on the host
 docker/389ds/            389 Directory Server carrying the IC FSD schema and a changelog
 deploy/release/          what goes in a customer release bundle: production compose,
                          env.template, install.sh, upgrade.sh and the customer README
+deploy/helm/cert-alert/  the Helm chart, its README and the example values in ci/
 scripts/                 the dummy directory generator, and release-bundle.sh
 src/main/java/com/enssolutions/license/   the ENS portal's license verifier, copied unchanged
 src/main/java/com/winllc/certalert/

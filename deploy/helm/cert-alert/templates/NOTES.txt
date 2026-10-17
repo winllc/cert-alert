@@ -1,0 +1,61 @@
+cert-alert {{ .Chart.AppVersion }} is installed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+1. Reach it
+{{- if .Values.route.enabled }}
+   OpenShift Route: {{ if .Values.route.host }}https://{{ .Values.route.host }}/{{ else }}oc get route {{ include "cert-alert.fullname" . }} -n {{ .Release.Namespace }}{{ end }}
+{{- else if .Values.ingress.enabled }}
+{{- range .Values.ingress.hosts }}
+   {{ if or $.Values.ingress.tls $.Values.tls.enabled }}https{{ else }}http{{ end }}://{{ .host }}/
+{{- end }}
+{{- else if eq .Values.service.type "LoadBalancer" }}
+   kubectl get svc {{ include "cert-alert.fullname" . }} -n {{ .Release.Namespace }}   # EXTERNAL-IP
+   then {{ include "cert-alert.scheme" . }}://<EXTERNAL-IP>:{{ .Values.service.port }}/
+{{- else }}
+   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "cert-alert.fullname" . }} 8080:{{ .Values.service.port }}
+   then {{ include "cert-alert.scheme" . }}://localhost:8080/
+{{- end }}
+   Wait for it: kubectl rollout status -n {{ .Release.Namespace }} deploy/{{ include "cert-alert.fullname" . }}
+   (the first start runs the database migrations).
+
+2. License
+   The license screen is /admin/license (Administration -> License). Sign in as one of
+   security.adminIdentifiers{{ if not .Values.security.adminIdentifiers }} - NONE ARE SET: set security.adminIdentifiers, or nobody can
+   reach it{{ end }}. Until a license is installed only sign-in and that screen work.
+{{- if include "cert-alert.licenseSupplied" . }}
+   The license you supplied was copied into the license volume, unless one was already
+   installed there (a later upload on the license screen is never overwritten).
+{{- else }}
+   No license was supplied: upload it on the license screen, or set license.existingSecret
+   or --set-file license.file=./license.lic on the next helm upgrade.
+{{- end }}
+   An evaluation license comes from the ENS licensing portal (product "certalert").
+   The license screen shows this installation's id; enter it on the portal to bind a
+   license to this installation. Once the license has been checked (after the first
+   sign-in), the id is also in the license volume:
+     kubectl exec -n {{ .Release.Namespace }} deploy/{{ include "cert-alert.fullname" . }} -- cat /var/lib/ens/certalert/installation-id
+
+3. Keep the license volume
+{{- if .Values.persistence.license.enabled }}
+   PVC {{ include "cert-alert.licenseClaimName" . }} holds the license, the installation id and
+   the license revisions seen. helm upgrade keeps it.{{ if not .Values.persistence.license.existingClaim }} helm uninstall DELETES it, and the
+   installation then gets a new id: a bound license must be re-bound on the portal. To keep
+   it across a reinstall, create the PVC yourself and pass persistence.license.existingClaim.{{ end }}
+{{- else }}
+   WARNING: persistence.license.enabled=false - the license and installation id are lost
+   with every pod restart. Evaluation only.
+{{- end }}
+{{- if .Values.database.embedded.enabled }}
+
+4. Database: EMBEDDED, EVALUATION ONLY, NO BACKUPS
+   {{ include "cert-alert.db.fullname" . }} is a single PostgreSQL pod. Nothing backs it up. Use an
+   external PostgreSQL (database.host) for anything you need to keep.
+{{- end }}
+{{- if and .Values.tls.enabled (not .Values.route.enabled) (not (eq .Values.service.type "LoadBalancer")) (not (hasKey .Values.ingress.annotations "nginx.ingress.kubernetes.io/ssl-passthrough")) }}
+
+Note: tls.enabled=true, so the pod serves HTTPS. Client-certificate sign-in needs TLS passed
+through to the pod: ingress-nginx ssl-passthrough, a Route with termination passthrough, or
+service.type=LoadBalancer.
+{{- end }}
+
+Then sign in as an administrator and press "Sync directory" to fill the cache.
+Docs: https://winllc.github.io/ens-apps-documentation/cert-alert/install/

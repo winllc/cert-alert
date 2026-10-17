@@ -1,0 +1,502 @@
+# Default values for the cert-alert chart.
+#
+# Every setting in the release bundle's env.template has a home here. The structured values
+# below cover the important ones; anything else from the documentation can be passed as its
+# environment variable through extraEnv (cert-alert.ldap.page-size is
+# CERT_ALERT_LDAP_PAGE_SIZE). A value left empty ("") or null is not passed at all, and the
+# application's own default applies.
+#
+# Required: ldap.url, ldap.base, and either database.host or database.embedded.enabled=true.
+
+global:
+  # Replaces the registry part of every image this chart runs - the application, the license
+  # init container (the application image by default) and the embedded PostgreSQL - for an
+  # air-gapped site with its own mirror, e.g. registry.example.gov. The repository path is
+  # kept: ghcr.io/winllc/cert-alert becomes registry.example.gov/winllc/cert-alert and
+  # docker.io/library/postgres becomes registry.example.gov/library/postgres.
+  imageRegistry: ""
+
+image:
+  repository: ghcr.io/winllc/cert-alert
+  # Empty means the chart's appVersion, which is the release this chart was published with.
+  tag: ""
+  # Pin by digest instead of tag, e.g. sha256:..., when set.
+  digest: ""
+  pullPolicy: IfNotPresent
+
+# Names of existing kubernetes.io/dockerconfigjson Secrets, e.g. [{name: ghcr-pull}].
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+# One replica only. cert-alert runs scheduled jobs (the directory sweeps, revocation checks,
+# the email round-up) and, when enabled, the changelog connector in-process, guarded per
+# process: a second replica would run every job twice. The license volume is single-writer
+# too. Values above 1 are not supported.
+replicaCount: 1
+
+# Recreate, so the old pod releases the ReadWriteOnce license volume before the new one
+# mounts it, and two instances never run the jobs at once during an upgrade.
+strategy:
+  type: Recreate
+
+revisionHistoryLimit: 3
+
+serviceAccount:
+  create: true
+  # Defaults to the release's full name when create is true, and to "default" when false.
+  name: ""
+  annotations: {}
+
+# The application talks to nothing in the Kubernetes API.
+automountServiceAccountToken: false
+
+podAnnotations: {}
+podLabels: {}
+
+# The image runs as uid 185 (the UBI OpenJDK image's own user), with its files owned by
+# 185:0 and group-writable, so it also runs under OpenShift's arbitrary uid.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 185
+  runAsGroup: 185
+  fsGroup: 185
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+
+# The root filesystem is read-only: the application writes only to /tmp (an emptyDir
+# below), the license volume and, when enabled, the audit file volume.
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop: [ALL]
+
+openshift:
+  # true drops runAsUser, runAsGroup and fsGroup from every pod (the application, the
+  # embedded database and the test pod), so the restricted-v2 SCC assigns them.
+  enabled: false
+
+# The JVM sizes its heap to 75% of the memory limit (JAVA_OPTS, below).
+resources:
+  requests:
+    cpu: 250m
+    memory: 768Mi
+  limits:
+    memory: 1536Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+priorityClassName: ""
+terminationGracePeriodSeconds: 45
+
+# Probes use the actuator's liveness and readiness groups, not the aggregate /actuator/health,
+# which turns DOWN when the directory is unreachable - not a reason to restart a process
+# still serving cached data. The scheme follows tls.enabled.
+livenessProbe:
+  enabled: true
+  initialDelaySeconds: 0
+  periodSeconds: 20
+  timeoutSeconds: 5
+  failureThreshold: 3
+readinessProbe:
+  enabled: true
+  initialDelaySeconds: 0
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+# Holds the other two off until the application has started: up to 10 minutes, enough for
+# the first start's Flyway migrations against an empty or large database.
+startupProbe:
+  enabled: true
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 60
+
+# ---------------------------------------------------------------------------------------
+# The directory - REQUIRED
+# ---------------------------------------------------------------------------------------
+ldap:
+  # CERT_ALERT_LDAP_URL. ldaps:// for anything but a lab; the directory's CA must be one the
+  # JVM trusts (see caTruststore below for a private CA).
+  url: ""
+  # CERT_ALERT_LDAP_BASE. The search base everything is found under, e.g. dc=example,dc=gov.
+  base: ""
+  # CERT_ALERT_LDAP_USER. The service account it binds as. Read access to people, servers and
+  # their certificates is all it needs, unless directory cleanup is licensed and enabled.
+  bindDn: ""
+  # CERT_ALERT_LDAP_PASSWORD. Inline (rendered into the chart's Secret), or from a Secret of
+  # your own.
+  bindPassword: ""
+  existingSecret: ""
+  existingSecretKey: ldap-password
+  # Your directory's shape. null leaves the application default.
+  # CERT_ALERT_LDAP_REQUIRE_EMAIL_POC: must every serverPOC be an address? false for a
+  # directory holding names.
+  requireEmailPoc: null
+  # CERT_ALERT_LDAP_BINARY_CERTIFICATE_OPTION: ask for userCertificate;binary. false for a
+  # directory (e.g. a virtual directory) with no such attribute to return.
+  binaryCertificateOption: null
+  # CERT_ALERT_LDAP_PAGE_SIZE (default 500) and CERT_ALERT_LDAP_PAGED (default true).
+  pageSize: null
+  paged: null
+  # CERT_ALERT_LDAP_CHANGELOG_ENABLED: follow the directory's changelog (licensed).
+  changelogEnabled: null
+
+# ---------------------------------------------------------------------------------------
+# Signing in and roles
+# ---------------------------------------------------------------------------------------
+security:
+  # CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS. Who may trigger jobs and administer: any value the
+  # directory knows them by - an address, a uid, a common name. Name at least one, or nobody
+  # can run the first sync or reach the license screen.
+  adminIdentifiers: []
+  ldap:
+    # CERT_ALERT_SECURITY_LDAP_ENABLED. The directory-password fallback; false for
+    # certificates only.
+    enabled: null
+    # CERT_ALERT_SECURITY_LDAP_USER_SEARCH_BASE, relative to ldap.base; empty searches the
+    # whole tree. E.g. ou=people.
+    userSearchBase: ""
+    # CERT_ALERT_SECURITY_LDAP_USER_SEARCH_FILTER, e.g. (uid={0}).
+    userSearchFilter: ""
+    # CERT_ALERT_SECURITY_LDAP_USER_DN_PATTERNS: bind straight to a DN shape instead of
+    # searching, for a directory that allows no search, e.g. [uid={0},ou=people].
+    userDnPatterns: []
+
+# ---------------------------------------------------------------------------------------
+# TLS in the pod, and with it X.509 client-certificate sign-in
+# ---------------------------------------------------------------------------------------
+# Client certificates reach the application only when it terminates TLS itself: it reads
+# the certificate from the TLS handshake and accepts no forwarded-certificate header. So
+# certificate sign-in needs TLS passthrough to the pod (ingress-nginx ssl-passthrough, an
+# OpenShift Route with termination: passthrough, or a LoadBalancer Service). With TLS
+# terminated at an ingress, password sign-in still works.
+tls:
+  # CERT_ALERT_TLS_ENABLED. The application then serves HTTPS on the same port (8080).
+  enabled: false
+  keystore:
+    # A Secret holding the server's key store (CERT_ALERT_KEYSTORE). Required when enabled.
+    existingSecret: ""
+    key: keystore.p12
+    # CERT_ALERT_KEYSTORE_TYPE.
+    type: PKCS12
+    # CERT_ALERT_KEYSTORE_PASSWORD.
+    password: ""
+    passwordExistingSecret: ""
+    passwordExistingSecretKey: keystore-password
+  truststore:
+    # The CAs whose client certificates are accepted at the handshake (CERT_ALERT_TRUSTSTORE).
+    # Required when enabled: the application does not start without one.
+    existingSecret: ""
+    key: truststore.p12
+    type: PKCS12
+    password: ""
+    passwordExistingSecret: ""
+    passwordExistingSecretKey: truststore-password
+
+# A trust store for outbound TLS: an ldaps:// directory, SMTP server or Splunk whose
+# certificate comes from a private CA. Added to JAVA_OPTS as -Djavax.net.ssl.trustStore*.
+caTruststore:
+  existingSecret: ""
+  key: ca-truststore.p12
+  type: PKCS12
+  password: ""
+  passwordExistingSecret: ""
+  passwordExistingSecretKey: ca-truststore-password
+
+# ---------------------------------------------------------------------------------------
+# Database - PostgreSQL
+# ---------------------------------------------------------------------------------------
+database:
+  # An external PostgreSQL. Required unless embedded.enabled is true.
+  host: ""
+  port: 5432
+  # CERT_ALERT_DB_NAME / CERT_ALERT_DB_USER.
+  name: certalert
+  username: certalert
+  # CERT_ALERT_DB_PASSWORD. Inline, or from a Secret of your own. With the embedded database
+  # and neither set, a random one is generated once and kept across upgrades.
+  password: ""
+  existingSecret: ""
+  existingSecretKey: db-password
+  # Appended to the JDBC URL, e.g. "sslmode=verify-full".
+  params: ""
+  # CERT_ALERT_DB_POOL_SIZE (default 10).
+  poolSize: null
+
+  # EVALUATION ONLY, NO BACKUPS. A single PostgreSQL pod with a PVC, of the same image the
+  # release bundle ships. Nothing backs it up, upgrades it across major versions or makes it
+  # highly available. Use an external, managed PostgreSQL for anything you need to keep.
+  # Not supported on OpenShift (the image expects its own uid 70).
+  embedded:
+    enabled: false
+    image:
+      repository: docker.io/library/postgres
+      tag: 17.11-alpine
+      pullPolicy: IfNotPresent
+    persistence:
+      size: 8Gi
+      storageClass: ""
+      accessModes: [ReadWriteOnce]
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        memory: 1Gi
+    # The official image's postgres user in the alpine variant.
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 70
+      runAsGroup: 70
+      fsGroup: 70
+      fsGroupChangePolicy: OnRootMismatch
+      seccompProfile:
+        type: RuntimeDefault
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      capabilities:
+        drop: [ALL]
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+
+# ---------------------------------------------------------------------------------------
+# Email - your SMTP server (the round-up and the email alert channel are licensed)
+# ---------------------------------------------------------------------------------------
+mail:
+  # SPRING_MAIL_HOST / SPRING_MAIL_PORT / SPRING_MAIL_USERNAME. Empty host: no mail.
+  host: ""
+  port: null
+  username: ""
+  # SPRING_MAIL_PASSWORD.
+  password: ""
+  existingSecret: ""
+  existingSecretKey: mail-password
+  # SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH / ..._STARTTLS_ENABLE.
+  smtpAuth: null
+  starttls: null
+
+notifications:
+  email:
+    # CERT_ALERT_NOTIFICATIONS_EMAIL_ENABLED. The daily round-up to each certificate's
+    # points of contact.
+    enabled: null
+    # CERT_ALERT_NOTIFICATIONS_EMAIL_FROM.
+    from: ""
+    # CERT_ALERT_EMAIL_DRY_RUN. Build every message and send none.
+    dryRun: null
+    # Your own templates: a ConfigMap whose keys are expiring-user.html, expiring-user.txt,
+    # expiring-server.html and/or expiring-server.txt. Mounted at
+    # /etc/cert-alert/templates/email, and CERT_ALERT_NOTIFICATIONS_EMAIL_TEMPLATE_DIRECTORY
+    # set to /etc/cert-alert/templates. Anything missing falls back to the packaged template.
+    templatesConfigMap: ""
+
+alerts:
+  email:
+    # CERT_ALERT_ALERTS_EMAIL_ENABLED / _FROM / _TO: every alert as it happens, to a fixed
+    # list of operators.
+    enabled: null
+    from: ""
+    to: []
+
+# ---------------------------------------------------------------------------------------
+# Revocation (licensed), look and thresholds
+# ---------------------------------------------------------------------------------------
+revocation:
+  # CERT_ALERT_DEFAULT_OCSP_URL / CERT_ALERT_DEFAULT_CRL_URL: where to ask about a
+  # certificate that names no responder or distribution point of its own.
+  defaultOcspUrl: ""
+  defaultCrlUrl: ""
+
+# Classification bars across the top and bottom of every page.
+banner:
+  # CERT_ALERT_BANNER_ENABLED / _TEXT / _TEXT_COLOR / _BACKGROUND / _HEIGHT.
+  enabled: null
+  text: ""
+  textColor: ""
+  background: ""
+  height: ""
+
+thresholds:
+  # CERT_ALERT_WARNING_THRESHOLD_DAYS (default 30) / CERT_ALERT_CRITICAL_THRESHOLD_DAYS (7).
+  warningDays: null
+  criticalDays: null
+
+# JAVA_OPTS. Replaces the image default, so keep the heap setting. caTruststore adds its
+# -Djavax.net.ssl.* options to whatever is here.
+javaOpts: "-XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError"
+
+# ---------------------------------------------------------------------------------------
+# Audit logging (ens-audit/1) - the ENS_AUDIT_* settings shared by every ENS product
+# ---------------------------------------------------------------------------------------
+# The trail is always kept in the database and shown at /admin/audit; these add copies for
+# a SIEM. A release without audit logging ignores them.
+audit:
+  # ENS_AUDIT_STDOUT: each event as one raw JSON line on the container's stdout.
+  stdout: true
+  file:
+    # ENS_AUDIT_FILE=/var/log/ens/certalert/audit.jsonl, rotated daily or at 100 MB.
+    enabled: false
+    # ENS_AUDIT_FILE_KEEP: rotated files kept.
+    keep: 30
+    # Without persistence the file is on an emptyDir and goes with the pod.
+    persistence:
+      enabled: false
+      size: 1Gi
+      storageClass: ""
+      accessModes: [ReadWriteOnce]
+      existingClaim: ""
+  # ENS_AUDIT_RETENTION_DAYS: days to keep events; 0 keeps them forever.
+  retentionDays: 0
+  splunk:
+    # ENS_AUDIT_SPLUNK_URL, e.g. https://splunk.example.gov:8088. Off while empty.
+    url: ""
+    # ENS_AUDIT_SPLUNK_TOKEN. Inline, or from a Secret of your own.
+    token: ""
+    existingSecret: ""
+    existingSecretKey: splunk-hec-token
+    # ENS_AUDIT_SPLUNK_INDEX / _SOURCETYPE / _INSECURE (skip TLS verification; tests only).
+    index: ""
+    sourcetype: "ens:audit"
+    insecure: false
+  syslog:
+    # ENS_AUDIT_SYSLOG_HOST. Off while empty. RFC 5424.
+    host: ""
+    # ENS_AUDIT_SYSLOG_PORT. Empty: 514 for udp and tcp, 6514 for tls.
+    port: null
+    # udp, tcp or tls.
+    protocol: tcp
+    facility: local0
+
+# ---------------------------------------------------------------------------------------
+# The ENS license
+# ---------------------------------------------------------------------------------------
+persistence:
+  license:
+    # The license, this installation's id (licenses are bound to it) and the license
+    # revisions seen, mounted at /var/lib/ens (the application keeps them in
+    # /var/lib/ens/certalert). Keep this PVC: helm upgrade does; helm uninstall deletes it
+    # unless it is an existingClaim of your own. Losing it gives the installation a new id,
+    # and a bound license must be re-bound on the ENS portal.
+    enabled: true
+    size: 100Mi
+    storageClass: ""
+    accessModes: [ReadWriteOnce]
+    # Use a PVC of your own (for example one kept from a previous release).
+    existingClaim: ""
+
+license:
+  # Optional. Without one, cert-alert starts and only sign-in and the license screen
+  # (/admin/license) work; an administrator can upload it there.
+  #
+  # Either a Secret of your own holding license.lic, or the file itself:
+  #   helm install ... --set-file license.file=./license.lic
+  # An init container copies it into the license volume ONLY IF no license is installed
+  # there yet, so a newer license uploaded on the license screen is never overwritten by a
+  # later helm upgrade.
+  existingSecret: ""
+  existingSecretKey: license.lic
+  file: ""
+  # The init container's image. Empty uses the application image (it has a shell).
+  initImage:
+    repository: ""
+    tag: ""
+    pullPolicy: IfNotPresent
+
+# ---------------------------------------------------------------------------------------
+# Anything else
+# ---------------------------------------------------------------------------------------
+# Extra environment variables, e.g.
+#   - name: CERT_ALERT_LDAP_CHANGELOG_POLL_INTERVAL
+#     value: 30s
+extraEnv: []
+# e.g. [{secretRef: {name: cert-alert-extra}}]
+extraEnvFrom: []
+extraVolumes: []
+extraVolumeMounts: []
+
+# ---------------------------------------------------------------------------------------
+# Networking
+# ---------------------------------------------------------------------------------------
+service:
+  # ClusterIP behind an ingress or Route. LoadBalancer for TLS straight to the pod (mTLS)
+  # without an ingress controller.
+  type: ClusterIP
+  port: 8080
+  annotations: {}
+  loadBalancerIP: ""
+  loadBalancerSourceRanges: []
+  # Local keeps the client's address (for audit records) on a LoadBalancer or NodePort.
+  externalTrafficPolicy: ""
+  nodePort: null
+
+ingress:
+  enabled: false
+  className: ""
+  # For TLS passthrough with ingress-nginx (client-certificate sign-in, tls.enabled=true):
+  #   nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+  #   nginx.ingress.kubernetes.io/backend-protocol: HTTPS
+  # and the controller started with --enable-ssl-passthrough.
+  annotations: {}
+  hosts:
+    - host: cert-alert.example.gov
+      paths:
+        - path: /
+          pathType: Prefix
+  # - secretName: cert-alert-tls
+  #   hosts: [cert-alert.example.gov]
+  tls: []
+
+# OpenShift Route.
+route:
+  enabled: false
+  host: ""
+  annotations: {}
+  tls:
+    # edge: the router terminates TLS (password sign-in only). passthrough: TLS to the pod
+    # (tls.enabled=true), which client-certificate sign-in needs. reencrypt also works for
+    # password sign-in with tls.enabled=true.
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+    # PEM, for reencrypt: the CA that signed the pod's keystore certificate.
+    destinationCACertificate: ""
+
+networkPolicy:
+  # When true, the application pod accepts traffic on its port only (from ingress.from, or
+  # anywhere when empty) and reaches only DNS, the database, the directory, SMTP and the
+  # web (CRLs, OCSP responders, the endpoint probe, Splunk) - or everything with allowAll.
+  enabled: false
+  ingress:
+    # NetworkPolicyPeer list, e.g. [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: ingress-nginx}}}].
+    from: []
+  egress:
+    allowAll: false
+    dns: true
+    database:
+      cidrs: ["0.0.0.0/0"]
+    ldap:
+      ports: [389, 636]
+      cidrs: ["0.0.0.0/0"]
+    smtp:
+      ports: [25, 465, 587]
+      cidrs: ["0.0.0.0/0"]
+    # CRL and OCSP fetches, the endpoint probe, Splunk HEC and syslog.
+    web:
+      ports: [80, 443, 8088, 514, 6514]
+      cidrs: ["0.0.0.0/0"]
+    # More NetworkPolicyEgressRule entries.
+    extra: []
+
+# `helm test <release>` runs a pod that curls /actuator/health/liveness through the Service.
+tests:
+  enabled: true

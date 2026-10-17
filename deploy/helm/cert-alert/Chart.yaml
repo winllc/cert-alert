@@ -1,0 +1,25 @@
+apiVersion: v2
+name: cert-alert
+description: >-
+  CertAlert - reads the certificates an LDAP directory publishes and tells the right people
+  before they expire. Spring Boot application with PostgreSQL (external, or an embedded
+  evaluation-only instance).
+type: application
+# Both are set from the release tag when CI packages the chart
+# (helm package --version X.Y.Z --app-version X.Y.Z); the committed values are placeholders.
+version: 0.0.0
+appVersion: "0.0.0"
+kubeVersion: ">=1.25.0-0"
+home: https://winllc.github.io/ens-apps-documentation/cert-alert/
+sources:
+  - https://github.com/winllc/cert-alert
+keywords:
+  - certificates
+  - ldap
+  - pki
+  - x509
+maintainers:
+  - name: ENS Solutions
+    url: https://github.com/winllc
+annotations:
+  artifacthub.io/license: MIT

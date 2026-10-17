@@ -1,0 +1,81 @@
+{{- include "cert-alert.validate" . -}}
+{{- $v := .Values -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "cert-alert.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cert-alert.labels" . | nindent 4 }}
+data:
+  # Fixed by the chart.
+  SPRING_PROFILES_ACTIVE: "postgres"
+  SERVER_PORT: "8080"
+  ENS_LICENSE_STATE_DIR: "/var/lib/ens/certalert"
+  ENS_LICENSE_FILE: "/var/lib/ens/certalert/license.lic"
+  # Database (the password is in a Secret).
+  CERT_ALERT_DB_URL: {{ printf "jdbc:postgresql://%s:%d/%s%s" (include "cert-alert.db.host" .) (int $v.database.port) $v.database.name (ternary (printf "?%s" $v.database.params) "" (ne $v.database.params "")) | quote }}
+  CERT_ALERT_DB_NAME: {{ $v.database.name | quote }}
+  CERT_ALERT_DB_USER: {{ $v.database.username | quote }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_DB_POOL_SIZE" "value" $v.database.poolSize) }}
+  # Directory.
+  CERT_ALERT_LDAP_URL: {{ required "ldap.url is required: the directory to read, e.g. ldaps://directory.example.gov:636" $v.ldap.url | quote }}
+  CERT_ALERT_LDAP_BASE: {{ required "ldap.base is required: the search base, e.g. dc=example,dc=gov" $v.ldap.base | quote }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_LDAP_USER" "value" $v.ldap.bindDn) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_LDAP_REQUIRE_EMAIL_POC" "value" $v.ldap.requireEmailPoc) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_LDAP_BINARY_CERTIFICATE_OPTION" "value" $v.ldap.binaryCertificateOption) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_LDAP_PAGE_SIZE" "value" $v.ldap.pageSize) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_LDAP_PAGED" "value" $v.ldap.paged) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_LDAP_CHANGELOG_ENABLED" "value" $v.ldap.changelogEnabled) }}
+  # Signing in.
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS" "value" (join "," $v.security.adminIdentifiers)) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SECURITY_LDAP_ENABLED" "value" $v.security.ldap.enabled) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SECURITY_LDAP_USER_SEARCH_BASE" "value" $v.security.ldap.userSearchBase) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SECURITY_LDAP_USER_SEARCH_FILTER" "value" $v.security.ldap.userSearchFilter) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SECURITY_LDAP_USER_DN_PATTERNS" "value" (join "," $v.security.ldap.userDnPatterns)) }}
+  # TLS (passwords are in a Secret).
+  CERT_ALERT_TLS_ENABLED: {{ $v.tls.enabled | quote }}
+  {{- if $v.tls.enabled }}
+  CERT_ALERT_KEYSTORE: {{ printf "file:/etc/cert-alert/tls/keystore/%s" $v.tls.keystore.key | quote }}
+  CERT_ALERT_KEYSTORE_TYPE: {{ $v.tls.keystore.type | quote }}
+  CERT_ALERT_TRUSTSTORE: {{ printf "file:/etc/cert-alert/tls/truststore/%s" $v.tls.truststore.key | quote }}
+  CERT_ALERT_TRUSTSTORE_TYPE: {{ $v.tls.truststore.type | quote }}
+  {{- end }}
+  # Email (the password is in a Secret).
+  {{- include "cert-alert.envLine" (dict "name" "SPRING_MAIL_HOST" "value" $v.mail.host) }}
+  {{- include "cert-alert.envLine" (dict "name" "SPRING_MAIL_PORT" "value" $v.mail.port) }}
+  {{- include "cert-alert.envLine" (dict "name" "SPRING_MAIL_USERNAME" "value" $v.mail.username) }}
+  {{- include "cert-alert.envLine" (dict "name" "SPRING_MAIL_PROPERTIES_MAIL_SMTP_AUTH" "value" $v.mail.smtpAuth) }}
+  {{- include "cert-alert.envLine" (dict "name" "SPRING_MAIL_PROPERTIES_MAIL_SMTP_STARTTLS_ENABLE" "value" $v.mail.starttls) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_NOTIFICATIONS_EMAIL_ENABLED" "value" $v.notifications.email.enabled) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_NOTIFICATIONS_EMAIL_FROM" "value" $v.notifications.email.from) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_EMAIL_DRY_RUN" "value" $v.notifications.email.dryRun) }}
+  {{- if $v.notifications.email.templatesConfigMap }}
+  CERT_ALERT_NOTIFICATIONS_EMAIL_TEMPLATE_DIRECTORY: "/etc/cert-alert/templates"
+  {{- end }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_ALERTS_EMAIL_ENABLED" "value" $v.alerts.email.enabled) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_ALERTS_EMAIL_FROM" "value" $v.alerts.email.from) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_ALERTS_EMAIL_TO" "value" (join "," $v.alerts.email.to)) }}
+  # Revocation, look and thresholds.
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_DEFAULT_OCSP_URL" "value" $v.revocation.defaultOcspUrl) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_DEFAULT_CRL_URL" "value" $v.revocation.defaultCrlUrl) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_BANNER_ENABLED" "value" $v.banner.enabled) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_BANNER_TEXT" "value" $v.banner.text) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_BANNER_TEXT_COLOR" "value" $v.banner.textColor) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_BANNER_BACKGROUND" "value" $v.banner.background) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_BANNER_HEIGHT" "value" $v.banner.height) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_WARNING_THRESHOLD_DAYS" "value" $v.thresholds.warningDays) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_CRITICAL_THRESHOLD_DAYS" "value" $v.thresholds.criticalDays) }}
+  # Audit logging (ens-audit/1); the Splunk token is in a Secret.
+  ENS_AUDIT_STDOUT: {{ $v.audit.stdout | quote }}
+  ENS_AUDIT_FILE: {{ ternary "/var/log/ens/certalert/audit.jsonl" "" $v.audit.file.enabled | quote }}
+  ENS_AUDIT_FILE_KEEP: {{ $v.audit.file.keep | toString | quote }}
+  ENS_AUDIT_RETENTION_DAYS: {{ $v.audit.retentionDays | toString | quote }}
+  ENS_AUDIT_SPLUNK_URL: {{ $v.audit.splunk.url | quote }}
+  ENS_AUDIT_SPLUNK_INDEX: {{ $v.audit.splunk.index | quote }}
+  ENS_AUDIT_SPLUNK_SOURCETYPE: {{ $v.audit.splunk.sourcetype | quote }}
+  ENS_AUDIT_SPLUNK_INSECURE: {{ $v.audit.splunk.insecure | quote }}
+  ENS_AUDIT_SYSLOG_HOST: {{ $v.audit.syslog.host | quote }}
+  ENS_AUDIT_SYSLOG_PORT: {{ ternary "" (toString $v.audit.syslog.port) (kindIs "invalid" $v.audit.syslog.port) | quote }}
+  ENS_AUDIT_SYSLOG_PROTOCOL: {{ $v.audit.syslog.protocol | quote }}
+  ENS_AUDIT_SYSLOG_FACILITY: {{ $v.audit.syslog.facility | quote }}

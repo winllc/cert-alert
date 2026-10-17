@@ -39,6 +39,53 @@ jobs:
           name: test-results
           path: build/reports/tests/test
 
+  helm:
+    # The Helm chart (deploy/helm/cert-alert): linted strictly and rendered with every example
+    # values file in ci/, and the output validated against the Kubernetes 1.29 schemas.
+    runs-on: ubuntu-latest
+
+    env:
+      CHART: deploy/helm/cert-alert
+      KUBECONFORM_VERSION: v0.6.7
+      KUBECONFORM_SHA256: 95f14e87aa28c09d5941f11bd024c1d02fdc0303ccaa23f61cef67bc92619d73
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+
+      - name: Install kubeconform
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/kubeconform.tar.gz" \
+            "https://github.com/yannh/kubeconform/releases/download/$KUBECONFORM_VERSION/kubeconform-linux-amd64.tar.gz"
+          echo "$KUBECONFORM_SHA256  $RUNNER_TEMP/kubeconform.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/kubeconform.tar.gz" -C "$RUNNER_TEMP" kubeconform
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Lint
+        run: |
+          for values in "$CHART"/ci/*.yaml; do
+            echo "::group::helm lint --strict -f $values"
+            helm lint --strict "$CHART" -f "$values"
+            echo "::endgroup::"
+          done
+
+      - name: Render and validate
+        run: |
+          for values in "$CHART"/ci/*.yaml; do
+            echo "::group::helm template -f $values | kubeconform"
+            # The OpenShift Route has no schema in the Kubernetes set; only that example
+            # renders one, so only it may skip missing schemas.
+            extra=()
+            case "$values" in *openshift*) extra=(-ignore-missing-schemas) ;; esac
+            helm template cert-alert "$CHART" -f "$values" \
+              | kubeconform -strict -summary -kubernetes-version 1.29.0 "${extra[@]}"
+            echo "::endgroup::"
+          done
+
   image:
     # Builds the container image on every push, and publishes what it just proved starts.
     # Nothing is published from a pull request: a fork's token cannot write packages, and
@@ -189,6 +236,12 @@ jobs:
         if: steps.release.outputs.enabled == 'true'
         uses: anchore/sbom-action/download-syft@v0
 
+      - name: Set up Helm
+        if: steps.release.outputs.enabled == 'true'
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+
       - name: Build the release bundle
         if: steps.release.outputs.enabled == 'true'
         env:
@@ -198,6 +251,9 @@ jobs:
           PUBLISHED: ${{ steps.meta.outputs.tags }}
           SYFT: ${{ steps.syft.outputs.cmd }}
           REQUIRE_SBOM: "true"
+          # The Helm chart is packaged into the bundle's output at the same version, so it is
+          # checksummed, signed, uploaded and kept as an artifact with everything else.
+          REQUIRE_CHART: "true"
         run: |
           # The image that passed the smoke test, under the name customers' compose file uses.
           # On a tag it was pushed under that name above; check, rather than ship a bundle
@@ -208,6 +264,21 @@ jobs:
           fi
           docker tag cert-alert:ci "$IMAGE_NAME:$VERSION"
           scripts/release-bundle.sh "$VERSION" "$IMAGE_NAME:$VERSION"
+
+      - name: Publish the Helm chart
+        # Releases only: a pull request's 0.0.0-pr<n> chart is packaged above and kept as an
+        # artifact, never pushed.
+        if: steps.release.outputs.enabled == 'true' && steps.release.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          OUT_DIR: ${{ steps.release.outputs.out_dir }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+          CHART_REPO: oci://ghcr.io/${{ github.repository_owner }}/charts
+        run: |
+          echo "$GITHUB_TOKEN" | helm registry login ghcr.io -u "$ACTOR" --password-stdin
+          helm push "$OUT_DIR/$PRODUCT_ID-$VERSION.tgz" "$CHART_REPO"
+          echo "Chart: \`$CHART_REPO/$PRODUCT_ID --version $VERSION\`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Sign the checksums
         id: sign
