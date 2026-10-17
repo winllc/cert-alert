@@ -743,12 +743,17 @@ a person — any address it publishes for them, their uid, or the DN of their en
 ```yaml
 cert-alert:
   security:
-    admin-identifiers: [alice@intelink.ic.gov]
+    admin-identifiers:
+      - alice@intelink.ic.gov
+      - uid=bob,ou=people,dc=example,dc=gov
 ```
 
 A common name, display name or preferred name is never matched: two people can share one,
-and the directory lets anybody be called anything. A DN has commas in it, so name one in
-YAML as above rather than in the comma-separated `CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS`.
+and the directory lets anybody be called anything. A DN has commas in it, so name one as a
+block-style list item as above: not in a flow list (`[...]`), and not in the comma-separated
+`CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS`, both of which split it at its commas. From the
+environment, use indexed variables instead (`CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS_0`,
+`CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS_1`, …), with `CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS` unset.
 
 A password sign-in is resolved to the cached person at the DN it bound as, and to nobody
 else. On a fresh deployment the cache is empty, so roles for someone signing in with a
