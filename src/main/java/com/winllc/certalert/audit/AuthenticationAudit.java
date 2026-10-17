@@ -1,6 +1,7 @@
 package com.winllc.certalert.audit;
 
 import com.winllc.certalert.security.DirectoryPrincipal;
+import com.winllc.certalert.security.RefusedCertificateException;
 import java.util.Locale;
 import org.springframework.context.event.EventListener;
 import org.springframework.security.authentication.AccountStatusException;
@@ -29,6 +30,11 @@ import org.springframework.stereotype.Component;
  * <p>A browser presenting a certificate the directory does not publish is refused on every
  * request it makes until it gives up, so those failures are collapsed: one event per
  * certificate subject a minute, with a count, through {@link AccessDenials}' sibling below.
+ *
+ * <p>A certificate the directory does publish but that has been revoked, or is out of date,
+ * is refused the same way and recorded with that as its reason and the certificate's
+ * fingerprint. A revoked one is raised as an alert: somebody holds the key to a certificate
+ * its authority has withdrawn, which is what revocation is for.
  */
 @Component
 public class AuthenticationAudit {
@@ -67,6 +73,12 @@ public class AuthenticationAudit {
                 .actor(AuditRecord.Actor.anonymous(attempted))
                 .reason(reasonOf(event.getException()))
                 .detail("method", method);
+        if (event.getException() instanceof RefusedCertificateException refused) {
+            record.detail("fingerprint", refused.getFingerprint());
+            if (refused.getReason() == RefusedCertificateException.Reason.REVOKED) {
+                record.severity(AuditRecord.Severity.ALERT);
+            }
+        }
         if ("x509".equals(method)) {
             certificateFailures.failed(record, attempted);
             return;

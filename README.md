@@ -694,6 +694,15 @@ no certificate and the password fallback becomes unreachable. Being in the trust
 gets a certificate as far as the application; it still has to be one the directory
 publishes.
 
+Being published is not enough on its own, because a directory goes on publishing what it
+was given. A certificate the [revocation check](#revocation) has found revoked, or whose
+validity dates do not cover the present moment, is refused even though the directory
+publishes it, and the refusal is recorded as a failed `auth.login` whose reason says which
+(`certificate revoked`, `certificate expired`, `certificate not yet valid`) with the
+certificate's fingerprint — at `alert` severity for a revoked one. A certificate whose
+revocation has not been checked, or could not be, still signs in; this is the cache's
+answer, not a live OCSP or CRL query at the handshake.
+
 Setting `cert-alert.security.x509.require-known-certificate: false` falls back to matching
 the `uid` and email address in the certificate's subject, and its `rfc822Name` alternative
 names, against the uid and addresses the directory publishes for a person. That trusts a
@@ -2200,7 +2209,7 @@ the documentation site: [audit-logging.md](https://github.com/winllc/ens-apps-do
 
 | Category | Actions |
 |---|---|
-| authentication | `auth.login` (success and failure; `details.method` `x509` or `ldap`, the attempted name as an `anonymous` actor on failure, `alert` severity after repeated failures for one name), `auth.logout` |
+| authentication | `auth.login` (success and failure; `details.method` `x509` or `ldap`, the attempted name as an `anonymous` actor on failure, `alert` severity after repeated failures for one name; a published client certificate refused as revoked, expired or not yet valid carries that as its reason and `details.fingerprint`, and a revoked one is `alert`), `auth.logout` |
 | authorization | `access.denied` for every 403: a role refused, `license_required`, `license_read_only`, `feature_not_licensed`, a CSRF failure — with method, path and reason code; identical refusals within 60 s are one event with `details.count` |
 | account | `project.admin-added`, `project.admin-removed` (the one role this application grants) |
 | configuration | `settings.changed` (the round-up's lead days, `<field>.old`/`.new`), `server-attribute.defined`, `.changed`, `.retired` |

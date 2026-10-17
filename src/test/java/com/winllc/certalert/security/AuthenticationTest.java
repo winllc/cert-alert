@@ -14,6 +14,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.unboundid.ldap.sdk.Attribute;
 import com.unboundid.ldap.sdk.Entry;
+import com.winllc.certalert.audit.AuditStore;
+import com.winllc.certalert.audit.AuthenticationAudit;
+import com.winllc.certalert.audit.StoredEvent;
+import com.winllc.certalert.domain.CachedCertificate;
+import com.winllc.certalert.domain.RevocationMethod;
+import com.winllc.certalert.domain.RevocationStatus;
+import com.winllc.certalert.repository.CachedCertificateRepository;
 import com.winllc.certalert.repository.DirectoryUserRepository;
 import com.winllc.certalert.service.DirectorySyncService;
 import com.winllc.certalert.support.EmbeddedDirectory;
@@ -21,6 +28,7 @@ import com.winllc.certalert.support.TestCertificates;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -68,6 +76,15 @@ class AuthenticationTest {
     /** Also never cached, and called by the administrator's address. */
     private static final String NAMESAKE_DN = "uid=namesake," + EmbeddedDirectory.PEOPLE_DN;
 
+    /** Published, and in date; each test that needs it revoked says so. */
+    private static byte[] revocableCertificate;
+
+    /** Published, and past its notAfter. */
+    private static byte[] expiredCertificate;
+
+    /** Published, and not valid for another week. */
+    private static byte[] earlyCertificate;
+
     @Autowired
     private WebApplicationContext context;
 
@@ -82,6 +99,15 @@ class AuthenticationTest {
 
     @Autowired
     private DirectoryPrincipalResolver resolver;
+
+    @Autowired
+    private CachedCertificateRepository certificateRepository;
+
+    @Autowired
+    private AuditStore auditStore;
+
+    @Autowired
+    private AuthenticationAudit authenticationAudit;
 
     private MockMvc mockMvc;
 
@@ -101,6 +127,15 @@ class AuthenticationTest {
         directory.addUser("ada.other", "Ada Admin", "ada.other@example.gov");
         directory.add(uncachedPerson(NEWCOMER_DN, "ada.newcomer", "Ada Admin"));
         directory.add(uncachedPerson(NAMESAKE_DN, "namesake", "admin@example.gov"));
+
+        revocableCertificate = TestCertificates.der("revoked@example.gov", now.minus(Duration.ofDays(30)),
+                now.plus(Duration.ofDays(365)));
+        directory.addUser("revoked", "Rev Oked", "revoked@example.gov", revocableCertificate);
+        expiredCertificate = TestCertificates.expired("expired@example.gov", Duration.ofDays(2));
+        directory.addUser("expired", "Ex Pired", "expired@example.gov", expiredCertificate);
+        earlyCertificate = TestCertificates.der("early@example.gov", now.plus(Duration.ofDays(7)),
+                now.plus(Duration.ofDays(365)));
+        directory.addUser("early", "Ear Ly", "early@example.gov", earlyCertificate);
 
         byte[] server = TestCertificates.der("web01.example.gov", now.minus(Duration.ofDays(30)),
                 now.plus(Duration.ofDays(365)));
@@ -222,6 +257,72 @@ class AuthenticationTest {
         assertThat(principal.getAuthorities())
                 .extracting(Object::toString)
                 .containsExactly(DirectoryPrincipalResolver.ROLE_USER);
+    }
+
+    // --- a published certificate still has to be good --------------------------------
+
+    /**
+     * Revoked by its authority, still published by the directory - which keeps what it was
+     * given. Refused, and recorded as an alert with the reason and the certificate.
+     */
+    @Test
+    void aRevokedCertificateIsRefusedAndAudited() throws Exception {
+        markRevocation(revocableCertificate, RevocationStatus.REVOKED);
+        authenticationAudit.flush();
+        long head = auditStore.headSeq();
+        try {
+            mockMvc.perform(get("/users").with(x509(TestCertificates.certificateOf(revocableCertificate))))
+                    .andExpect(unauthenticated());
+            authenticationAudit.flush();
+
+            List<StoredEvent> refused = auditStore.after(head, 1000).stream()
+                    .filter(event -> "auth.login".equals(event.action()))
+                    .filter(event -> event.line().contains("\"reason\":\"certificate revoked\""))
+                    .toList();
+            assertThat(refused).hasSize(1);
+            assertThat(refused.getFirst().line()).contains(
+                    "\"outcome\":\"failure\"", "\"severity\":\"alert\"", "\"method\":\"x509\"",
+                    "\"fingerprint\":\"" + TestCertificates.sha256(revocableCertificate) + "\"");
+        } finally {
+            markRevocation(revocableCertificate, RevocationStatus.NOT_CHECKED);
+        }
+    }
+
+    /** The same certificate, before anybody revoked it, is fine: it is the revocation that refuses it. */
+    @Test
+    void theSameCertificateNotRevokedSignsIn() throws Exception {
+        markRevocation(revocableCertificate, RevocationStatus.GOOD);
+        mockMvc.perform(get("/users").with(x509(TestCertificates.certificateOf(revocableCertificate))))
+                .andExpect(status().isOk())
+                .andExpect(authenticated().withUsername("revoked@example.gov"));
+    }
+
+    @Test
+    void anExpiredCertificateIsRefusedThoughTheDirectoryStillPublishesIt() {
+        assertThatRefused(expiredCertificate, RefusedCertificateException.Reason.EXPIRED);
+    }
+
+    @Test
+    void aCertificateNotYetValidIsRefused() {
+        assertThatRefused(earlyCertificate, RefusedCertificateException.Reason.NOT_YET_VALID);
+    }
+
+    private void assertThatRefused(byte[] der, RefusedCertificateException.Reason reason) {
+        X509Certificate certificate = TestCertificates.certificateOf(der);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> x509UserDetailsService.loadUserDetails(
+                        new PreAuthenticatedAuthenticationToken(
+                                certificate.getSubjectX500Principal().getName(), certificate)))
+                .isInstanceOfSatisfying(RefusedCertificateException.class,
+                        refused -> assertThat(refused.getReason()).isEqualTo(reason));
+    }
+
+    private void markRevocation(byte[] der, RevocationStatus status) {
+        for (CachedCertificate cached : certificateRepository.findByFingerprint(TestCertificates.sha256(der))) {
+            cached.recordRevocation(status, RevocationMethod.OCSP,
+                    status == RevocationStatus.REVOKED ? Instant.now().minus(Duration.ofDays(1)) : null,
+                    status == RevocationStatus.REVOKED ? "keyCompromise" : null, null, Instant.now());
+            certificateRepository.save(cached);
+        }
     }
 
     // --- LDAP fallback -----------------------------------------------------------------
