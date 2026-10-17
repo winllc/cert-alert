@@ -27,6 +27,11 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
     @Query("update Notification n set n.readAt = :when where n.recipientUserId = :userId and n.readAt is null")
     int markAllRead(@Param("userId") Long userId, @Param("when") Instant when);
 
+    /** Records that the email for this notification went out, which the outbox learns after the fact. */
+    @Modifying
+    @Query("update Notification n set n.emailedAt = :when where n.id = :id")
+    int markEmailed(@Param("id") Long id, @Param("when") Instant when);
+
     /**
      * Whether this person has already been told about this certificate in this state, so a
      * sweep that runs every night does not tell them the same thing every night.
