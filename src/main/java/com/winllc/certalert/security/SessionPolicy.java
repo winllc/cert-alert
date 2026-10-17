@@ -65,7 +65,7 @@ public class SessionPolicy implements HttpSessionListener, HttpSessionIdListener
      * certificate is checked afresh on every request and never stored in the session, so
      * without this an idle session's record would have nobody to name.
      */
-    static final String SIGNED_IN_AS = SessionPolicy.class.getName() + ".signedInAs";
+    public static final String SIGNED_IN_AS = SessionPolicy.class.getName() + ".signedInAs";
 
     /** Why the application ended this session, so its destruction is not mistaken for idling. */
     static final String ENDED = SessionPolicy.class.getName() + ".ended";

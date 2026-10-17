@@ -140,6 +140,19 @@ class SessionControlsTest {
     }
 
     @Test
+    void aCertificateIsCheckedOnEveryRequestButSignsInOncePerSession() throws Exception {
+        long head = auditStore.headSeq();
+        MockHttpSession session = new MockHttpSession();
+
+        for (int i = 0; i < 3; i++) {
+            mockMvc.perform(get("/users").session(session).with(x509(daveCertificate))).andExpect(status().isOk());
+        }
+
+        assertThat(auditStore.after(head, 1000).stream().filter(event -> "auth.login".equals(event.action())))
+                .hasSize(1);
+    }
+
+    @Test
     void anAdministratorGetsTheShorterIdleTimeout() throws Exception {
         MockHttpSession session = new MockHttpSession();
 

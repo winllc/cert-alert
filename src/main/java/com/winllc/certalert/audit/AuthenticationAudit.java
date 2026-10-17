@@ -2,6 +2,9 @@ package com.winllc.certalert.audit;
 
 import com.winllc.certalert.security.DirectoryPrincipal;
 import com.winllc.certalert.security.RefusedCertificateException;
+import com.winllc.certalert.security.SessionPolicy;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpSession;
 import java.util.Locale;
 import org.springframework.context.event.EventListener;
 import org.springframework.security.authentication.AccountStatusException;
@@ -32,6 +35,9 @@ import org.springframework.stereotype.Component;
  * request it makes until it gives up, so those failures are collapsed: one event per
  * certificate subject a minute, with a count, through {@link AccessDenials}' sibling below.
  *
+ * <p>A client certificate is checked on every request, but recorded as a sign-in once per
+ * session (see {@link #alreadySignedIn}).
+ *
  * <p>A certificate the directory does publish but that has been revoked, or is out of date,
  * is refused the same way and recorded with that as its reason and the certificate's
  * fingerprint. A revoked one is raised as an alert: somebody holds the key to a certificate
@@ -53,6 +59,9 @@ public class AuthenticationAudit {
         Authentication authentication = event.getAuthentication();
         if (authentication != null && authentication.getName() != null) {
             failures.remove(authentication.getName().toLowerCase(Locale.ROOT));
+        }
+        if (alreadySignedIn(authentication)) {
+            return;
         }
         AuditRecord record = AuditRecord.of(AuditRecord.Category.AUTHENTICATION, "auth.login")
                 .actor(AuditContext.actorOf(authentication))
@@ -122,6 +131,28 @@ public class AuthenticationAudit {
             failures.clear();
         }
         return times.size();
+    }
+
+    /**
+     * A client certificate is checked afresh on every request it comes with - so revoking or
+     * unpublishing it takes effect at once - but only the first request of a session is a
+     * sign-in. The rest are the same person in the same session, already recorded.
+     */
+    static boolean alreadySignedIn(Authentication authentication) {
+        if (authentication == null || !"x509".equals(methodOf(authentication))) {
+            return false;
+        }
+        HttpServletRequest request = AuditContext.request();
+        HttpSession session = request == null ? null : request.getSession(false);
+        if (session == null) {
+            return false;
+        }
+        try {
+            return session.getAttribute(SessionPolicy.SIGNED_IN_AS) instanceof Authentication previous
+                    && java.util.Objects.equals(previous.getName(), authentication.getName());
+        } catch (IllegalStateException invalidated) {
+            return false;
+        }
     }
 
     @EventListener
