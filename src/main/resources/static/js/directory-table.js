@@ -32,17 +32,28 @@
         NONE: 'bg-secondary-lt'
     };
 
-    // Every request the tables make is a POST, so each one carries the CSRF token the
-    // server rendered into the page. Done once here rather than per call site.
-    $(function () {
+    /**
+     * The CSRF token the server rendered into the page, as request headers.
+     *
+     * <p>Every request the tables make is a POST, so each one carries it. jQuery's own calls
+     * get it from $.ajaxSetup, once, below. DataTables 3 makes its requests itself rather
+     * than through jQuery, so $.ajaxSetup never reaches them: the tables' ajax options carry
+     * the header themselves (see initTable).
+     */
+    function csrfHeaders() {
         var token = $('meta[name="_csrf"]').attr('content');
         var header = $('meta[name="_csrf_header"]').attr('content');
+        var headers = {};
         if (token && header) {
-            $.ajaxSetup({
-                beforeSend: function (xhr) {
-                    xhr.setRequestHeader(header, token);
-                }
-            });
+            headers[header] = token;
+        }
+        return headers;
+    }
+
+    $(function () {
+        var headers = csrfHeaders();
+        if (Object.keys(headers).length > 0) {
+            $.ajaxSetup({headers: headers});
         }
     });
 
@@ -436,6 +447,7 @@
             ajax: {
                 url: buildUrl(config.endpoint, config.readFilters()),
                 type: 'POST',
+                headers: csrfHeaders(),
                 contentType: 'application/json',
                 data: function (request) {
                     return JSON.stringify(request);
