@@ -32,7 +32,9 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p>Falling back to subject and subject-alternative names is available for directories
  * whose people hold certificates they do not publish, but it is off by default because it
- * trusts a name rather than a key.
+ * trusts a name rather than a key. Even then only a uid or an address is matched, against
+ * what the directory publishes for a person - never a common name, and never an address
+ * added in this application.
  */
 @Service
 public class X509DirectoryUserDetailsService
@@ -73,7 +75,7 @@ public class X509DirectoryUserDetailsService
 
         Set<String> identifiers = X509Identifiers.of(certificate);
         return resolver
-                .findByAnyIdentifier(identifiers)
+                .findByDirectoryIdentifier(identifiers)
                 .map(user -> {
                     log.debug("Client certificate '{}' matched directory entry '{}' by name", subject, user.getDn());
                     return (UserDetails)

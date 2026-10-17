@@ -695,8 +695,11 @@ gets a certificate as far as the application; it still has to be one the directo
 publishes.
 
 Setting `cert-alert.security.x509.require-known-certificate: false` falls back to matching
-the certificate's subject and `rfc822Name` alternative names against directory entries.
-That trusts a name rather than a key, so it is off by default.
+the `uid` and email address in the certificate's subject, and its `rfc822Name` alternative
+names, against the uid and addresses the directory publishes for a person. That trusts a
+name rather than a key, so it is off by default. The subject's common name is never
+matched — any authority in the truststore can issue a certificate to any name — and a
+certificate whose values name more than one person signs in nobody.
 
 ### A directory password
 
@@ -725,8 +728,8 @@ nothing else, and there will be no password path at all.
 | `ROLE_ADMIN` | Also trigger the jobs and reach the management endpoints   |
 
 Everyone who authenticates gets `ROLE_USER`. `ROLE_ADMIN` comes from
-`cert-alert.security.admin-identifiers`, matched against **any** value the directory knows
-a person by — an address, a uid, a common name:
+`cert-alert.security.admin-identifiers`, matched against what the directory says identifies
+a person — any address it publishes for them, their uid, or the DN of their entry:
 
 ```yaml
 cert-alert:
@@ -734,9 +737,14 @@ cert-alert:
     admin-identifiers: [alice@intelink.ic.gov]
 ```
 
-On a fresh deployment the cache is empty, so roles for someone signing in with a password
-are resolved from the directory entry they just bound against. Otherwise nobody could
-trigger the first sync.
+A common name, display name or preferred name is never matched: two people can share one,
+and the directory lets anybody be called anything. A DN has commas in it, so name one in
+YAML as above rather than in the comma-separated `CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS`.
+
+A password sign-in is resolved to the cached person at the DN it bound as, and to nobody
+else. On a fresh deployment the cache is empty, so roles for someone signing in with a
+password are resolved from the directory entry they just bound against — its DN, uid and
+addresses, and the username typed. Otherwise nobody could trigger the first sync.
 
 `/actuator/health` stays open so the thing can be monitored. Everything else requires
 authentication; an unauthenticated API call gets a 401 rather than a login page, because a

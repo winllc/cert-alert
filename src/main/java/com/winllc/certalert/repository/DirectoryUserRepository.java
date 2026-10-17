@@ -23,6 +23,20 @@ public interface DirectoryUserRepository extends DataTablesRepository<DirectoryU
     Optional<DirectoryUser> findByDn(String dn);
 
     /**
+     * The entry at this distinguished name, however its letters are cased.
+     *
+     * <p>A DN is compared case-insensitively by the directory, so binding as
+     * {@code uid=ALICE,ou=people} is binding as the entry a sweep cached as
+     * {@code uid=alice,ou=people}. Only asked after the exact lookup misses: the function on
+     * the column cannot use the unique index, and the exact form is what nearly every
+     * sign-in presents.
+     *
+     * @param dn the name, already lowercased
+     */
+    @Query("select u from DirectoryUser u where lower(u.dn) = :dn")
+    List<DirectoryUser> findByLowercaseDn(@Param("dn") String dn);
+
+    /**
      * Loads a whole sync batch in one query. Certificates come along because reconciliation
      * always needs them; identifiers are left lazy and batch-fetched.
      */
@@ -34,6 +48,10 @@ public interface DirectoryUserRepository extends DataTablesRepository<DirectoryU
 
     @Query("select i from DirectoryUser u join u.identifiers i where u.id = :id")
     Set<String> findIdentifiersById(@Param("id") Long id);
+
+    /** The addresses read from the deployment's own attributes - directory data, unlike an alias. */
+    @Query("select a from DirectoryUser u join u.additionalEmails a where u.id = :id")
+    Set<String> findAdditionalEmailsById(@Param("id") Long id);
 
     /**
      * Finds the person the directory knows by this value - an address, a uid, a name.
