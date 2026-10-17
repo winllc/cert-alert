@@ -57,6 +57,9 @@ class AuthenticationTest {
 
     private static EmbeddedDirectory directory;
 
+    /** Synced once per class, whatever the shared database already holds under the same names. */
+    private static boolean synced;
+
     /** Published by the directory for alice, so it authenticates her. */
     private static X509Certificate aliceCertificate;
 
@@ -177,11 +180,13 @@ class AuthenticationTest {
         mockMvc = MockMvcBuilders.webAppContextSetup(context)
                 .apply(SecurityMockMvcConfigurers.springSecurity())
                 .build();
-        // Asks for this class's own fixture rather than for any row at all. The in-memory
-        // database is one database for the whole test JVM, so "somebody has synced
-        // something" is not the same question as "alice is cached", and answering the
-        // first one leaves these cases depending on which class ran before them.
-        if (userRepository.findByDn("uid=alice," + EmbeddedDirectory.PEOPLE_DN).isEmpty()) {
+        // Once per class whatever the cache already holds, and again whenever a case here has
+        // emptied it. The in-memory database is one database for the whole test JVM, and
+        // another class caches an alice of its own under the same DN - with no certificate -
+        // so "alice is cached" is not the same question as "this class's alice is cached",
+        // and answering only the first leaves these cases depending on which class ran first.
+        if (!synced || userRepository.findByDn("uid=alice," + EmbeddedDirectory.PEOPLE_DN).isEmpty()) {
+            synced = true;
             syncService.syncUsers();
             syncService.syncServers();
         }

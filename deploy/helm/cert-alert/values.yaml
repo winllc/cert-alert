@@ -97,7 +97,9 @@ terminationGracePeriodSeconds: 45
 
 # Probes use the actuator's liveness and readiness groups, not the aggregate /actuator/health,
 # which turns DOWN when the directory is unreachable - not a reason to restart a process
-# still serving cached data. The scheme follows tls.enabled.
+# still serving cached data. Readiness is the database and the audit log. With
+# metrics.enabled they go to the management port (plain HTTP); otherwise to the application's
+# port, whose scheme follows tls.enabled.
 livenessProbe:
   enabled: true
   initialDelaySeconds: 0
@@ -173,11 +175,12 @@ security:
 # ---------------------------------------------------------------------------------------
 # TLS in the pod, and with it X.509 client-certificate sign-in
 # ---------------------------------------------------------------------------------------
-# Client certificates reach the application only when it terminates TLS itself: it reads
-# the certificate from the TLS handshake and accepts no forwarded-certificate header. So
-# certificate sign-in needs TLS passthrough to the pod (ingress-nginx ssl-passthrough, an
-# OpenShift Route with termination: passthrough, or a LoadBalancer Service). With TLS
-# terminated at an ingress, password sign-in still works.
+# Client certificates reach the application one of two ways (x509.source, below): from the
+# TLS handshake when the pod terminates TLS itself - TLS passthrough to the pod
+# (ingress-nginx ssl-passthrough, an OpenShift Route with termination: passthrough, or a
+# LoadBalancer Service) - or, with x509.source=header, in a header from an ingress that
+# terminates TLS and verifies the client certificate. With TLS terminated at an ingress and
+# no header, password sign-in still works.
 tls:
   # CERT_ALERT_TLS_ENABLED. The application then serves HTTPS on the same port (8080).
   enabled: false
@@ -200,6 +203,54 @@ tls:
     password: ""
     passwordExistingSecret: ""
     passwordExistingSecretKey: truststore-password
+
+# ---------------------------------------------------------------------------------------
+# Client-certificate (CAC/PIV) sign-in - the ENS_X509_* settings
+# ---------------------------------------------------------------------------------------
+x509:
+  # ENS_X509_SOURCE. servlet: the certificate from the pod's own TLS handshake (tls.enabled,
+  # with passthrough). header: from a header set by a TLS-terminating proxy - the ingress
+  # controller - which verified the client certificate. Header mode needs proxySecret and
+  # trustedCa below, or the chart refuses to render (and the application to start).
+  source: servlet
+  # ENS_X509_HEADER. Empty: X-SSL-Client-Cert. ingress-nginx with
+  # nginx.ingress.kubernetes.io/auth-tls-pass-certificate-to-upstream: "true" sends
+  # "ssl-client-cert" (URL-encoded PEM).
+  header: ""
+  # ENS_X509_TRUSTED_PROXIES: the addresses (CIDRs) the header is accepted from - the
+  # ingress controller's pods, so the pod network.
+  trustedProxies: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+  # The shared secret the proxy sends in X-ENS-Proxy-Secret (ENS_X509_PROXY_SECRET_FILE):
+  # at least 32 characters, e.g. openssl rand -hex 32. A Secret of your own, or the value
+  # (rendered into the chart's Secret). The proxy has to send the same value, e.g. with
+  # ingress-nginx: proxy_set_header X-ENS-Proxy-Secret "<secret>"; in a configuration
+  # snippet, or the controller's proxy-set-headers ConfigMap.
+  proxySecret:
+    existingSecret: ""
+    existingSecretKey: proxy-secret
+    value: ""
+  # The CA certificates (PEM) a forwarded certificate must chain to
+  # (ENS_X509_TRUSTED_CA_FILE). Also searched for an issuer when checking revocation.
+  trustedCa:
+    existingSecret: ""
+    existingSecretKey: ca.pem
+    value: ""
+  # ENS_X509_REVOCATION: off, ocsp, crl or ocsp-then-crl. The STIG requires it on.
+  revocation: "off"
+  # ENS_X509_OCSP_RESPONDER_URL: ask here instead of the certificate's own responder.
+  ocspResponderUrl: ""
+  # ENS_X509_REVOCATION_FAIL: closed (refuse when unknown) or open.
+  revocationFail: closed
+  # ENS_X509_REVOCATION_CACHE, e.g. 10m. Empty: the application default.
+  revocationCache: ""
+  # ENS_X509_ALLOWED_ISSUERS: issuer DNs separated by semicolons. Empty: any trusted issuer.
+  allowedIssuers: ""
+  # ENS_X509_USER_FILTER, e.g. (uid={edipi}): finds the holder of a certificate the
+  # directory does not publish (with {upn}, {edipi}, {email}, {uuid}). Only used with
+  # CERT_ALERT_SECURITY_X509_REQUIRE_KNOWN_CERTIFICATE=false (extraEnv).
+  userFilter: ""
+  # For ENS_X509_CRL_DIR (the air-gapped CRL option), mount the CRLs with extraVolumes and
+  # pass the path in extraEnv.
 
 # A trust store for outbound TLS: an ldaps:// directory, SMTP server or Splunk whose
 # certificate comes from a private CA. Added to JAVA_OPTS as -Djavax.net.ssl.trustStore*.
@@ -226,7 +277,11 @@ database:
   password: ""
   existingSecret: ""
   existingSecretKey: db-password
-  # Appended to the JDBC URL, e.g. "sslmode=verify-full".
+  # Appended to the JDBC URL. Use TLS to a database outside the cluster, or anywhere the
+  # network between is not yours: "sslmode=verify-full" checks the server's certificate and
+  # name (add "&sslrootcert=/etc/cert-alert/pg/ca.pem", mounted with extraVolumes, for a
+  # private CA); "sslmode=require" encrypts without checking who answered. Empty: the
+  # driver's default, which tries TLS and falls back to plain text without saying so.
   params: ""
   # CERT_ALERT_DB_POOL_SIZE (default 10).
   poolSize: null
@@ -317,6 +372,28 @@ revocation:
   # certificate that names no responder or distribution point of its own.
   defaultOcspUrl: ""
   defaultCrlUrl: ""
+  # CERT_ALERT_REVOCATION_ALLOWED_HOSTS: the only hosts CRLs and OCSP answers are fetched
+  # from (names, *.domain, addresses or CIDRs). Empty: wherever the certificates say, except
+  # link-local and cloud metadata addresses (never) and loopback (only when named).
+  allowedHosts: []
+
+# Session limits: ENS_SESSION_IDLE_TIMEOUT / _ADMIN_IDLE_TIMEOUT / _ABSOLUTE_TIMEOUT /
+# _MAX_PER_USER. Empty (or null) keeps the application's default: 30m, the same as idle, 12h
+# and 0 (no limit). The STIG suggests adminIdleTimeout 15m and maxPerUser 3.
+session:
+  idleTimeout: ""
+  adminIdleTimeout: ""
+  absoluteTimeout: ""
+  maxPerUser: null
+
+# The DoD notice-and-consent banner, shown and agreed to before any sign-in (DISA STIG):
+# ENS_CONSENT_BANNER_ENABLED / _TITLE / _TEXT. Empty title and text mean the standard USG
+# title and DoD text. For ENS_CONSENT_BANNER_FILE, mount the file with extraVolumes and pass
+# it in extraEnv.
+consentBanner:
+  enabled: false
+  title: ""
+  text: ""
 
 # Classification bars across the top and bottom of every page.
 banner:
@@ -331,6 +408,34 @@ thresholds:
   # CERT_ALERT_WARNING_THRESHOLD_DAYS (default 30) / CERT_ALERT_CRITICAL_THRESHOLD_DAYS (7).
   warningDays: null
   criticalDays: null
+
+# ---------------------------------------------------------------------------------------
+# Metrics and logs
+# ---------------------------------------------------------------------------------------
+metrics:
+  # MANAGEMENT_SERVER_PORT: the actuator on a port of its own - plain HTTP, never published
+  # by the ingress or route - with health and /actuator/prometheus open there. The Service
+  # gets a "metrics" port and the probes use it. false: no Prometheus endpoint at all, and
+  # the actuator stays on the application's port.
+  enabled: true
+  port: 9090
+  serviceMonitor:
+    # A Prometheus Operator ServiceMonitor (monitoring.coreos.com/v1) for the metrics port.
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    # Extra labels, e.g. the one your Prometheus selects ServiceMonitors by.
+    labels: {}
+  # With networkPolicy.enabled: the NetworkPolicyPeers allowed to reach the metrics port,
+  # e.g. [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}}].
+  # Empty: nothing is admitted to it beyond what the policy already allows (kubelet probes
+  # are not subject to it on most CNIs).
+  allowFrom: []
+
+# json: structured ECS JSON on stdout (LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs), for a log
+# collector. text: Spring Boot's ordinary lines. The audit trail's own stdout lines are raw
+# ens-audit/1 JSON either way.
+logFormat: json
 
 # JAVA_OPTS. Replaces the image default, so keep the heap setting. caTruststore adds its
 # -Djavax.net.ssl.* options to whatever is here.

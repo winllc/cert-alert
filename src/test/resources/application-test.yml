@@ -6,11 +6,22 @@ spring:
     driver-class-name: org.h2.Driver
 
 cert-alert:
+  revocation:
+    # The test CRL publishers and OCSP responders listen on loopback, which revocation
+    # fetches refuse unless the host is named.
+    allowed-hosts: [localhost, 127.0.0.1]
+
   security:
     admin-identifiers: [admin@example.gov]
     ldap:
       user-search-base: ou=people
       user-search-filter: "(uid={0})"
+
+  # Tests send queued mail themselves (MailOutbox.deliver / deliverDue); nothing in the
+  # background picks up another test's messages.
+  mail:
+    outbox:
+      background: false
 
   ldap:
     # Deliberately tiny, so even a handful of fixture entries cross page and batch

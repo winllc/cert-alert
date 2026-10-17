@@ -3,7 +3,7 @@
 # `docker compose up` gives you something to scrape - and, unlike the OpenLDAP stand-in it
 # replaces, something to follow. It serves plaintext LDAP and has a default password on
 # everything, and belongs nowhere near a network you care about.
-FROM debian:trixie-slim
+FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f
 
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \

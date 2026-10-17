@@ -1,5 +1,6 @@
 package com.winllc.certalert.audit;
 
+import com.winllc.certalert.observability.EnsMetrics;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -7,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 /**
@@ -18,10 +20,12 @@ import org.springframework.stereotype.Component;
 public class JobAudit {
 
     private final AuditLog audit;
+    private final ObjectProvider<EnsMetrics> metrics;
     private final Clock clock;
 
-    public JobAudit(AuditLog audit, Clock clock) {
+    public JobAudit(AuditLog audit, ObjectProvider<EnsMetrics> metrics, Clock clock) {
         this.audit = audit;
+        this.metrics = metrics;
         this.clock = clock;
     }
 
@@ -76,6 +80,10 @@ public class JobAudit {
     }
 
     public void completed(String job, Instant started, boolean manual, Map<String, ?> counts) {
+        EnsMetrics counting = metrics.getIfAvailable();
+        if (counting != null) {
+            counting.jobSucceeded(job, Instant.now(clock));
+        }
         AuditRecord event = AuditRecord.of(AuditRecord.Category.SYSTEM, "job.completed")
                 .detail("job", job)
                 .detail("trigger", manual ? "manual" : "schedule")

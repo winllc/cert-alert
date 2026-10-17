@@ -140,6 +140,28 @@ check_env() {
     fi
 }
 
+warn_if_exposed() {
+    # Plain HTTP on every interface sends passwords and session cookies across the network
+    # in clear text. Allowed - a lab, or a firewall in front - but never silently.
+    [ "$(env_value CERT_ALERT_TLS_ENABLED)" = "true" ] && return 0
+    local bind port
+    bind=$(env_value CERT_ALERT_BIND_ADDRESS); bind=${bind:-0.0.0.0}
+    port=$(env_value CERT_ALERT_PORT); port=${port:-8080}
+    case "$bind" in
+        0.0.0.0|::|'[::]'|'*') ;;
+        *) return 0 ;;
+    esac
+    say "" >&2
+    say "WARNING: TLS is off (CERT_ALERT_TLS_ENABLED is not true) and cert-alert is published on" >&2
+    say "         every interface (CERT_ALERT_BIND_ADDRESS=$bind, port $port). Directory passwords" >&2
+    say "         and session cookies will cross the network in clear text. Either:" >&2
+    say "           - put a TLS-terminating reverse proxy in front and set" >&2
+    say "             CERT_ALERT_BIND_ADDRESS=127.0.0.1, SERVER_FORWARD_HEADERS_STRATEGY=framework" >&2
+    say "             and ENS_COOKIE_SECURE=true; or" >&2
+    say "           - turn TLS on in the application (CERT_ALERT_TLS_ENABLED=true, keystores in tls/)." >&2
+    say "" >&2
+}
+
 check_license() {
     if [ -f license/license.lic ]; then
         say "License: license/license.lic found; it is installed once cert-alert has started."
@@ -274,6 +296,7 @@ if [ "$MODE" = install ]; then
     fi
     say "Using the existing .env (not overwritten)."
     check_env
+    warn_if_exposed
     check_license
     load_images
     start
@@ -283,6 +306,7 @@ else
     make_directories
     newer_settings
     check_env
+    warn_if_exposed
     check_license
     load_images
     backup_database

@@ -21,6 +21,15 @@ helm install cert-alert oci://ghcr.io/winllc/charts/cert-alert --version X.Y.Z \
 It is also in each release download as `cert-alert-X.Y.Z.tgz`, covered by `SHA256SUMS` and its
 signature (see the Releases page of the docs): `helm install cert-alert ./cert-alert-X.Y.Z.tgz ...`.
 
+The chart and the image are signed with cosign (keyless, by the release workflow). Check either
+by digest before installing:
+
+```bash
+cosign verify ghcr.io/winllc/charts/cert-alert@<digest> \
+  --certificate-identity-regexp 'https://github.com/winllc/cert-alert/.github/workflows/.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
 What you must set: `ldap.url`, `ldap.base`, and either `database.host` (an external PostgreSQL)
 or `database.embedded.enabled=true` (evaluation only). Set `security.adminIdentifiers` too, or
 nobody can reach the license screen or run the first sync.
@@ -113,6 +122,17 @@ The license screen shows the installation id; after the first sign-in it is also
 | `caTruststore.existingSecret` | `""` | `JAVA_OPTS` | Trust store for a private-CA `ldaps://` directory, SMTP or Splunk |
 | `caTruststore.key` / `.type` | `ca-truststore.p12` / `PKCS12` | | |
 | `caTruststore.password` | `""` | | Or `passwordExistingSecret` + `passwordExistingSecretKey` (`ca-truststore-password`) |
+| `x509.source` | `servlet` | `ENS_X509_SOURCE` | `servlet`: from the pod's TLS handshake. `header`: forwarded by a TLS-terminating ingress |
+| `x509.header` | `""` (`X-SSL-Client-Cert`) | `ENS_X509_HEADER` | ingress-nginx sends `ssl-client-cert` |
+| `x509.trustedProxies` | private ranges | `ENS_X509_TRUSTED_PROXIES` | Where the header is accepted from: the ingress controller's pods |
+| `x509.proxySecret.existingSecret` / `.existingSecretKey` / `.value` | `""` / `proxy-secret` / `""` | `ENS_X509_PROXY_SECRET_FILE` | The secret the proxy sends in `X-ENS-Proxy-Secret`, 32+ characters. Required in header mode |
+| `x509.trustedCa.existingSecret` / `.existingSecretKey` / `.value` | `""` / `ca.pem` / `""` | `ENS_X509_TRUSTED_CA_FILE` | PEM CAs a forwarded certificate must chain to. Required in header mode |
+| `x509.revocation` | `off` | `ENS_X509_REVOCATION` | `off`, `ocsp`, `crl`, `ocsp-then-crl`: checked live at sign-in |
+| `x509.ocspResponderUrl` / `.revocationFail` / `.revocationCache` | `""` / `closed` / `""` | `ENS_X509_OCSP_RESPONDER_URL` / `_REVOCATION_FAIL` / `_REVOCATION_CACHE` | |
+| `x509.allowedIssuers` | `""` | `ENS_X509_ALLOWED_ISSUERS` | Issuer DNs separated by `;` |
+| `x509.userFilter` | `""` | `ENS_X509_USER_FILTER` | e.g. `(uid={edipi})`, with `CERT_ALERT_SECURITY_X509_REQUIRE_KNOWN_CERTIFICATE=false` in `extraEnv` |
+
+The chart refuses to render `x509.source=header` without a proxy secret and a CA.
 
 ### Database
 
@@ -178,6 +198,16 @@ A release without audit logging ignores these variables.
 | `extraEnv` | `[]` | More environment variables; any documented setting works as its variable |
 | `extraEnvFrom` | `[]` | e.g. `[{secretRef: {name: cert-alert-extra}}]` |
 | `extraVolumes`, `extraVolumeMounts` | `[]` | |
+
+### Metrics and logs
+
+| Value | Default | Environment | Description |
+|---|---|---|---|
+| `metrics.enabled` | `true` | `MANAGEMENT_SERVER_PORT` | The actuator on its own port (plain HTTP), with health and `/actuator/prometheus` open there; the probes use it and the Service gets a `metrics` port. The ingress and route never route to it |
+| `metrics.port` | `9090` | | |
+| `metrics.serviceMonitor.enabled` | `false` | | Renders a `monitoring.coreos.com/v1` ServiceMonitor; `.interval`, `.scrapeTimeout`, `.labels` |
+| `metrics.allowFrom` | `[]` | | With `networkPolicy.enabled`, the peers admitted to the metrics port |
+| `logFormat` | `json` | `LOGGING_STRUCTURED_FORMAT_CONSOLE` | `json` (ECS) or `text` |
 
 ### Networking
 
@@ -273,9 +303,9 @@ directory password.
 
 ### X.509 client-certificate sign-in (TLS passthrough)
 
-CertAlert reads the client certificate from its own TLS handshake. It does not accept a
-certificate forwarded in a header by a proxy, so certificate sign-in needs TLS passed through
-to the pod. Edge termination is not an option for certificate sign-in.
+With `x509.source: servlet` (the default) CertAlert reads the client certificate from its own
+TLS handshake, so certificate sign-in needs TLS passed through to the pod. For edge
+termination at the ingress, see header mode below.
 
 ```bash
 kubectl create secret generic cert-alert-tls-stores \
@@ -329,6 +359,39 @@ route:
 
 The key store's certificate must be issued for the name users browse to. Client
 authentication is `want`, so a browser without a certificate still reaches the password form.
+
+### X.509 client-certificate sign-in (TLS at the ingress, header mode)
+
+The ingress controller terminates TLS, verifies the client certificate and forwards it in a
+header together with a shared secret; CertAlert believes it only from `x509.trustedProxies`,
+with the secret, and when it chains to `x509.trustedCa`. See `ci/header-x509-values.yaml`.
+
+```bash
+kubectl create secret generic cert-alert-x509-proxy --from-literal=proxy-secret="$(openssl rand -hex 32)"
+kubectl create secret generic dod-cas --from-file=ca.pem=dod-roots-and-intermediates.pem
+```
+
+```yaml
+x509:
+  source: header
+  header: ssl-client-cert
+  trustedProxies: "10.42.0.0/16"          # the ingress controller's pods
+  proxySecret: {existingSecret: cert-alert-x509-proxy}
+  trustedCa: {existingSecret: dod-cas}
+  revocation: ocsp-then-crl
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/auth-tls-secret: ingress-nginx/dod-cas
+    nginx.ingress.kubernetes.io/auth-tls-verify-client: "optional"
+    nginx.ingress.kubernetes.io/auth-tls-pass-certificate-to-upstream: "true"
+```
+
+The controller must also send `X-ENS-Proxy-Secret` with the secret's value - with
+ingress-nginx, `proxy_set_header X-ENS-Proxy-Secret "<secret>";` in a configuration snippet
+(where snippets are allowed) or the controller's `proxy-set-headers` ConfigMap. Use
+`networkPolicy` so only the controller reaches the pod.
 
 ### OpenShift
 

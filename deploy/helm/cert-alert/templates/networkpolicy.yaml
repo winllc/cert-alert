@@ -20,6 +20,14 @@ spec:
       from:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+    {{- if and .Values.metrics.enabled .Values.metrics.allowFrom }}
+    # The metrics port, from Prometheus only.
+    - ports:
+        - port: {{ .Values.metrics.port }}
+          protocol: TCP
+      from:
+        {{- toYaml .Values.metrics.allowFrom | nindent 8 }}
+    {{- end }}
   egress:
     {{- if $np.egress.allowAll }}
     - {}

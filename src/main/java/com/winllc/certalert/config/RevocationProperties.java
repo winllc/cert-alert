@@ -1,6 +1,8 @@
 package com.winllc.certalert.config;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
@@ -83,8 +85,33 @@ public class RevocationProperties {
     /** How long a fetched CRL is reused before being fetched again, at the most. */
     private Duration crlCacheTtl = Duration.ofHours(6);
 
-    /** A CRL larger than this is refused rather than read into memory. */
+    /**
+     * A CRL larger than this is refused. The download is counted as it arrives and dropped
+     * the moment it passes this, so a list - or something posing as one - cannot fill the
+     * heap before anything gets to look at its size.
+     */
     private int maxCrlBytes = 16 * 1024 * 1024;
+
+    /**
+     * The longest one download may take, start to finish, redirects included. The connect
+     * and read timeouts bound each wait; this bounds the whole, so a server that answers
+     * one byte at a time just inside the read timeout cannot hold a worker for an hour.
+     */
+    private Duration maxFetchTime = Duration.ofSeconds(60);
+
+    /**
+     * Where revocation data may be fetched from, when set: host names ({@code
+     * crl.example.gov}), a domain and everything under it ({@code *.example.gov}), or
+     * addresses and ranges ({@code 10.20.0.0/16}). Empty means anywhere the certificates
+     * name, apart from the addresses that are never fetched from whatever this says.
+     *
+     * <p>Those are link-local and cloud metadata addresses (169.254.0.0/16, fe80::/10,
+     * fd00:ec2::254), which a certificate has no business sending this application to, and
+     * loopback - unless the host is named here, or is the host of a responder or list
+     * configured on this deployment, which is a decision somebody made rather than one a
+     * certificate made for them.
+     */
+    private List<String> allowedHosts = new ArrayList<>();
 
     /**
      * How many certificates to ask about at once.
@@ -166,6 +193,22 @@ public class RevocationProperties {
 
     public void setMaxCrlBytes(int maxCrlBytes) {
         this.maxCrlBytes = maxCrlBytes;
+    }
+
+    public Duration getMaxFetchTime() {
+        return maxFetchTime;
+    }
+
+    public void setMaxFetchTime(Duration maxFetchTime) {
+        this.maxFetchTime = maxFetchTime;
+    }
+
+    public List<String> getAllowedHosts() {
+        return allowedHosts;
+    }
+
+    public void setAllowedHosts(List<String> allowedHosts) {
+        this.allowedHosts = allowedHosts == null ? new ArrayList<>() : allowedHosts;
     }
 
     public int getWorkers() {

@@ -1,0 +1,43 @@
+# TLS terminated at ingress-nginx, which verifies the client certificate and forwards it in
+# ssl-client-cert with the proxy secret (ENS_X509_SOURCE=header), revocation checked at
+# sign-in, and a NetworkPolicy that admits only the ingress controller.
+ldap:
+  url: ldaps://directory.example.gov:636
+  base: dc=example,dc=gov
+database:
+  host: postgres.example.gov
+  params: sslmode=verify-full
+x509:
+  source: header
+  header: ssl-client-cert
+  trustedProxies: "10.42.0.0/16"
+  proxySecret:
+    existingSecret: cert-alert-x509-proxy
+  trustedCa:
+    existingSecret: dod-cas
+    existingSecretKey: dod-roots-and-intermediates.pem
+  revocation: ocsp-then-crl
+  allowedIssuers: "CN=DOD ID CA-70,OU=PKI,OU=DoD,O=U.S. Government,C=US"
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/auth-tls-secret: ingress-nginx/dod-cas
+    nginx.ingress.kubernetes.io/auth-tls-verify-client: "optional"
+    nginx.ingress.kubernetes.io/auth-tls-verify-depth: "3"
+    nginx.ingress.kubernetes.io/auth-tls-pass-certificate-to-upstream: "true"
+  hosts:
+    - host: cert-alert.example.gov
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: cert-alert-tls
+      hosts: [cert-alert.example.gov]
+networkPolicy:
+  enabled: true
+  ingress:
+    from:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: ingress-nginx

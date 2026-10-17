@@ -60,7 +60,9 @@ Two details from the spec shape the design:
 
 ## Licensing
 
-cert-alert needs an **ENS license** to run. Licenses are issued by the ENS licensing portal
+cert-alert is proprietary software of ENS Solutions ([`LICENSE`](LICENSE), SPDX
+`LicenseRef-ENS-Commercial`, as the image's and the chart's license labels say): its source being
+visible does not license it. It needs an **ENS license** to run. Licenses are issued by the ENS licensing portal
 (an evaluation, or the license issued against an order) in the portal's `ens-license/1`
 format, for the product id **`certalert`**, and are checked offline: the application
 verifies the Ed25519 signature against the ENS public key built into it
@@ -284,9 +286,15 @@ never moves.
 The branch name, which does. `latest`, only from the default branch. And on a `v*` tag, the
 version and its major.minor. Nothing is published from a pull request.
 
-What is published is the image that was tested, not a rebuild of it: the Dockerfile's base
-images default to floating tags, so building twice can pick up two different bases, and the
-one that answered the probe is the one that goes to the registry.
+What is published is the image that was tested, not a rebuild of it: the one that answered
+the probe and passed the vulnerability scan is the one that goes to the registry.
+
+**Every image is scanned** with Trivy (`--severity HIGH,CRITICAL --ignore-unfixed`), on every
+push and pull request, and a finding fails the build. Accepted risks are listed in
+`.trivyignore`, each with its reason and a date to look at it again. CodeQL analyses the Java
+and the page scripts on every push and weekly. Dependabot proposes updates weekly for the
+Gradle dependencies, the base images and the workflow actions — all of which are pinned, the
+images by digest and the actions by commit.
 
 Or build it yourself:
 
@@ -302,16 +310,10 @@ kilobytes and changes on every commit.
 It is built on **Red Hat's Universal Base Image** — `ubi9/openjdk-21` to build and
 `ubi9/openjdk-21-runtime` to run. UBI is freely redistributable and needs no subscription
 to pull or to run, and it is what a RHEL or OpenShift estate already has a patching story
-for, which inside an accredited network is worth more than a smaller image. Both tags are
-build arguments, so a real build pins them and a move to UBI 10 is an argument rather than
-an edit:
-
-```bash
-docker build \
-  --build-arg UBI_JDK_IMAGE=registry.access.redhat.com/ubi9/openjdk-21:1.23-1 \
-  --build-arg UBI_JRE_IMAGE=registry.access.redhat.com/ubi9/openjdk-21-runtime:1.23-1 \
-  -t cert-alert:latest .
-```
+for, which inside an accredited network is worth more than a smaller image. Both are
+pinned by digest on the `FROM` lines (the tag is kept to say which release), so a build is
+reproducible and patched bases arrive as Dependabot pull requests; moving to UBI 10 is an
+edit of those lines.
 
 It runs as the image's own uid 185 rather than a user of its own making, with everything
 owned by that uid and group 0 and the group given the owner's permissions — which is what
@@ -663,6 +665,148 @@ element and put what follows into the page as markup.
 One trade-off worth knowing: generated content is announced by screen readers but is not
 selectable text, so the marking cannot be copied out of the page.
 
+## FIPS 140-3
+
+CertAlert implements no cryptography of its own. Every hash, signature check, key exchange
+and cipher - TLS to the browser, the directory, the mail server, Splunk and syslog; the SHA-256
+fingerprints and audit chain; CRL and OCSP verification; the license's Ed25519 signature -
+goes through the Java platform's security providers (JCA/JSSE). FIPS 140-3 therefore comes
+from the platform: run the image, which is built on Red Hat's UBI 9 OpenJDK, on a RHEL host
+or OpenShift cluster booted in FIPS mode, where Red Hat's OpenJDK switches itself to the
+validated cryptographic modules (the `fips` security profile; see Red Hat's *Configuring
+OpenJDK on RHEL with FIPS*). The application needs no setting of its own for that.
+
+Not appropriate on a FIPS system, and off by default:
+
+- `ENS_AUDIT_SPLUNK_INSECURE=true` - skips TLS verification to Splunk (a warning is logged).
+- `cert-alert.revocation.allow-unverified-crl` (default `true`) - believes a CRL whose
+  signature could not be checked; set `false` and configure `issuer-directory`.
+- Plain `ldap://`, plain syslog (`udp`/`tcp`), and SMTP without `STARTTLS`.
+- `ENS_X509_REVOCATION_FAIL=open`, and `ENS_X509_REVOCATION=off` (the default).
+
+Notes: the server-endpoint probe deliberately trusts every chain, because it reads and reports
+certificates rather than relying on them. OCSP requests name the certificate by SHA-1 hashes,
+as RFC 6960 has them - a non-signature use of SHA-1 that FIPS 140-3 permits. Key and trust
+stores have to be in a format the FIPS-mode providers can open (in RHEL's FIPS mode, PKCS#12
+created with approved algorithms, or the NSS database).
+
+### FIPS test results for the license library
+
+*To be added:* the results of running the ENS license library's tests (Ed25519 verification)
+under the FIPS-mode providers.
+
+## Metrics, health and logs
+
+The ENS platform baseline:
+
+- **Prometheus** at `/actuator/prometheus`, **only on the management port**: set
+  `MANAGEMENT_SERVER_PORT` (e.g. `9090`, Spring Boot's own setting) and the actuator moves to
+  that port, where health and Prometheus are open without signing in — so never publish it
+  beyond your monitoring network. Unset (the default), Prometheus is not served at all, and the
+  application's port keeps the actuator exactly as before (`health` and `info` open, `metrics`
+  and `loggers` for administrators). `/livez` and `/readyz` stay on the application's port
+  either way. The Helm chart sets the port (`metrics.enabled`, default on, port `9090`) and
+  points its probes at it.
+- **Health**: `/actuator/health/liveness` is the process alone; `/actuator/health/readiness`
+  is the database and the audit log being writable (`auditLog`: the `ENS_AUDIT_FILE` output,
+  when set). The directory is deliberately not in readiness — everything is served from the
+  cache, and certificates sign in from it — add `ldap` with
+  `MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE=readinessState,db,auditLog,ldap` to make it
+  one. Details are shown only to administrators.
+- **Business metrics** (Prometheus names):
+
+| Metric | Type | |
+|---|---|---|
+| `ens_license_mode{mode}` | gauge | 1 for the current mode: `FULL`, `READ_ONLY`, `UNLICENSED` |
+| `ens_license_days_remaining` | gauge | Days until the license expires (or its grace ends); NaN for a perpetual one |
+| `ens_audit_events_total{category,outcome}` | counter | Events written to the audit trail |
+| `ens_audit_forward_failures_total{output}` | counter | Failed attempts to forward them (`splunk`, `syslog`) |
+| `ens_auth_attempts_total{method,outcome}` | counter | Sign-ins and refusals: `x509` (once per session) or `ldap`, `success` or `failure` |
+| `ens_certalert_certificates{status}` | gauge | Cached certificates by state: `none`, `valid`, `expiring_soon`, `expired` |
+| `ens_certalert_job_last_success_seconds{job}` | gauge | When each job last finished without failing (Unix time), since startup |
+| `ens_certalert_digest_truncated_total` | counter | Round-ups that stopped at `cert-alert.notifications.digest.scan-limit` |
+| `ens_certalert_revocation_unknown` | gauge | Cached certificates whose authority gave no revocation answer |
+| `ens_certalert_mail_outbox{state}` | gauge | Email `pending` in the outbox, and `failed` (given up on) |
+
+  The counts are read from the database at most once a minute.
+- **Logs**: `LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs` (Spring Boot's own setting) writes the
+  application log as one ECS JSON object per line. The Helm chart does so by default
+  (`logFormat: json`). The audit trail's stdout lines are raw `ens-audit/1` JSON either way.
+
+## Security headers, cookies and TLS
+
+The ENS platform baseline, the same in every ENS product:
+
+- **Content-Security-Policy** on every response: `default-src 'self'; script-src 'self';
+  style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:;
+  connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self';
+  object-src 'none'`. Scripts come from this application only: no page has an inline script
+  or an event-handler attribute, and a test keeps it that way. `ENS_CSP_REPORT_ONLY=true`
+  sends `Content-Security-Policy-Report-Only` instead — an escape hatch for a page the tests
+  missed, not a way to run.
+- `Strict-Transport-Security: max-age=31536000; includeSubDomains` on secure requests,
+  `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+  `Referrer-Policy: strict-origin-when-cross-origin` and
+  `Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()`.
+- **The session cookie** is `HttpOnly` and `SameSite=Lax`, and `Secure` on any request that
+  arrived over TLS. `ENS_COOKIE_SECURE=true` makes it `Secure` always, for a proxy that
+  terminates TLS without saying so.
+- **TLS 1.2 and 1.3 only** when the application terminates TLS itself
+  (`server.ssl.enabled-protocols`).
+- **Behind a proxy that terminates TLS**, set `SERVER_FORWARD_HEADERS_STRATEGY=framework` so
+  the application trusts its `X-Forwarded-*` headers: redirects stay on https, HSTS and the
+  `Secure` cookie follow the browser's request, and the audit trail records the client's
+  address rather than the proxy's. Only with a proxy in front that sets those headers itself.
+  The Helm chart sets it whenever its ingress or an edge or reencrypt Route terminates TLS.
+- **The release bundle** publishes on every interface by default, as it always has
+  (`CERT_ALERT_BIND_ADDRESS`, default `0.0.0.0`); with TLS off, `install.sh` now warns that
+  passwords and cookies would cross the network in clear text.
+- **PostgreSQL**: reach a database outside the bundle's internal network over TLS, with
+  `sslmode=verify-full` in the JDBC URL (the chart's `database.params`).
+
+## Session controls
+
+| Setting | Default | |
+|---|---|---|
+| `ENS_SESSION_IDLE_TIMEOUT` | `30m` | A session nobody has used for this long ends. `SERVER_SERVLET_SESSION_TIMEOUT` still works as the same setting, and wins if both are set |
+| `ENS_SESSION_ADMIN_IDLE_TIMEOUT` | same as idle | The same for an administrator's session (the STIG suggests `15m`) |
+| `ENS_SESSION_ABSOLUTE_TIMEOUT` | `12h` | A session ends this long after sign-in, however busy |
+| `ENS_SESSION_MAX_PER_USER` | `0` (no limit) | Sessions one person may hold at once. Signing in beyond it ends their **oldest** session - the earliest sign-in (the STIG suggests `3`) |
+
+Durations are Spring durations: `15m`, `12h`, `90s`. An ended session goes back to the
+sign-in page (`/login?expired`, which says so); an API call in one gets a 401. Each is
+audited as `auth.session-expired` with its reason — `idle`, `absolute` or `concurrent` — and
+the person and session it belonged to. A sign-out is `auth.logout`, not an expiry.
+
+The limits apply however somebody signed in. A client certificate is checked on every
+request rather than remembered by the session, so for its holder an ended session means a new
+one on the next request — and, with the consent banner on, agreeing to it again. The first
+signed-in request of every session also gives it a new id. The register of who holds which
+sessions is in memory, like the sessions themselves: one instance, as the chart requires.
+
+## Notice and consent banner
+
+The DoD notice-and-consent banner (DISA STIG), shown before sign-in. Off by default.
+
+| Setting | Default | |
+|---|---|---|
+| `ENS_CONSENT_BANNER_ENABLED` | `false` | Show the banner before sign-in |
+| `ENS_CONSENT_BANNER_TITLE` | `U.S. Government (USG) Information System (IS) Notice and Consent` | |
+| `ENS_CONSENT_BANNER_TEXT` | the standard DoD notice-and-consent text | Plain text: blank lines separate paragraphs, lines starting `- ` make a list. Shown as written, never as markup |
+| `ENS_CONSENT_BANNER_FILE` | — | Read the text from a file instead; wins over `_TEXT`. Read at startup, and a file that cannot be read stops the application starting |
+
+**Enforced on the server, not just shown.** While it is on, every request from a browser
+session that has not pressed **I agree** is sent to `/consent` — before any sign-in filter
+runs, so no sign-in of any kind succeeds first: not the form, not a client certificate. An
+API call (`/api/**`) gets a 401 instead. The agreement is kept in the session, so signing out
+shows the banner again before the next sign-in. It is audited as `auth.consent-acknowledged`
+(category `authentication`, success, with the client's address).
+
+Exempt, because they are not browser sessions or are what the banner is made of: `/consent`
+itself, `/css/**`, `/js/**`, `/img/**`, `/webjars/**`, `/favicon.ico`, `/error`, the health
+endpoints (`/actuator/health/**`, `/livez`, `/readyz`), `/actuator/prometheus` on the
+management port, and the SIEM pull API (`/api/audit/**`, bearer tokens).
+
 ## Signing in
 
 Two ways in, in order of preference.
@@ -699,9 +843,8 @@ was given. A certificate the [revocation check](#revocation) has found revoked, 
 validity dates do not cover the present moment, is refused even though the directory
 publishes it, and the refusal is recorded as a failed `auth.login` whose reason says which
 (`certificate revoked`, `certificate expired`, `certificate not yet valid`) with the
-certificate's fingerprint — at `alert` severity for a revoked one. A certificate whose
-revocation has not been checked, or could not be, still signs in; this is the cache's
-answer, not a live OCSP or CRL query at the handshake.
+certificate's fingerprint — at `alert` severity for a revoked one. That is the cache's
+answer; the live check at sign-in is below.
 
 Setting `cert-alert.security.x509.require-known-certificate: false` falls back to matching
 the `uid` and email address in the certificate's subject, and its `rfc822Name` alternative
@@ -709,6 +852,76 @@ names, against the uid and addresses the directory publishes for a person. That 
 name rather than a key, so it is off by default. The subject's common name is never
 matched — any authority in the truststore can issue a certificate to any name — and a
 certificate whose values name more than one person signs in nobody.
+
+A certificate is checked on every request it is presented with, not remembered by the
+session: removing it from the directory, or its authority revoking it, takes effect at once.
+
+#### CAC/PIV: revocation at sign-in, issuers, and mapping (ENS baseline)
+
+The same settings, with the same meanings, in every ENS product that signs in with
+certificates.
+
+| Setting | Default | |
+|---|---|---|
+| `ENS_X509_REVOCATION` | `off` | `off`, `ocsp`, `crl` or `ocsp-then-crl`: checked live, for every certificate presented, before it is matched to anybody |
+| `ENS_X509_OCSP_RESPONDER_URL` | — | Ask this responder instead of the one the certificate names — a local OCSP relay on an air-gapped network |
+| `ENS_X509_CRL_DIR` | — | A directory of CRL files (DER or PEM), re-read when they change. With it set, no distribution point is fetched over the network: the air-gapped option |
+| `ENS_X509_REVOCATION_FAIL` | `closed` | `closed`: when the status cannot be found, refuse. `open`: allow, and log a warning |
+| `ENS_X509_REVOCATION_CACHE` | `10m` | How long a good or revoked answer is reused, per issuer and serial number. No answer is reused for 30 seconds |
+| `ENS_X509_ALLOWED_ISSUERS` | — | Issuer DNs, separated by `;`. When set, a certificate from any other issuer is refused even if the trust store accepts it. Compared as names (RFC 4514), so spacing and case do not matter |
+| `ENS_X509_USER_FILTER` | — | An LDAP filter that finds the holder of a certificate the directory does not publish, with `{upn}`, `{edipi}`, `{email}` and `{uuid}` filled in — e.g. `(uid={edipi})`. Used instead of the uid/address matching above, and only with `require-known-certificate: false` |
+
+- **Revocation** needs the certificate's issuer: it is taken from the chain the browser
+  presented, `ENS_X509_TRUSTED_CA_FILE`, `cert-alert.revocation.issuer-directory` or the TLS
+  trust store, whichever has a certificate whose key verifies it. OCSP answers are checked
+  by the platform's path validator; a CRL counts only if it is signed by the issuer and not
+  past its next update. Fetches have 5 s to connect and 10 s to answer, follow redirects to
+  http and https only, and never go to link-local or metadata addresses
+  (`cert-alert.revocation.allowed-hosts` applies here too). A refusal is a failed
+  `auth.login` with reason `certificate revoked` or `revocation unknown`. **The default is
+  `off`, for upgrades** — and with certificate sign-in on and revocation off, a warning at
+  startup says the STIG requires it.
+- **`{upn}`** is the SAN otherName UserPrincipalName; **`{edipi}`** the digits of a
+  `1234567890@mil` UPN, or else the trailing number of a `LAST.FIRST.MI.1234567890` common
+  name; **`{email}`** the rfc822Name SAN, or else the subject's emailAddress; **`{uuid}`** the
+  `urn:uuid:` SAN URI (the PIV FASC-N UUID). Every value is LDAP-escaped where it is put in.
+  A filter naming a value the certificate does not carry is not searched with, and a search
+  that finds no entry or more than one — or one this application has not synced — signs
+  nobody in. Published-certificate fingerprint matching stays the first and preferred way.
+- **An issuer not on the allowlist** is refused with reason `issuer not allowed`.
+
+#### Behind a TLS-terminating proxy (header mode)
+
+By default (`ENS_X509_SOURCE=servlet`) a certificate is read from the TLS handshake the
+application terminates itself. With `ENS_X509_SOURCE=header`, a proxy in front terminates
+TLS, verifies the client certificate, and forwards it:
+
+| Setting | Default | |
+|---|---|---|
+| `ENS_X509_SOURCE` | `servlet` | `servlet` or `header` |
+| `ENS_X509_HEADER` | `X-SSL-Client-Cert` | The header, URL-encoded PEM as nginx's `$ssl_client_escaped_cert` sends it (ingress-nginx: `ssl-client-cert`) |
+| `ENS_X509_TRUSTED_PROXIES` | `127.0.0.1/32,::1/128` | Addresses (CIDRs) the header is accepted from: the proxy's |
+| `ENS_X509_PROXY_SECRET_FILE` / `ENS_X509_PROXY_SECRET` | — | At least 32 characters, which the proxy sends in `X-ENS-Proxy-Secret`; compared in constant time. The file wins |
+| `ENS_X509_TRUSTED_CA_FILE` | — | PEM certificates of the CAs a forwarded certificate must chain to |
+
+The header is believed only when the connection itself comes from a trusted proxy address
+(never an address a forwarded-for header claims) **and** carries the secret, and the
+certificate then chains to a CA in the file, is in date and is not restricted to some use
+other than client authentication. Anything else is refused and recorded as a failed
+`auth.login` (`certificate header not from a trusted proxy`, `certificate not trusted`). In
+header mode a certificate from the application's own TLS handshake is ignored. **The
+application refuses to start** in header mode without a secret of 32 characters or more,
+without the CA file, or with `SERVER_FORWARD_HEADERS_STRATEGY=native` (use `framework`).
+
+The proxy must set both headers itself and drop any copy a client sends. With nginx:
+
+```nginx
+ssl_verify_client optional;              # or on
+ssl_client_certificate /etc/nginx/dod-cas.pem;
+proxy_set_header X-SSL-Client-Cert  $ssl_client_escaped_cert;
+proxy_set_header X-ENS-Proxy-Secret "<the secret>";
+proxy_set_header X-Forwarded-Proto  $scheme;
+```
 
 ### A directory password
 
@@ -1339,9 +1552,9 @@ distribution points reads the directory no more than it did before.
 All of that is waiting, so it is done several at a time — `cert-alert.revocation.workers`,
 eight by default. Asked one after another at a few hundred milliseconds a round trip, a
 directory of any size does not finish overnight, and against a responder that has stopped
-answering each certificate waits out the timeout before the next one begins. That timeout is
-the platform's fifteen seconds unless told otherwise, so it is set from `read-timeout` at
-startup; an operator who passes `-Dcom.sun.security.ocsp.timeout` keeps theirs.
+answering each certificate waits out the timeout before the next one begins. Responders are
+asked with the same `connect-timeout` and `read-timeout` as the lists, through the same
+client; the platform's own OCSP client, and its process-wide timeout property, are not used.
 
 Only the asking happens off the job's own thread. Recording what came back, telling people
 and writing the audit trail all happen in order on the thread that owns the transaction, and
@@ -1410,6 +1623,26 @@ Where a certificate names neither and neither is configured, the result says so.
 certificate by, or the entry could not be read back — the result says which piece was
 missing, rather than reporting that the certificate names nowhere to ask. A deployment that
 configured a responder is owed the difference.
+
+**What a certificate can make this application fetch.** Every distribution point and
+responder address comes out of a certificate, and a certificate is something somebody else
+wrote — so every download is held to limits, and to a list of places it may not go:
+
+| Setting | Default | |
+|---|---|---|
+| `cert-alert.revocation.max-crl-bytes` | `16777216` | A list over this is dropped as it downloads — counted as it arrives, never read whole and measured afterwards. A list in a directory is held to it by the largest message the connection accepts |
+| `cert-alert.revocation.connect-timeout` / `read-timeout` | `10s` / `30s` | Each wait |
+| `cert-alert.revocation.max-fetch-time` | `60s` | The whole of one download, redirects included, so a server answering a byte at a time cannot hold a worker |
+| `cert-alert.revocation.allowed-hosts` (`CERT_ALERT_REVOCATION_ALLOWED_HOSTS`) | empty | When set, the only hosts fetched from: names, `*.example.gov` for a domain and everything under it, or addresses and ranges such as `10.20.0.0/16` |
+
+Whatever is configured, **link-local and cloud metadata addresses are never fetched from**
+(169.254.0.0/16 — which includes 169.254.169.254 — fe80::/10, fd00:ec2::254, 100.100.100.200,
+0.0.0.0/8), and **loopback only when its host is named in `allowed-hosts`**. The hosts of
+`default-ocsp-url` and `default-crl-url` are always allowed, loopback included: they are a
+decision somebody made, not one a certificate made for them. A redirect is followed — at most
+three — only to http or https, and every hop is checked the same way; an OCSP request, which
+is a POST, follows none. A refused address is logged as a warning naming the certificate's
+URL and counts as *Unknown*, never as an answer.
 
 ```
 GET  /api/v1/revocation        the counts, and whether OCSP is possible here
@@ -1739,6 +1972,27 @@ question of its own.
 
 An entry whose certificates have *all* lapsed is the case that most needs telling, and it
 still is: with nothing standing, nothing has been replaced.
+
+#### When the mail server is down
+
+Nothing is sent from inside a database transaction. A round-up's messages, and the alert
+channel's, are written to an outbox table (`outbound_email`) in the same transaction as the
+notifications or the sweep that produced them, and sent once that has committed — the
+round-up straight away, so the page can say what went; an alert by a background thread a
+moment later. A mail server that is slow therefore holds no transaction open, and one that is
+down loses nothing:
+
+- a message that cannot be sent stays queued and is tried again a minute later, then two,
+  four and so on up to an hour apart (`cert-alert.mail.outbox.retry-initial` / `retry-max`),
+  each failure logged as a warning with the mail server's reason;
+- a newer round-up to the same address replaces one still waiting, so a mail server that comes
+  back after a weekend delivers today's round-up rather than three;
+- after three days (`give-up-after`) a message is given up on, with an error in the log;
+- a notification is marked emailed when its message actually goes, not when it is queued.
+
+A round-up run while the mail server is down says so on the notifications page — "could not
+be sent and are queued to try again", with the reason — rather than reporting them as sent.
+An alert is recorded as `alert.sent` once it is safely queued.
 
 #### A dry run
 
@@ -2361,6 +2615,31 @@ Scraping, under `cert-alert.ldap`:
 | `changelog.full-sync-on-gap` | `true` | Sweep when the changelog has been trimmed past the cursor |
 | `user.*`, `server.*` | FSD names | Search base, filter, and attribute names      |
 
+Waiting on the directory and the mail server. Without these, a directory or mail server that
+accepts a connection and then says nothing holds whatever was talking to it for good:
+
+| Environment variable | Default | Purpose |
+|---|---|---|
+| `CERT_ALERT_LDAP_CONNECT_TIMEOUT_MS` | `10000` | Reaching the directory (every connection: the sweeps, the changelog, sign-in) |
+| `CERT_ALERT_LDAP_READ_TIMEOUT_MS` | `60000` | Each answer from it - one page of a sweep, one bind. Raise it for a directory that takes longer than a minute to return one page |
+| `CERT_ALERT_MAIL_CONNECT_TIMEOUT_MS` | `30000` | Reaching the mail server (`mail.smtp.connectiontimeout`, and `smtps`) |
+| `CERT_ALERT_MAIL_READ_TIMEOUT_MS` | `30000` | Each answer from it (`mail.smtp.timeout`) |
+| `CERT_ALERT_MAIL_WRITE_TIMEOUT_MS` | `30000` | Each write to it (`mail.smtp.writetimeout`) |
+
+They are `spring.ldap.base-environment` and `spring.mail.properties` entries, so either map can
+also be set directly.
+
+Email that cannot be sent yet, under `cert-alert.mail.outbox` (see [When the mail server is
+down](#when-the-mail-server-is-down)):
+
+| Property | Default | Purpose |
+|---|---|---|
+| `poll-interval` | `30s` | How often waiting mail is looked at |
+| `retry-initial` | `1m` | Wait after the first failure; it doubles after each one after |
+| `retry-max` | `1h` | Longest wait between two attempts |
+| `give-up-after` | `3d` | How long a message keeps being tried before it is given up on and an error logged |
+| `keep` | `7d` | How long sent, given-up and replaced messages stay in the table |
+
 What counts as one issuance, under `cert-alert.credentials`:
 
 | Property      | Default | Purpose                                                     |
@@ -2377,9 +2656,11 @@ Revocation, under `cert-alert.revocation`:
 | `default-ocsp-url`     | unset               | Responder to ask about a certificate that names none; the certificate's own always wins |
 | `allow-unverified-crl` | `true`              | Believe a CRL whose signature could not be checked |
 | `crl-cache-ttl`        | `6h`                | Ceiling on how long a fetched list is reused |
-| `max-crl-bytes`        | `16777216`          | A larger list is refused rather than read    |
-| `connect-timeout`      | `10s`               | Reaching a distribution point                |
-| `read-timeout`         | `30s`               | Downloading from one                         |
+| `max-crl-bytes`        | `16777216`          | A larger list is dropped as it downloads     |
+| `connect-timeout`      | `10s`               | Reaching a distribution point or responder   |
+| `read-timeout`         | `30s`               | Each wait for one to answer                  |
+| `max-fetch-time`       | `60s`               | The whole of one download, redirects included |
+| `allowed-hosts`        | empty (anywhere)    | The only hosts lists and responders are fetched from, when set: names, `*.domain`, addresses or ranges. Link-local and metadata addresses never; loopback only when named |
 
 The endpoint probe, under `cert-alert.probe`:
 
@@ -2509,6 +2790,28 @@ gpg --verify SHA256SUMS.asc SHA256SUMS       # and SHA256SUMS is the one ENS sig
 then `tar xzf cert-alert-<version>.tar.gz` and follow the `README.md` inside: `./install.sh`
 for a first install, `./upgrade.sh --from ../cert-alert-<old version>` to move to a new one.
 Or install `cert-alert-<version>.tgz` with Helm (see `deploy/helm/cert-alert/README.md`).
+
+**Signed images and charts.** On a release tag the image and the Helm chart are signed with
+cosign, keylessly - the signature is a certificate naming this repository's workflow, issued
+through GitHub's OIDC, with no key to keep - always by digest, and the image's SPDX SBOM is
+attached to it as an attestation. The job summary prints the digests. To check them:
+
+```bash
+cosign verify ghcr.io/winllc/cert-alert@<digest> \
+  --certificate-identity-regexp 'https://github.com/winllc/cert-alert/.github/workflows/.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+cosign verify-attestation --type spdxjson ghcr.io/winllc/cert-alert@<digest> \
+  --certificate-identity-regexp 'https://github.com/winllc/cert-alert/.github/workflows/.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+cosign verify ghcr.io/winllc/charts/cert-alert@<digest> \
+  --certificate-identity-regexp 'https://github.com/winllc/cert-alert/.github/workflows/.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+`docker buildx imagetools inspect ghcr.io/winllc/cert-alert:<version>` gives the image's
+digest; `helm pull` prints the chart's.
 
 **The Helm chart** is checked on every push and pull request by the `helm` job:
 `helm lint --strict` and `helm template` with each `deploy/helm/cert-alert/ci/*.yaml`, the

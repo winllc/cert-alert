@@ -1,5 +1,6 @@
 {{- if .Values.tests.enabled }}
-# `helm test <release>`: the liveness endpoint answers through the Service. Runs the
+# `helm test <release>`: the liveness endpoint (/livez, on the application's port whether or
+# not the actuator has a port of its own) answers through the Service. Runs the
 # application image, which carries curl, so no other image is needed on an air-gapped site.
 apiVersion: v1
 kind: Pod
@@ -41,7 +42,7 @@ spec:
         - --retry-delay
         - "3"
         - --retry-all-errors
-        - {{ printf "%s://%s:%v/actuator/health/liveness" (include "cert-alert.scheme" .) (include "cert-alert.fullname" .) .Values.service.port }}
+        - {{ printf "%s://%s:%v/livez" (include "cert-alert.scheme" .) (include "cert-alert.fullname" .) .Values.service.port }}
       securityContext:
         {{- include "cert-alert.securityContext" (dict "ctx" .Values.containerSecurityContext "root" .) | nindent 8 }}
       resources:

@@ -281,8 +281,10 @@ class RevocationCheckerTest {
 
     private RevocationChecker checker(Path issuers) {
         properties.setIssuerDirectory(issuers == null ? null : issuers.toString());
+        // The publisher is on loopback, which is only fetched from when named.
+        FetchPolicy policy = FetchPolicy.of(java.util.List.of("localhost", "127.0.0.1"));
         return new RevocationChecker(
-                new CrlStore(properties), new IssuerCertificates(properties), properties);
+                new CrlStore(properties, policy), new IssuerCertificates(properties), properties);
     }
 
     private Path issuerDirectory() throws IOException {

@@ -68,7 +68,7 @@ public class LicensingConfiguration implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(new LicenseInterceptor(licensing.getObject()))
                 .excludePathPatterns(
-                        "/login", "/logout", "/error", "/error/**",
+                        "/login", "/logout", "/consent", "/error", "/error/**",
                         LICENSE_SCREEN, LICENSE_SCREEN + "/**", UNLICENSED_PAGE, "/api/v1/license",
                         "/css/**", "/js/**", "/img/**", "/webjars/**", "/favicon.ico",
                         "/actuator/**")

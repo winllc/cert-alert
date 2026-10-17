@@ -1,0 +1,14 @@
+Copyright (c) ENS Solutions. All rights reserved.
+
+CertAlert is proprietary software of ENS Solutions. It is not open source, and no licence
+to use, copy, modify or distribute it is granted by its source code being publicly visible.
+
+Running CertAlert, in any form - the source, the container image, the release bundle or the
+Helm chart - requires a license issued by ENS Solutions, and is subject to the terms that
+license is issued under. To obtain a license, an evaluation license, or the terms, contact
+ENS Solutions.
+
+Third-party components included in CertAlert remain under their own licences, which are
+listed in the software bill of materials (SBOM) published with each release.
+
+SPDX-License-Identifier: LicenseRef-ENS-Commercial

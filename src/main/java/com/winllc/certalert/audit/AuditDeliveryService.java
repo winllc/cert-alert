@@ -1,5 +1,6 @@
 package com.winllc.certalert.audit;
 
+import com.winllc.certalert.observability.EnsMetrics;
 import com.winllc.certalert.repository.AuditDeliveryRepository;
 import java.time.Clock;
 import java.time.Duration;
@@ -11,6 +12,7 @@ import java.util.Map;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -41,6 +43,7 @@ public class AuditDeliveryService implements SmartLifecycle {
     private final AuditLog audit;
     private final AuditSinks sinks;
     private final TransactionTemplate transaction;
+    private final ObjectProvider<EnsMetrics> metrics;
     private final Clock clock;
 
     private final Map<String, AuditForwarder> forwarders = new LinkedHashMap<>();
@@ -55,6 +58,7 @@ public class AuditDeliveryService implements SmartLifecycle {
             AuditLog audit,
             AuditSinks sinks,
             PlatformTransactionManager transactions,
+            ObjectProvider<EnsMetrics> metrics,
             Clock clock) {
         this.properties = properties;
         this.store = store;
@@ -63,6 +67,7 @@ public class AuditDeliveryService implements SmartLifecycle {
         this.sinks = sinks;
         this.transaction = new TransactionTemplate(transactions);
         this.transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        this.metrics = metrics;
         this.clock = clock;
         configure();
     }
@@ -190,6 +195,10 @@ public class AuditDeliveryService implements SmartLifecycle {
     }
 
     private void failed(String name, Exception error) {
+        EnsMetrics counting = metrics.getIfAvailable();
+        if (counting != null) {
+            counting.auditForwardFailure(name);
+        }
         String message = error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
         Instant now = Instant.now(clock);
         Optional<String> alert = Optional.ofNullable(transaction.execute(status -> {

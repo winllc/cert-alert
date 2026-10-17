@@ -100,8 +100,9 @@ services:
     healthcheck:
       # Liveness rather than the aggregate: the aggregate turns DOWN when the directory is
       # unreachable, which is not a reason to call a process serving cached data unhealthy.
+      # /livez, which stays on 8080 even when MANAGEMENT_SERVER_PORT moves the actuator.
       # Plain HTTP first, then HTTPS for when TLS is on (self-signed is fine for this).
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health/liveness || curl -fsSk https://localhost:8080/actuator/health/liveness"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/livez || curl -fsSk https://localhost:8080/livez"]
       interval: 30s
       timeout: 5s
       retries: 3

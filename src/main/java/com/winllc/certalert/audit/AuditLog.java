@@ -4,6 +4,7 @@ import com.enssolutions.license.LicenseManager;
 import com.winllc.certalert.domain.AuditAction;
 import com.winllc.certalert.domain.AuditEvent;
 import com.winllc.certalert.license.LicensingConfiguration;
+import com.winllc.certalert.observability.EnsMetrics;
 import com.winllc.certalert.service.AuditActors;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.LockModeType;
@@ -70,6 +71,7 @@ public class AuditLog {
     private final LicenseManager licenses;
     private final ObjectProvider<BuildProperties> build;
     private final ObjectProvider<AuditDeliveryService> delivery;
+    private final ObjectProvider<EnsMetrics> metrics;
     private final Clock clock;
 
     private volatile AuditFormat.Origin origin;
@@ -81,6 +83,7 @@ public class AuditLog {
             LicenseManager licenses,
             ObjectProvider<BuildProperties> build,
             ObjectProvider<AuditDeliveryService> delivery,
+            ObjectProvider<EnsMetrics> metrics,
             Clock clock) {
         this.joining = new TransactionTemplate(transactions);
         this.independent = new TransactionTemplate(transactions);
@@ -89,6 +92,7 @@ public class AuditLog {
         this.licenses = licenses;
         this.build = build;
         this.delivery = delivery;
+        this.metrics = metrics;
         this.clock = clock;
     }
 
@@ -204,7 +208,7 @@ public class AuditLog {
             entityManager.persist(row);
         }
         entityManager.flush();
-        return new Written(lines, head.getLastSeq(), chainedHistory);
+        return new Written(lines, head.getLastSeq(), chainedHistory, events);
     }
 
     private String append(AuditChainHead head, AuditRecord event, AuditEvent row, AuditFormat.Origin from) {
@@ -326,6 +330,10 @@ public class AuditLog {
         if (written.chainedHistory()) {
             historyChained = true;
         }
+        EnsMetrics counting = metrics.getIfAvailable();
+        if (counting != null) {
+            written.events().forEach(event -> counting.auditEvent(event.category().id(), event.outcome().id()));
+        }
         sinks.emit(written.lines(), written.lastSeq());
         AuditDeliveryService forwarders = delivery.getIfAvailable();
         if (forwarders != null && !written.lines().isEmpty()) {
@@ -345,7 +353,7 @@ public class AuditLog {
         }
     }
 
-    private record Written(List<String> lines, long lastSeq, boolean chainedHistory) {}
+    private record Written(List<String> lines, long lastSeq, boolean chainedHistory, List<AuditRecord> events) {}
 
     /** The events a transaction has recorded, written as it commits. */
     private static final class Pending implements TransactionSynchronization {

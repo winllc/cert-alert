@@ -126,6 +126,19 @@ openshift.enabled so the restricted SCC assigns them.
 {{- if .Values.tls.enabled }}https{{ else }}http{{ end }}
 {{- end }}
 
+{{/*
+Whether something in front terminates TLS and forwards the request: an ingress, unless the
+pod serves TLS itself (passthrough), or an edge or reencrypt Route. Then the application
+trusts X-Forwarded-* (SERVER_FORWARD_HEADERS_STRATEGY=framework), so it sees the browser's
+https request. Never with passthrough: nothing in front would rewrite a client's own
+X-Forwarded-For.
+*/}}
+{{- define "cert-alert.proxyTerminatesTls" -}}
+{{- if and .Values.ingress.enabled (not .Values.tls.enabled) -}}true
+{{- else if and .Values.route.enabled (has .Values.route.tls.termination (list "edge" "reencrypt")) -}}true
+{{- end -}}
+{{- end }}
+
 {{/* The database host the application connects to. */}}
 {{- define "cert-alert.db.host" -}}
 {{- if .Values.database.embedded.enabled -}}
@@ -212,6 +225,15 @@ not set at all. Takes (dict "root" $ "inline" <value> "existing" <secret name>
 {{- trim $opts -}}
 {{- end }}
 
+{{/* Whether the X.509 proxy secret / trusted CA come from somewhere. */}}
+{{- define "cert-alert.x509ProxySecretConfigured" -}}
+{{- if or .Values.x509.proxySecret.existingSecret .Values.x509.proxySecret.value }}true{{ end }}
+{{- end }}
+
+{{- define "cert-alert.x509CaConfigured" -}}
+{{- if or .Values.x509.trustedCa.existingSecret .Values.x509.trustedCa.value }}true{{ end }}
+{{- end }}
+
 {{/* Validation that cannot be expressed in the schema. */}}
 {{- define "cert-alert.validate" -}}
 {{- if gt (int .Values.replicaCount) 1 -}}
@@ -232,6 +254,17 @@ not set at all. Takes (dict "root" $ "inline" <value> "existing" <secret name>
 {{- end -}}
 {{- if and (eq $t "edge") .Values.tls.enabled -}}
 {{- fail "route.tls.termination=edge sends plain HTTP to a pod serving HTTPS (tls.enabled=true): use passthrough (client-certificate sign-in) or reencrypt." -}}
+{{- end -}}
+{{- end -}}
+{{- if eq .Values.x509.source "header" -}}
+{{- if not (include "cert-alert.x509ProxySecretConfigured" .) -}}
+{{- fail "x509.source=header needs x509.proxySecret.existingSecret (or .value): the secret, at least 32 characters, that the proxy sends in X-ENS-Proxy-Secret. A forwarded certificate is believed only with it." -}}
+{{- end -}}
+{{- if and .Values.x509.proxySecret.value (lt (len .Values.x509.proxySecret.value) 32) -}}
+{{- fail "x509.proxySecret.value must be at least 32 characters (e.g. openssl rand -hex 32)." -}}
+{{- end -}}
+{{- if not (include "cert-alert.x509CaConfigured" .) -}}
+{{- fail "x509.source=header needs x509.trustedCa.existingSecret (or .value): the CA certificates (PEM) a forwarded certificate must chain to." -}}
 {{- end -}}
 {{- end -}}
 {{- if and .Values.license.existingSecret .Values.license.file -}}

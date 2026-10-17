@@ -1,12 +1,17 @@
 package com.winllc.certalert.audit;
 
+import com.winllc.certalert.observability.EnsMetrics;
 import com.winllc.certalert.security.DirectoryPrincipal;
 import com.winllc.certalert.security.RefusedCertificateException;
+import com.winllc.certalert.security.SessionPolicy;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpSession;
 import java.util.Locale;
 import org.springframework.context.event.EventListener;
 import org.springframework.security.authentication.AccountStatusException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.InternalAuthenticationServiceException;
+import org.springframework.security.authentication.ProviderNotFoundException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.authentication.event.AbstractAuthenticationFailureEvent;
 import org.springframework.security.authentication.event.AuthenticationSuccessEvent;
@@ -31,6 +36,9 @@ import org.springframework.stereotype.Component;
  * request it makes until it gives up, so those failures are collapsed: one event per
  * certificate subject a minute, with a count, through {@link AccessDenials}' sibling below.
  *
+ * <p>A client certificate is checked on every request, but recorded as a sign-in once per
+ * session (see {@link #alreadySignedIn}).
+ *
  * <p>A certificate the directory does publish but that has been revoked, or is out of date,
  * is refused the same way and recorded with that as its reason and the certificate's
  * fingerprint. A revoked one is raised as an alert: somebody holds the key to a certificate
@@ -41,10 +49,22 @@ public class AuthenticationAudit {
 
     private final AuditLog audit;
     private final FailureCollapser certificateFailures;
+    private final org.springframework.beans.factory.ObjectProvider<EnsMetrics> metrics;
 
-    public AuthenticationAudit(AuditLog audit, java.time.Clock clock) {
+    public AuthenticationAudit(
+            AuditLog audit,
+            java.time.Clock clock,
+            org.springframework.beans.factory.ObjectProvider<EnsMetrics> metrics) {
         this.audit = audit;
         this.certificateFailures = new FailureCollapser(audit, clock);
+        this.metrics = metrics;
+    }
+
+    private void count(String method, boolean succeeded) {
+        EnsMetrics counting = metrics.getIfAvailable();
+        if (counting != null) {
+            counting.authAttempt(method, succeeded);
+        }
     }
 
     @EventListener
@@ -53,6 +73,10 @@ public class AuthenticationAudit {
         if (authentication != null && authentication.getName() != null) {
             failures.remove(authentication.getName().toLowerCase(Locale.ROOT));
         }
+        if (alreadySignedIn(authentication)) {
+            return;
+        }
+        count(methodOf(authentication), true);
         AuditRecord record = AuditRecord.of(AuditRecord.Category.AUTHENTICATION, "auth.login")
                 .actor(AuditContext.actorOf(authentication))
                 .detail("method", methodOf(authentication));
@@ -65,8 +89,15 @@ public class AuthenticationAudit {
 
     @EventListener
     public void failed(AbstractAuthenticationFailureEvent event) {
+        if (event.getException() instanceof ProviderNotFoundException) {
+            // The parent authentication manager saying it has no provider for a certificate,
+            // after this chain's own has already refused it - and published that, with the
+            // real reason. Recording it as well would make every refusal two.
+            return;
+        }
         Authentication attempt = event.getAuthentication();
         String method = methodOf(attempt);
+        count(method, false);
         String attempted = attempt == null ? null : attempt.getName();
         AuditRecord record = AuditRecord.of(AuditRecord.Category.AUTHENTICATION, "auth.login")
                 .outcome(AuditRecord.Outcome.FAILURE)
@@ -115,6 +146,28 @@ public class AuthenticationAudit {
             failures.clear();
         }
         return times.size();
+    }
+
+    /**
+     * A client certificate is checked afresh on every request it comes with - so revoking or
+     * unpublishing it takes effect at once - but only the first request of a session is a
+     * sign-in. The rest are the same person in the same session, already recorded.
+     */
+    static boolean alreadySignedIn(Authentication authentication) {
+        if (authentication == null || !"x509".equals(methodOf(authentication))) {
+            return false;
+        }
+        HttpServletRequest request = AuditContext.request();
+        HttpSession session = request == null ? null : request.getSession(false);
+        if (session == null) {
+            return false;
+        }
+        try {
+            return session.getAttribute(SessionPolicy.SIGNED_IN_AS) instanceof Authentication previous
+                    && java.util.Objects.equals(previous.getName(), authentication.getName());
+        } catch (IllegalStateException invalidated) {
+            return false;
+        }
     }
 
     @EventListener

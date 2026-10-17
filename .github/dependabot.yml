@@ -1,0 +1,38 @@
+# Weekly dependency updates. Minor and patch releases come grouped into one pull request per
+# ecosystem, so they arrive as one thing to review; a major version comes on its own.
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      gradle-minor-and-patch:
+        update-types: [minor, patch]
+
+  # The application image. Its base images are pinned by digest, which this keeps current.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      docker-minor-and-patch:
+        update-types: [minor, patch]
+
+  # The stand-in directory for local development (docker-compose.yml).
+  - package-ecosystem: docker
+    directory: /docker/389ds
+    schedule:
+      interval: weekly
+    groups:
+      docker-389ds-minor-and-patch:
+        update-types: [minor, patch]
+
+  # The workflows' actions, pinned by commit SHA with the version in a comment.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions-minor-and-patch:
+        update-types: [minor, patch]

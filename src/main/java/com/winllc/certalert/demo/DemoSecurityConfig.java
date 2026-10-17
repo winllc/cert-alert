@@ -19,6 +19,13 @@ import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.authentication.AuthenticationProvider;
 import com.winllc.certalert.license.Licensing;
+import com.winllc.certalert.observability.ManagementEndpoints;
+import com.winllc.certalert.security.ConsentBanner;
+import com.winllc.certalert.security.ConsentFilter;
+import com.winllc.certalert.security.EnsSecurityProperties;
+import com.winllc.certalert.security.SessionPolicy;
+import com.winllc.certalert.security.SessionPolicyFilter;
+import com.winllc.certalert.security.SecurityHeaders;
 import com.winllc.certalert.security.SignedInDirectoryUser;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.authorization.AuthorizationDecision;
@@ -26,6 +33,8 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
+import org.springframework.security.web.access.ExceptionTranslationFilter;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -63,7 +72,7 @@ public class DemoSecurityConfig {
 
     /** Served before anybody signs in - the sign-in page itself, and what it is made of. */
     private static final String[] PUBLIC_PATHS = {
-        "/login", "/css/**", "/js/**", "/img/**", "/webjars/**", "/favicon.ico", "/error"
+        "/login", ConsentFilter.PATH, "/css/**", "/js/**", "/img/**", "/webjars/**", "/favicon.ico", "/error"
     };
 
     /**
@@ -105,19 +114,29 @@ public class DemoSecurityConfig {
             List<AuthenticationProvider> authenticationProviders,
             ObjectMapper json,
             Licensing licensing,
-            AccessDenials denials)
+            AccessDenials denials,
+            EnsSecurityProperties ens,
+            ConsentBanner consentBanner,
+            SessionPolicy sessionPolicy,
+            org.springframework.core.env.Environment environment)
             throws Exception {
         log.warn("DEMO MODE: every account in this directory is published on the sign-in page with "
                 + "its password. Nothing can be changed, but everything the directory holds can be "
                 + "read by anyone who can reach this application.");
 
+        SecurityHeaders.apply(http, ens.getCsp().isReportOnly());
+        http.addFilterBefore(new ConsentFilter(consentBanner), UsernamePasswordAuthenticationFilter.class);
+        http.addFilterBefore(new SessionPolicyFilter(sessionPolicy), ExceptionTranslationFilter.class);
+
         http.authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(PUBLIC_PATHS)
                         .permitAll()
-                        .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info")
+                        .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info", "/livez", "/readyz")
                         .permitAll()
                         // The reads that are an administrator's, and the only place the
                         // roles differ once every write is refused anyway.
+                        .requestMatchers(ManagementEndpoints.prometheusScrape(environment))
+                        .permitAll()
                         .requestMatchers("/admin", "/api/v1/audit/summary", "/actuator/**")
                         .hasRole("ADMIN")
                         // The audit log page and its reads, and verifying the trail - which
@@ -154,7 +173,10 @@ public class DemoSecurityConfig {
                         .access((authentication, context) -> new AuthorizationDecision(
                                 signedIn(authentication.get()) && isRead(context.getRequest()))))
                 .formLogin(form -> form.loginPage("/login").permitAll())
-                .logout(logout -> logout.logoutSuccessUrl("/login?logout").permitAll())
+                .logout(logout -> logout
+                        .addLogoutHandler(sessionPolicy::loggingOut)
+                        .logoutSuccessUrl("/login?logout")
+                        .permitAll())
                 // A denial from the authorization filter never reaches the controller
                 // advice - it is translated further down the chain - so the wording has to
                 // be put on the response here.

@@ -6,16 +6,21 @@ import java.util.Map;
 import com.winllc.certalert.audit.AccessDenials;
 import com.winllc.certalert.audit.AuditingAccessDeniedHandler;
 import com.winllc.certalert.demo.DemoMode;
+import com.winllc.certalert.observability.ManagementEndpoints;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.authentication.AuthenticationEventPublisher;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.DefaultAuthenticationEventPublisher;
+import org.springframework.security.authentication.InternalAuthenticationServiceException;
 import org.springframework.security.authentication.event.AuthenticationFailureBadCredentialsEvent;
+import org.springframework.security.authentication.event.AuthenticationFailureServiceExceptionEvent;
 import org.springframework.security.authorization.AuthenticatedAuthorizationManager;
 import org.springframework.security.authorization.AuthorityAuthorizationManager;
 import org.springframework.security.authorization.AuthorizationManager;
@@ -24,10 +29,12 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.access.AccessDeniedHandlerImpl;
+import org.springframework.security.web.access.ExceptionTranslationFilter;
 import org.springframework.security.web.authentication.DelegatingAuthenticationEntryPoint;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
 import org.springframework.security.web.authentication.preauth.x509.SubjectX500PrincipalExtractor;
+import org.springframework.security.web.authentication.preauth.x509.X509AuthenticationFilter;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.access.intercept.RequestAuthorizationContext;
 import org.springframework.security.web.util.matcher.RequestMatcher;
@@ -59,8 +66,8 @@ public class SecurityConfig {
 
     private static final String[] PUBLIC_PATHS = {
         // The images among them: the sign-in page carries the logo, and nobody has signed
-        // in when it is served.
-        "/login", "/css/**", "/js/**", "/img/**", "/webjars/**", "/favicon.ico", "/error"
+        // in when it is served. The notice-and-consent banner comes before signing in too.
+        "/login", ConsentFilter.PATH, "/css/**", "/js/**", "/img/**", "/webjars/**", "/favicon.ico", "/error"
     };
 
     /** Administrators, or anyone signed in, depending on how the application is configured. */
@@ -76,15 +83,37 @@ public class SecurityConfig {
             SecurityProperties properties,
             X509DirectoryUserDetailsService x509UserDetailsService,
             List<AuthenticationProvider> authenticationProviders,
-            AccessDenials denials)
+            AccessDenials denials,
+            EnsSecurityProperties ens,
+            ConsentBanner consentBanner,
+            SessionPolicy sessionPolicy,
+            EnsX509Properties x509,
+            ForwardedCertificates forwardedCertificates,
+            AuthenticationEventPublisher authenticationEvents,
+            Environment environment)
             throws Exception {
+
+        SecurityHeaders.apply(http, ens.getCsp().isReportOnly());
+        // Ahead of every sign-in filter, so nothing signs anybody in before they have agreed.
+        http.addFilterBefore(new ConsentFilter(consentBanner), X509AuthenticationFilter.class);
+        // Then where the certificate comes from: the TLS handshake, or a trusted proxy's header.
+        http.addFilterBefore(
+                new ClientCertificateHeaderFilter(x509, forwardedCertificates, authenticationEvents),
+                X509AuthenticationFilter.class);
+        // After every sign-in filter, before anything is authorised: idle, absolute and
+        // concurrent limits, the same whichever way somebody signed in.
+        http.addFilterBefore(new SessionPolicyFilter(sessionPolicy), ExceptionTranslationFilter.class);
 
         http.authorizeHttpRequests(authorize -> authorize
                 .requestMatchers(PUBLIC_PATHS)
                 .permitAll()
                 // Liveness has to answer before anyone signs in; everything else the
                 // management endpoints expose is for administrators.
-                .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info")
+                .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info", "/livez", "/readyz")
+                .permitAll()
+                // Metrics, on the management port only, for the scraper - the port the
+                // ingress never publishes.
+                .requestMatchers(ManagementEndpoints.prometheusScrape(environment))
                 .permitAll()
                 .requestMatchers("/actuator/**")
                 .hasRole("ADMIN")
@@ -163,16 +192,21 @@ public class SecurityConfig {
                 .authenticated());
 
         if (properties.getX509().isEnabled()) {
-            http.x509(x509 -> x509
+            http.x509(certificates -> certificates
                     // Names the principal for logs; the real resolution is by fingerprint.
                     .x509PrincipalExtractor(new SubjectX500PrincipalExtractor())
+                    // Keeps the whole chain, which the revocation check needs for the issuer.
+                    .authenticationDetailsSource(ClientCertificateDetails::new)
                     .authenticationUserDetailsService(x509UserDetailsService));
         }
 
         authenticationProviders.forEach(http::authenticationProvider);
 
         http.formLogin(form -> form.loginPage("/login").permitAll())
-                .logout(logout -> logout.logoutSuccessUrl("/login?logout").permitAll())
+                .logout(logout -> logout
+                        .addLogoutHandler(sessionPolicy::loggingOut)
+                        .logoutSuccessUrl("/login?logout")
+                        .permitAll())
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(authenticationEntryPoint())
                         // Every 403 the chain answers is recorded as access.denied.
@@ -182,17 +216,19 @@ public class SecurityConfig {
     }
 
     /**
-     * Spring Boot's publisher, plus the one failure of ours it would otherwise not publish.
+     * Spring Boot's publisher, plus the failures it would otherwise not publish.
      *
      * <p>It maps exceptions to failure events by exact class, and has no event for one it
      * does not know - so a revoked or expired certificate being refused would leave no
-     * {@code auth.login} failure in the audit trail at all.
+     * {@code auth.login} failure in the audit trail at all, and neither would a password
+     * sign-in the directory could not be reached to check.
      */
     @Bean
     public DefaultAuthenticationEventPublisher authenticationEventPublisher(ApplicationEventPublisher publisher) {
         DefaultAuthenticationEventPublisher events = new DefaultAuthenticationEventPublisher(publisher);
-        events.setAdditionalExceptionMappings(
-                Map.of(RefusedCertificateException.class, AuthenticationFailureBadCredentialsEvent.class));
+        events.setAdditionalExceptionMappings(Map.of(
+                RefusedCertificateException.class, AuthenticationFailureBadCredentialsEvent.class,
+                InternalAuthenticationServiceException.class, AuthenticationFailureServiceExceptionEvent.class));
         return events;
     }
 
