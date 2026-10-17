@@ -1,0 +1,272 @@
+{{- $v := .Values -}}
+{{- $scheme := include "cert-alert.scheme" . | upper -}}
+{{- $secretEnv := list
+  (dict "env" "CERT_ALERT_DB_PASSWORD" "ref" (include "cert-alert.db.passwordRef" .))
+  (dict "env" "CERT_ALERT_LDAP_PASSWORD" "ref" (include "cert-alert.secretRef" (dict "root" . "inline" $v.ldap.bindPassword "existing" $v.ldap.existingSecret "existingKey" $v.ldap.existingSecretKey "key" "ldap-password")))
+  (dict "env" "SPRING_MAIL_PASSWORD" "ref" (include "cert-alert.secretRef" (dict "root" . "inline" $v.mail.password "existing" $v.mail.existingSecret "existingKey" $v.mail.existingSecretKey "key" "mail-password")))
+  (dict "env" "ENS_AUDIT_SPLUNK_TOKEN" "ref" (include "cert-alert.secretRef" (dict "root" . "inline" $v.audit.splunk.token "existing" $v.audit.splunk.existingSecret "existingKey" $v.audit.splunk.existingSecretKey "key" "splunk-hec-token")))
+-}}
+{{- if $v.tls.enabled -}}
+{{- $secretEnv = append $secretEnv (dict "env" "CERT_ALERT_KEYSTORE_PASSWORD" "ref" (include "cert-alert.secretRef" (dict "root" . "inline" $v.tls.keystore.password "existing" $v.tls.keystore.passwordExistingSecret "existingKey" $v.tls.keystore.passwordExistingSecretKey "key" "keystore-password"))) -}}
+{{- $secretEnv = append $secretEnv (dict "env" "CERT_ALERT_TRUSTSTORE_PASSWORD" "ref" (include "cert-alert.secretRef" (dict "root" . "inline" $v.tls.truststore.password "existing" $v.tls.truststore.passwordExistingSecret "existingKey" $v.tls.truststore.passwordExistingSecretKey "key" "truststore-password"))) -}}
+{{- end -}}
+{{- if $v.caTruststore.existingSecret -}}
+{{- $secretEnv = append $secretEnv (dict "env" "CA_TRUSTSTORE_PASSWORD" "ref" (include "cert-alert.secretRef" (dict "root" . "inline" $v.caTruststore.password "existing" $v.caTruststore.passwordExistingSecret "existingKey" $v.caTruststore.passwordExistingSecretKey "key" "ca-truststore-password"))) -}}
+{{- end -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "cert-alert.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cert-alert.labels" . | nindent 4 }}
+spec:
+  # See replicaCount in values.yaml: one replica only.
+  replicas: {{ $v.replicaCount }}
+  revisionHistoryLimit: {{ $v.revisionHistoryLimit }}
+  strategy:
+    {{- toYaml $v.strategy | nindent 4 }}
+  selector:
+    matchLabels:
+      {{- include "cert-alert.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        # Configuration changes roll the pod.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with $v.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "cert-alert.labels" . | nindent 8 }}
+        {{- with $v.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "cert-alert.serviceAccountName" . }}
+      automountServiceAccountToken: {{ $v.automountServiceAccountToken }}
+      {{- with $v.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $v.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ $v.terminationGracePeriodSeconds }}
+      securityContext:
+        {{- include "cert-alert.securityContext" (dict "ctx" $v.podSecurityContext "root" .) | nindent 8 }}
+      {{- if and (include "cert-alert.licenseSupplied" .) $v.persistence.license.enabled }}
+      initContainers:
+        # Installs the supplied license into the license volume only if none is there yet,
+        # as the release bundle's install.sh does: a license already installed - perhaps a
+        # newer one uploaded on the license screen - is never replaced by a helm upgrade.
+        # To replace it, upload the new file on the license screen (/admin/license).
+        - name: install-license
+          image: {{ include "cert-alert.licenseInitImage" . }}
+          imagePullPolicy: {{ ternary $v.license.initImage.pullPolicy $v.image.pullPolicy (ne $v.license.initImage.repository "") }}
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              dir=/var/lib/ens/certalert
+              mkdir -p "$dir"
+              if [ -s "$dir/license.lic" ]; then
+                echo "License: one is already installed in $dir; kept it (upload a new one on /admin/license)."
+              else
+                cp /license-source/license.lic "$dir/license.lic.tmp"
+                chmod 0664 "$dir/license.lic.tmp"
+                mv "$dir/license.lic.tmp" "$dir/license.lic"
+                echo "License: installed the supplied license into $dir."
+              fi
+          securityContext:
+            {{- include "cert-alert.securityContext" (dict "ctx" $v.containerSecurityContext "root" .) | nindent 12 }}
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          volumeMounts:
+            - name: license-state
+              mountPath: /var/lib/ens
+            - name: license-source
+              mountPath: /license-source
+              readOnly: true
+      {{- end }}
+      containers:
+        - name: cert-alert
+          image: {{ include "cert-alert.appImage" . }}
+          imagePullPolicy: {{ $v.image.pullPolicy }}
+          securityContext:
+            {{- include "cert-alert.securityContext" (dict "ctx" $v.containerSecurityContext "root" .) | nindent 12 }}
+          ports:
+            # Plain HTTP, or HTTPS with tls.enabled: the same port either way.
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "cert-alert.fullname" . }}
+            {{- with $v.extraEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          env:
+            {{- range $secretEnv }}
+            {{- if .ref }}
+            {{- $ref := fromJson .ref }}
+            - name: {{ .env }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $ref.name }}
+                  key: {{ $ref.key }}
+            {{- end }}
+            {{- end }}
+            # After CA_TRUSTSTORE_PASSWORD, which it may reference.
+            - name: JAVA_OPTS
+              value: {{ include "cert-alert.javaOpts" . | quote }}
+            {{- with $v.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if $v.startupProbe.enabled }}
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+              scheme: {{ $scheme }}
+            initialDelaySeconds: {{ $v.startupProbe.initialDelaySeconds }}
+            periodSeconds: {{ $v.startupProbe.periodSeconds }}
+            timeoutSeconds: {{ $v.startupProbe.timeoutSeconds }}
+            failureThreshold: {{ $v.startupProbe.failureThreshold }}
+          {{- end }}
+          {{- if $v.livenessProbe.enabled }}
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+              scheme: {{ $scheme }}
+            initialDelaySeconds: {{ $v.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ $v.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ $v.livenessProbe.timeoutSeconds }}
+            failureThreshold: {{ $v.livenessProbe.failureThreshold }}
+          {{- end }}
+          {{- if $v.readinessProbe.enabled }}
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+              scheme: {{ $scheme }}
+            initialDelaySeconds: {{ $v.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ $v.readinessProbe.periodSeconds }}
+            timeoutSeconds: {{ $v.readinessProbe.timeoutSeconds }}
+            failureThreshold: {{ $v.readinessProbe.failureThreshold }}
+          {{- end }}
+          resources:
+            {{- toYaml $v.resources | nindent 12 }}
+          volumeMounts:
+            # The read-only root filesystem's one writable scratch space (Tomcat, the JVM).
+            - name: tmp
+              mountPath: /tmp
+            - name: license-state
+              mountPath: /var/lib/ens
+            {{- if $v.audit.file.enabled }}
+            - name: audit-log
+              mountPath: /var/log/ens
+            {{- end }}
+            {{- if $v.tls.enabled }}
+            - name: tls-keystore
+              mountPath: /etc/cert-alert/tls/keystore
+              readOnly: true
+            - name: tls-truststore
+              mountPath: /etc/cert-alert/tls/truststore
+              readOnly: true
+            {{- end }}
+            {{- if $v.caTruststore.existingSecret }}
+            - name: ca-truststore
+              mountPath: /etc/cert-alert/ca
+              readOnly: true
+            {{- end }}
+            {{- if $v.notifications.email.templatesConfigMap }}
+            - name: email-templates
+              mountPath: /etc/cert-alert/templates/email
+              readOnly: true
+            {{- end }}
+            {{- with $v.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: license-state
+          {{- if $v.persistence.license.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "cert-alert.licenseClaimName" . }}
+          {{- else }}
+          # persistence.license.enabled=false: the license and installation id go with the
+          # pod. Evaluation only.
+          emptyDir: {}
+          {{- end }}
+        {{- if and (include "cert-alert.licenseSupplied" .) $v.persistence.license.enabled }}
+        - name: license-source
+          secret:
+            secretName: {{ include "cert-alert.licenseSecretName" . }}
+            items:
+              - key: {{ ternary $v.license.existingSecretKey "license.lic" (ne $v.license.existingSecret "") }}
+                path: license.lic
+        {{- end }}
+        {{- if $v.audit.file.enabled }}
+        - name: audit-log
+          {{- if $v.audit.file.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "cert-alert.auditClaimName" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- end }}
+        {{- if $v.tls.enabled }}
+        - name: tls-keystore
+          secret:
+            secretName: {{ $v.tls.keystore.existingSecret }}
+            items:
+              - key: {{ $v.tls.keystore.key }}
+                path: {{ $v.tls.keystore.key }}
+        - name: tls-truststore
+          secret:
+            secretName: {{ $v.tls.truststore.existingSecret }}
+            items:
+              - key: {{ $v.tls.truststore.key }}
+                path: {{ $v.tls.truststore.key }}
+        {{- end }}
+        {{- if $v.caTruststore.existingSecret }}
+        - name: ca-truststore
+          secret:
+            secretName: {{ $v.caTruststore.existingSecret }}
+            items:
+              - key: {{ $v.caTruststore.key }}
+                path: {{ $v.caTruststore.key }}
+        {{- end }}
+        {{- if $v.notifications.email.templatesConfigMap }}
+        - name: email-templates
+          configMap:
+            name: {{ $v.notifications.email.templatesConfigMap }}
+        {{- end }}
+        {{- with $v.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with $v.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $v.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $v.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $v.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -4,7 +4,11 @@ cert-alert reads the certificates your LDAP directory publishes and tells the ri
 before they expire. This bundle is everything needed to run it with Docker Compose,
 including on a host with no internet access.
 
-Full documentation: <https://github.com/winllc/cert-alert#readme>
+Install guide: <https://winllc.github.io/ens-apps-documentation/cert-alert/install/>
+
+Installing on Kubernetes or OpenShift instead? Use the Helm chart,
+`oci://ghcr.io/winllc/charts/cert-alert`, at this same version (also in the release download
+as `cert-alert-@VERSION@.tgz`).
 
 ## What is here
 

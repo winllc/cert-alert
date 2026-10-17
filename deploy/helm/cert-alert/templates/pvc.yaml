@@ -1,0 +1,41 @@
+{{- if and .Values.persistence.license.enabled (not .Values.persistence.license.existingClaim) }}
+# The ENS license, this installation's id and the license revisions seen. Keep it: losing it
+# gives the installation a new id, and a license bound to the old one must be re-bound on the
+# ENS portal. `helm upgrade` keeps it; `helm uninstall` deletes it (see the chart README).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "cert-alert.licenseClaimName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cert-alert.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    {{- toYaml .Values.persistence.license.accessModes | nindent 4 }}
+  {{- with .Values.persistence.license.storageClass }}
+  storageClassName: {{ if eq . "-" }}""{{ else }}{{ . | quote }}{{ end }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.license.size }}
+{{- end }}
+{{- if and .Values.audit.file.enabled .Values.audit.file.persistence.enabled (not .Values.audit.file.persistence.existingClaim) }}
+---
+# The audit trail's JSONL file (ENS_AUDIT_FILE). The database holds the trail regardless.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "cert-alert.auditClaimName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cert-alert.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    {{- toYaml .Values.audit.file.persistence.accessModes | nindent 4 }}
+  {{- with .Values.audit.file.persistence.storageClass }}
+  storageClassName: {{ if eq . "-" }}""{{ else }}{{ . | quote }}{{ end }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.audit.file.persistence.size }}
+{{- end }}

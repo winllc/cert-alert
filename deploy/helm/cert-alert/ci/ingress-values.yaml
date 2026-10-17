@@ -1,0 +1,87 @@
+# Behind ingress-nginx with TLS at the ingress (password sign-in), mail, banner, audit to
+# Splunk and syslog with a persisted audit file, and a NetworkPolicy.
+ldap:
+  url: ldaps://directory.example.gov:636
+  base: dc=example,dc=gov
+  bindDn: cn=cert-alert,ou=services,dc=example,dc=gov
+  bindPassword: change-me
+  requireEmailPoc: false
+  pageSize: 1000
+database:
+  host: postgres.example.gov
+  password: change-me
+  params: sslmode=require
+  poolSize: 20
+security:
+  adminIdentifiers: [pki-admin@example.gov, jdoe]
+  ldap:
+    userSearchBase: ou=people
+    userSearchFilter: "(uid={0})"
+mail:
+  host: smtp.example.gov
+  port: 587
+  username: cert-alert
+  password: change-me
+  smtpAuth: true
+  starttls: true
+notifications:
+  email:
+    enabled: true
+    from: cert-alert@example.gov
+    dryRun: true
+    templatesConfigMap: cert-alert-email-templates
+alerts:
+  email:
+    enabled: true
+    from: cert-alert@example.gov
+    to: [pki-team@example.gov]
+banner:
+  enabled: true
+  text: UNCLASSIFIED
+  background: "#007a33"
+thresholds:
+  warningDays: 45
+  criticalDays: 10
+revocation:
+  defaultCrlUrl: http://crl.example.gov/ca.crl
+audit:
+  file:
+    enabled: true
+    persistence:
+      enabled: true
+  retentionDays: 365
+  splunk:
+    url: https://splunk.example.gov:8088
+    token: 00000000-0000-0000-0000-000000000000
+    index: ens
+  syslog:
+    host: syslog.example.gov
+    port: 6514
+    protocol: tls
+license:
+  file: |
+    not-a-real-license
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: example-issuer
+  hosts:
+    - host: cert-alert.example.gov
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: cert-alert-tls
+      hosts: [cert-alert.example.gov]
+networkPolicy:
+  enabled: true
+  ingress:
+    from:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: ingress-nginx
+  egress:
+    ldap:
+      ports: [636]
+      cidrs: ["10.0.10.0/24"]

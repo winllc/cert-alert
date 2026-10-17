@@ -15,6 +15,9 @@
 #                                   license/README.txt, images/cert-alert-images-<version>.tar
 #   sbom-<image>.spdx.json          SPDX SBOM per image, when syft is installed ($SYFT names
 #                                   it; REQUIRE_SBOM=true makes its absence an error, as in CI)
+#   cert-alert-<version>.tgz        the Helm chart (deploy/helm/cert-alert) packaged at this
+#                                   version, when helm is installed ($HELM names it;
+#                                   REQUIRE_CHART=true makes its absence an error, as in CI)
 #   SHA256SUMS                      over all of the above
 #
 # Signing SHA256SUMS and uploading are CI's job (.github/workflows/ci.yml).
@@ -24,6 +27,8 @@ PRODUCT=cert-alert
 POSTGRES_IMAGE=${POSTGRES_IMAGE:-postgres:17.11-alpine}
 REQUIRE_SBOM=${REQUIRE_SBOM:-false}
 SYFT=${SYFT:-syft}
+REQUIRE_CHART=${REQUIRE_CHART:-false}
+HELM=${HELM:-helm}
 
 usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"; exit 2; }
 die() { printf 'release-bundle: %s\n' "$*" >&2; exit 1; }
@@ -141,10 +146,26 @@ else
     echo "release-bundle: warning: syft not installed, no SBOMs generated" >&2
 fi
 
+# The Helm chart, at the same version as the bundle and its images. The second way to
+# install: CI also pushes it to oci://ghcr.io/winllc/charts on a release tag.
+if command -v "$HELM" > /dev/null 2>&1; then
+    echo "Packaging the Helm chart -> $PRODUCT-$VERSION.tgz"
+    "$HELM" lint --strict "$REPO_ROOT/deploy/helm/$PRODUCT" \
+        -f "$REPO_ROOT/deploy/helm/$PRODUCT/ci/default-values.yaml" > /dev/null \
+        || die "the Helm chart does not lint"
+    "$HELM" package "$REPO_ROOT/deploy/helm/$PRODUCT" --version "$VERSION" --app-version "$VERSION" \
+        --destination "$OUT_DIR" > /dev/null
+    [ -f "$OUT_DIR/$PRODUCT-$VERSION.tgz" ] || die "helm package did not write $PRODUCT-$VERSION.tgz"
+elif [ "$REQUIRE_CHART" = true ]; then
+    die "helm is not installed and REQUIRE_CHART=true"
+else
+    echo "release-bundle: warning: helm not installed, the chart was not packaged" >&2
+fi
+
 (
     cd "$OUT_DIR"
     shopt -s nullglob
-    sha256sum -- "$NAME.tar.gz" sbom-*.spdx.json > SHA256SUMS
+    sha256sum -- "$NAME.tar.gz" "$PRODUCT"-*.tgz sbom-*.spdx.json > SHA256SUMS
 )
 
 echo

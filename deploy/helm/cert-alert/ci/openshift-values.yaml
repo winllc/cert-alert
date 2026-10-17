@@ -1,0 +1,33 @@
+# OpenShift: restricted-v2 SCC assigns the uid, a Route with TLS passthrough for
+# client-certificate sign-in, an external database.
+openshift:
+  enabled: true
+ldap:
+  url: ldaps://directory.example.gov:636
+  base: dc=example,dc=gov
+  bindDn: cn=cert-alert,ou=services,dc=example,dc=gov
+  existingSecret: cert-alert-ldap
+  existingSecretKey: password
+database:
+  host: postgres.example.gov
+  existingSecret: cert-alert-db
+  existingSecretKey: password
+security:
+  adminIdentifiers: [pki-admin@example.gov]
+tls:
+  enabled: true
+  keystore:
+    existingSecret: cert-alert-keystore
+    passwordExistingSecret: cert-alert-keystore
+    passwordExistingSecretKey: password
+  truststore:
+    existingSecret: cert-alert-truststore
+    passwordExistingSecret: cert-alert-truststore
+    passwordExistingSecretKey: password
+route:
+  enabled: true
+  host: cert-alert.apps.example.gov
+  tls:
+    termination: passthrough
+networkPolicy:
+  enabled: true
