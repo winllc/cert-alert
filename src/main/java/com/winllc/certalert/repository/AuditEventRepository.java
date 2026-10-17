@@ -6,13 +6,14 @@ import java.time.Instant;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.datatables.repository.DataTablesRepository;
-import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
-import org.springframework.data.repository.query.Param;
 
 /**
  * A DataTables repository, because the audit table on a details page is a search table like
  * the other two: the same paging, ordering and search, and the same request shape.
+ *
+ * <p>Reads only. Events are written by {@code AuditLog}, which chains them, and removed by
+ * {@code AuditRetention} alone; nothing here saves or deletes one.
  */
 public interface AuditEventRepository extends DataTablesRepository<AuditEvent, Long> {
 
@@ -39,7 +40,4 @@ public interface AuditEventRepository extends DataTablesRepository<AuditEvent, L
     @Query("select max(e.occurredAt) from AuditEvent e")
     Instant latest();
 
-    @Modifying
-    @Query("delete from AuditEvent e where e.occurredAt < :cutoff")
-    int deleteByOccurredAtBefore(@Param("cutoff") Instant cutoff);
 }

@@ -1,5 +1,6 @@
 package com.winllc.certalert.web;
 
+import com.winllc.certalert.audit.JobAudit;
 import com.winllc.certalert.license.RequiresFeature;
 import com.winllc.certalert.config.RevocationProperties;
 import com.winllc.certalert.domain.RevocationStatus;
@@ -24,6 +25,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/revocation")
 public class RevocationController {
 
+    private final JobAudit jobs;
+
     private final RevocationService revocationService;
     private final CachedCertificateRepository certificates;
     private final IssuerCertificates issuers;
@@ -33,7 +36,9 @@ public class RevocationController {
             RevocationService revocationService,
             CachedCertificateRepository certificates,
             IssuerCertificates issuers,
-            RevocationProperties properties) {
+            RevocationProperties properties,
+            JobAudit jobs) {
+        this.jobs = jobs;
         this.revocationService = revocationService;
         this.certificates = certificates;
         this.issuers = issuers;
@@ -81,6 +86,6 @@ public class RevocationController {
 
     @PostMapping("/check")
     public RunResult check() {
-        return RunResult.of(revocationService.checkAll());
+        return RunResult.of(jobs.run("revocation", revocationService::checkAll));
     }
 }

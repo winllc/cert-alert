@@ -25,6 +25,11 @@ cert-alert:
 # LicenseManager with one that trusts the ENS portal's published TEST key and installs a
 # full test license, in a temporary directory, for every context with this profile.
 
+# The audit forwarders and roll-ups run only when a test drives them.
+ens:
+  audit:
+    background: false
+
 logging:
   level:
     com.winllc.certalert: DEBUG

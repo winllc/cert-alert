@@ -131,13 +131,17 @@ COPY --from=extract --chown=185:0 /extract/extracted/application/ ./
 # rather than for running it; a real deployment uses the postgres profile and writes nothing
 # there. /var/lib/ens/certalert is the license's directory (see below): owned by uid 185 and
 # group 0 with the group rwx, so it stays writable under OpenShift's arbitrary uid - the
-# license screen writes the uploaded license there.
+# license screen writes the uploaded license there. /var/log/ens/certalert is where the audit
+# trail's JSONL file goes when ENS_AUDIT_FILE points there; same ownership, same reason.
 RUN mkdir -p /app/data \
     && chown -R 185:0 /app \
     && chmod -R g=u /app \
     && mkdir -p /var/lib/ens/certalert \
     && chown -R 185:0 /var/lib/ens \
-    && chmod -R 0775 /var/lib/ens
+    && chmod -R 0775 /var/lib/ens \
+    && mkdir -p /var/log/ens/certalert \
+    && chown -R 185:0 /var/log/ens \
+    && chmod -R 0775 /var/log/ens
 
 USER 185
 
@@ -157,6 +161,11 @@ USER 185
 ENV ENS_LICENSE_STATE_DIR=/var/lib/ens/certalert \
     ENS_LICENSE_FILE=/var/lib/ens/certalert/license.lic
 VOLUME /var/lib/ens
+
+# The audit trail (ens-audit/1) goes to the database, and as raw JSON lines to stdout (on by
+# default: ENS_AUDIT_STDOUT). Setting ENS_AUDIT_FILE=/var/log/ens/certalert/audit.jsonl
+# also writes a rotated file here, for a forwarder to tail; mount a volume to keep it.
+VOLUME /var/log/ens
 
 # 8080 plain, 8443 when TLS is switched on for X.509 client certificates.
 EXPOSE 8080 8443

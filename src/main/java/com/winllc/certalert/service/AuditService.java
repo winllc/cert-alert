@@ -1,39 +1,44 @@
 package com.winllc.certalert.service;
 
+import com.winllc.certalert.audit.AuditLog;
+import com.winllc.certalert.audit.AuditRetention;
 import com.winllc.certalert.config.AuditProperties;
 import com.winllc.certalert.domain.AuditEvent;
 import com.winllc.certalert.domain.OwnerType;
 import com.winllc.certalert.repository.AuditEventRepository;
-import java.time.Clock;
-import java.time.Instant;
 import java.util.Collection;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Writes and reads the audit trail.
+ * Writes and reads the history of directory entries - what happened to an entry, and who
+ * did it.
  *
- * <p>Records join whatever transaction produced them, rather than being written on the way
- * out or from another thread. An audit record that survives a rolled-back change is a lie,
- * and a lie in an audit trail is worse than a gap.
+ * <p>Every record is an {@code ens-audit/1} event too: it goes through {@link AuditLog},
+ * which numbers and chains it with everything else the application audits and hands it to
+ * the outputs. Records join whatever transaction produced them, rather than being written on
+ * the way out or from another thread. An audit record that survives a rolled-back change is
+ * a lie, and a lie in an audit trail is worse than a gap.
  */
 @Service
 public class AuditService {
 
-    private static final Logger log = LoggerFactory.getLogger(AuditService.class);
-
     private final AuditEventRepository repository;
     private final AuditProperties properties;
-    private final Clock clock;
+    private final AuditLog auditLog;
+    private final AuditRetention retention;
 
-    public AuditService(AuditEventRepository repository, AuditProperties properties, Clock clock) {
+    public AuditService(
+            AuditEventRepository repository,
+            AuditProperties properties,
+            AuditLog auditLog,
+            AuditRetention retention) {
         this.repository = repository;
         this.properties = properties;
-        this.clock = clock;
+        this.auditLog = auditLog;
+        this.retention = retention;
     }
 
     /**
@@ -45,7 +50,7 @@ public class AuditService {
         if (!properties.isEnabled()) {
             return;
         }
-        repository.save(event);
+        auditLog.record(AuditLog.entry(event));
     }
 
     /**
@@ -57,7 +62,7 @@ public class AuditService {
         if (!properties.isEnabled() || events.isEmpty()) {
             return;
         }
-        repository.saveAll(events);
+        auditLog.recordAll(events.stream().map(AuditLog::entry).toList());
     }
 
     /** One entry's history, newest first. */
@@ -67,20 +72,11 @@ public class AuditService {
     }
 
     /**
-     * Removes records older than the configured window. Does nothing unless retention has
-     * been turned on deliberately.
+     * Prunes events older than the retention window - {@code ENS_AUDIT_RETENTION_DAYS}, or
+     * {@code cert-alert.audit.retention.*} where that is unset. Does nothing unless retention
+     * has been turned on deliberately.
      */
-    @Transactional
     public int trim() {
-        AuditProperties.Retention retention = properties.getRetention();
-        if (!retention.isEnabled()) {
-            return 0;
-        }
-        Instant cutoff = Instant.now(clock).minus(retention.getAfter());
-        int removed = repository.deleteByOccurredAtBefore(cutoff);
-        if (removed > 0) {
-            log.info("Trimmed {} audit record(s) older than {}", removed, cutoff);
-        }
-        return removed;
+        return retention.prune();
     }
 }

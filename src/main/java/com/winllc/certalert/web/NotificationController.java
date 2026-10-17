@@ -1,5 +1,6 @@
 package com.winllc.certalert.web;
 
+import com.winllc.certalert.audit.JobAudit;
 import com.winllc.certalert.license.RequiresFeature;
 import com.winllc.certalert.config.NotificationProperties;
 import com.winllc.certalert.security.SignedInDirectoryUser;
@@ -39,6 +40,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/notifications")
 public class NotificationController {
 
+    private final JobAudit jobs;
+
     private static final int DEFAULT_PAGE_SIZE = 20;
     private static final int MAX_PAGE_SIZE = 100;
 
@@ -51,7 +54,9 @@ public class NotificationController {
             NotificationService notificationService,
             NotificationSettingsService settingsService,
             NotificationProperties properties,
-            SignedInDirectoryUser signedIn) {
+            SignedInDirectoryUser signedIn,
+            JobAudit jobs) {
+        this.jobs = jobs;
         this.notificationService = notificationService;
         this.settingsService = settingsService;
         this.properties = properties;
@@ -127,7 +132,10 @@ public class NotificationController {
     @PostMapping("/digest")
     public NotificationService.DigestResult digest(
             @RequestParam(defaultValue = "false") boolean dryRun) {
-        return notificationService.digest(dryRun);
+        // A rehearsal writes nothing and sends nothing, so it is not a run of the job.
+        return dryRun
+                ? notificationService.digest(true)
+                : jobs.run("expiry digest", () -> notificationService.digest(false));
     }
 
     private boolean isAdmin(Authentication authentication) {

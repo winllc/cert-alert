@@ -57,6 +57,10 @@ class AdminPageTest {
     @Autowired
     private AuditEventRepository auditRepository;
 
+    /** Records go in the way the application writes them: chained, through the audit log. */
+    @Autowired
+    private com.winllc.certalert.service.AuditService auditService;
+
     @Autowired
     private DirectoryUserRepository userRepository;
 
@@ -91,7 +95,7 @@ class AdminPageTest {
         web01.markSynced(now);
         serverId = serverRepository.save(web01).getId();
 
-        auditRepository.saveAll(List.of(
+        auditService.recordAll(List.of(
                 AuditEvent.about(
                                 AuditEvent.SubjectRef.of(alice),
                                 AuditAction.ENTRY_DISCOVERED,
@@ -121,9 +125,14 @@ class AdminPageTest {
                 .andExpect(status().isOk())
                 .andExpect(view().name("admin"))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("System audit log")))
-                // The kinds of event come from the enum, so a new one appears here by itself.
-                .andExpect(content().string(org.hamcrest.Matchers.containsString("PROJECT_JOINED")))
-                .andExpect(content().string(org.hamcrest.Matchers.containsString("id=\"audit-table\"")));
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("href=\"/admin/audit\"")));
+        // The trail itself has its own page. The kinds of entry change come from the enum,
+        // so a new one appears in its filter by itself.
+        mockMvc.perform(get("/admin/audit").with(admin()))
+                .andExpect(status().isOk())
+                .andExpect(view().name("audit"))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("project.joined")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("id=\"audit-log\"")));
     }
 
     @Test

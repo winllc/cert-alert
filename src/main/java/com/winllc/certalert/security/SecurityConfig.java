@@ -2,6 +2,8 @@ package com.winllc.certalert.security;
 
 import java.util.LinkedHashMap;
 import java.util.List;
+import com.winllc.certalert.audit.AccessDenials;
+import com.winllc.certalert.audit.AuditingAccessDeniedHandler;
 import com.winllc.certalert.demo.DemoMode;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -17,6 +19,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.AuthenticationEntryPoint;
+import org.springframework.security.web.access.AccessDeniedHandlerImpl;
 import org.springframework.security.web.authentication.DelegatingAuthenticationEntryPoint;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
@@ -68,7 +71,8 @@ public class SecurityConfig {
             HttpSecurity http,
             SecurityProperties properties,
             X509DirectoryUserDetailsService x509UserDetailsService,
-            List<AuthenticationProvider> authenticationProviders)
+            List<AuthenticationProvider> authenticationProviders,
+            AccessDenials denials)
             throws Exception {
 
         http.authorizeHttpRequests(authorize -> authorize
@@ -85,6 +89,12 @@ public class SecurityConfig {
                 // for itself, because a table is asked for directly as often as it is
                 // reached through the page it sits on.
                 .requestMatchers("/admin", "/api/v1/audit/summary")
+                .hasRole("ADMIN")
+                // The audit log page: the whole trail, its export, verification, delivery
+                // status and the SIEM tokens. Administrators only; its API is under
+                // /api/v1/admin, below. The SIEM pull API has a chain of its own
+                // (AuditApiSecurityConfig), authenticated by bearer token.
+                .requestMatchers("/admin/audit", "/admin/audit/**")
                 .hasRole("ADMIN")
                 // The license screen: what is installed, this installation's id, and the
                 // upload. Reachable whatever the license says, and only by administrators.
@@ -159,7 +169,10 @@ public class SecurityConfig {
 
         http.formLogin(form -> form.loginPage("/login").permitAll())
                 .logout(logout -> logout.logoutSuccessUrl("/login?logout").permitAll())
-                .exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(authenticationEntryPoint()));
+                .exceptionHandling(exceptions -> exceptions
+                        .authenticationEntryPoint(authenticationEntryPoint())
+                        // Every 403 the chain answers is recorded as access.denied.
+                        .accessDeniedHandler(new AuditingAccessDeniedHandler(new AccessDeniedHandlerImpl(), denials)));
 
         return http.build();
     }

@@ -116,6 +116,22 @@ services:
       # Whoever should be able to trigger jobs; any value the directory knows them by.
       # alice is the generated directory's administrator.
       CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS: ${CERT_ALERT_ADMINS:-alice@intelink.ic.gov}
+      # The audit trail (ens-audit/1): every ENS_AUDIT_* setting, passed through. Unset
+      # means the application's default; see env.template and the README.
+      ENS_AUDIT_STDOUT: ${ENS_AUDIT_STDOUT:-true}
+      ENS_AUDIT_FILE: ${ENS_AUDIT_FILE:-}
+      ENS_AUDIT_FILE_KEEP: ${ENS_AUDIT_FILE_KEEP:-30}
+      ENS_AUDIT_RETENTION_DAYS: ${ENS_AUDIT_RETENTION_DAYS:-0}
+      ENS_AUDIT_SPLUNK_URL: ${ENS_AUDIT_SPLUNK_URL:-}
+      ENS_AUDIT_SPLUNK_TOKEN: ${ENS_AUDIT_SPLUNK_TOKEN:-}
+      ENS_AUDIT_SPLUNK_TOKEN_FILE: ${ENS_AUDIT_SPLUNK_TOKEN_FILE:-}
+      ENS_AUDIT_SPLUNK_INDEX: ${ENS_AUDIT_SPLUNK_INDEX:-}
+      ENS_AUDIT_SPLUNK_SOURCETYPE: ${ENS_AUDIT_SPLUNK_SOURCETYPE:-ens:audit}
+      ENS_AUDIT_SPLUNK_INSECURE: ${ENS_AUDIT_SPLUNK_INSECURE:-false}
+      ENS_AUDIT_SYSLOG_HOST: ${ENS_AUDIT_SYSLOG_HOST:-}
+      ENS_AUDIT_SYSLOG_PORT: ${ENS_AUDIT_SYSLOG_PORT:-}
+      ENS_AUDIT_SYSLOG_PROTOCOL: ${ENS_AUDIT_SYSLOG_PROTOCOL:-tcp}
+      ENS_AUDIT_SYSLOG_FACILITY: ${ENS_AUDIT_SYSLOG_FACILITY:-local0}
     # Nothing published to the host either - see docker-compose.ports.yml to reach the UI
     # from a browser. The application still listens on 8080 inside the container, which is
     # what the image's EXPOSE, its HEALTHCHECK and every probe path assume.
@@ -124,6 +140,8 @@ services:
     # The license screen writes uploads there; see the top of this file for copying one in.
     volumes:
       - ens-license:/var/lib/ens/certalert
+      # Where ENS_AUDIT_FILE writes, when it is set (e.g. /var/log/ens/certalert/audit.jsonl).
+      - ens-audit:/var/log/ens
     # Further mounts, all read-only and all commented out so a first run needs no
     # directories - add them under volumes above.
     #
@@ -157,3 +175,4 @@ volumes:
   postgres-data:
   ldap-data:
   ens-license:
+  ens-audit:

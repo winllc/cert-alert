@@ -38,6 +38,14 @@ public class LicensingConfiguration implements WebMvcConfigurer {
     /** Where anybody else is sent while the application is unlicensed. */
     public static final String UNLICENSED_PAGE = "/unlicensed";
 
+    /**
+     * The audit trail stays available whatever the license says: the audit page, its API
+     * (export, verify, tokens) and the SIEM pull API. It is not a licensed feature.
+     */
+    public static final String[] AUDIT_PATHS = {
+        "/admin/audit", "/admin/audit/**", "/api/v1/admin/audit/**", "/api/audit/**"
+    };
+
     private static final Logger log = LoggerFactory.getLogger(LicensingConfiguration.class);
 
     private final ObjectProvider<Licensing> licensing;
@@ -63,6 +71,7 @@ public class LicensingConfiguration implements WebMvcConfigurer {
                         "/login", "/logout", "/error", "/error/**",
                         LICENSE_SCREEN, LICENSE_SCREEN + "/**", UNLICENSED_PAGE, "/api/v1/license",
                         "/css/**", "/js/**", "/img/**", "/webjars/**", "/favicon.ico",
-                        "/actuator/**");
+                        "/actuator/**")
+                .excludePathPatterns(AUDIT_PATHS);
     }
 }

@@ -44,11 +44,18 @@ public record AuditEventRow(
                 event.getSubjectDn(),
                 event.getSubjectName(),
                 event.getAction(),
-                event.getAction().label(),
-                event.getSummary(),
+                // Events about no entry - a sign-in, a settings change - have no kind of
+                // their own here; their ens-audit action id stands in for it.
+                event.getAction() != null ? event.getAction().label() : event.getEventAction(),
+                event.getSummary() != null ? event.getSummary() : describe(event),
                 event.getActor(),
                 event.getCertificateFingerprint(),
                 event.getChannel(),
                 event.getTarget());
+    }
+
+    private static String describe(AuditEvent event) {
+        String what = event.getEventAction() == null ? "event" : event.getEventAction();
+        return event.getOutcome() == null || "success".equals(event.getOutcome()) ? what : what + " (" + event.getOutcome() + ")";
     }
 }
