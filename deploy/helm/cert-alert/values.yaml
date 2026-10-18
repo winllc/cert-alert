@@ -34,8 +34,8 @@ fullnameOverride: ""
 # same job started by hand, takes a lock in the database so it runs on one replica at a time;
 # sessions are kept in the database (the postgres profile's default), so any replica serves
 # any request and a rolling update signs nobody out; and SAML sign-in requests are kept in
-# the database too. Above 1 needs the license volume shared - see
-# persistence.license.readWriteMany - and gets a RollingUpdate strategy, a
+# the database too, as is the license state. Above 1 - see
+# persistence.license - and gets a RollingUpdate strategy, a
 # PodDisruptionBudget and a preference for spreading pods across nodes.
 replicaCount: 1
 
@@ -630,7 +630,7 @@ audit:
 persistence:
   license:
     # The license, this installation's id (licenses are bound to it) and the license
-    # revisions seen, mounted at /var/lib/ens (the application keeps them in
+    # revisions seen, as releases before the database store kept them, mounted at /var/lib/ens (the application keeps them in
     # /var/lib/ens/certalert). Keep this PVC: helm upgrade does; helm uninstall deletes it
     # unless it is an existingClaim of your own. Losing it gives the installation a new id,
     # and a bound license must be re-bound on the ENS portal.
@@ -640,10 +640,11 @@ persistence:
     accessModes: [ReadWriteOnce]
     # Use a PVC of your own (for example one kept from a previous release).
     existingClaim: ""
-    # Required for replicaCount above 1: every replica mounts this volume, so it has to be
-    # ReadWriteMany (accessModes above, or the existingClaim's own), and setting this says it
-    # is. A ReadWriteOnce volume cannot be mounted by pods on different nodes, and separate
-    # volumes would give each replica its own installation id.
+    # The license state itself is in the database, shared by every replica. This volume is
+    # where an installation upgraded from a release that kept it in files has its id,
+    # revisions and license imported from on the first start. With replicaCount above 1 it is
+    # mounted only if it is ReadWriteMany (accessModes above, or the existingClaim's own) and
+    # this says so; otherwise upgrade with one replica first, then scale up.
     readWriteMany: false
 
 license:

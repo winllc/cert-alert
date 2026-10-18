@@ -238,14 +238,8 @@ not set at all. Takes (dict "root" $ "inline" <value> "existing" <secret name>
 {{- define "cert-alert.validate" -}}
 {{- if gt (int .Values.replicaCount) 1 -}}
 {{- $license := .Values.persistence.license -}}
-{{- if not $license.enabled -}}
-{{- fail "replicaCount above 1 needs persistence.license.enabled=true: without a shared license volume each replica would have an installation id of its own." -}}
-{{- end -}}
-{{- if not $license.readWriteMany -}}
-{{- fail "replicaCount above 1 needs the license volume shared by every replica: give it a ReadWriteMany access mode (persistence.license.accessModes, or an existingClaim that is ReadWriteMany) and set persistence.license.readWriteMany=true to say so. See the README's \"High availability\"." -}}
-{{- end -}}
-{{- if and (not $license.existingClaim) (not (has "ReadWriteMany" $license.accessModes)) -}}
-{{- fail "persistence.license.readWriteMany=true, but the chart's license volume is not ReadWriteMany: set persistence.license.accessModes to [ReadWriteMany] (a new claim - the access mode of an existing one cannot change; see the README's upgrade notes)." -}}
+{{- if and $license.readWriteMany (not $license.existingClaim) (not (has "ReadWriteMany" $license.accessModes)) -}}
+{{- fail "persistence.license.readWriteMany=true, but the chart's license volume is not ReadWriteMany: set persistence.license.accessModes to [ReadWriteMany] (a new claim - the access mode of an existing one cannot change)." -}}
 {{- end -}}
 {{- if eq (lower (toString .Values.session.store)) "memory" -}}
 {{- fail "replicaCount above 1 needs sessions in the database: leave session.store empty (jdbc)." -}}
@@ -313,6 +307,17 @@ rollingUpdate:
 {{- else -}}
 type: Recreate
 {{- end -}}
+{{- end -}}
+
+{{/*
+Whether the license volume is mounted: always with one replica, where it is where an
+installation upgraded from a file-based release has its id imported from on the first start;
+with more, only when it is ReadWriteMany (persistence.license.readWriteMany), because the
+license state is in the database and a ReadWriteOnce claim cannot follow pods across nodes.
+*/}}
+{{- define "cert-alert.licenseVolumeMounted" -}}
+{{- $license := .Values.persistence.license -}}
+{{- if and $license.enabled (or (le (int .Values.replicaCount) 1) $license.readWriteMany) }}true{{ end -}}
 {{- end -}}
 
 {{/* Whether the PodDisruptionBudget is rendered: as set, or when there is more than one replica. */}}

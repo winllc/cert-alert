@@ -2623,12 +2623,14 @@ What is still each replica's own, and why that is acceptable:
 | `ens_certalert_job_last_success_seconds` | set where the job ran | the PrometheusRule takes the `max` across replicas |
 | Directory groups, CRLs, sign-in revocation answers | caches | each replica fills its own |
 
-**The license volume.** The vendored license library keeps this installation's id and the
-license revisions it has seen in files on the license volume (`/var/lib/ens`). Every replica
-must see the same files, or each would have an installation id of its own, so above one
-replica the chart requires a ReadWriteMany volume and `persistence.license.readWriteMany: true`
-to say so. A shared store for that state is coming in the license library; until then, see
-[the chart's README](deploy/helm/cert-alert/README.md#high-availability).
+**The license.** The license, this installation's id and the license revisions seen are kept
+in the database (`ens_license_installation`, `ens_license_file`, `ens_license_revision`;
+the license library's `JdbcLicenseStore`), so every replica has the same installation id and
+license, and a license uploaded on one replica is in force on the others within five
+seconds. The license volume (`/var/lib/ens/certalert`) is now read once only: on the first
+start after upgrading, if the database holds no installation id yet, the id, the revisions
+and the license there are imported, so the installation keeps its id and its license stays
+bound to it. Upgrade with the volume mounted (and, in Helm, with one replica), then scale.
 
 **Helm.** `replicaCount: 2` (with the license volume as above) gives a `RollingUpdate`
 strategy with `maxUnavailable: 0` and `minReadySeconds`, a PodDisruptionBudget
@@ -3063,8 +3065,20 @@ of running alongside it.
 ### New tables, migrated on start
 
 Flyway adds `shedlock` (V21), `job_run` (V22), `spring_session` and
-`spring_session_attributes` (V23) and `saml_authn_request` (V24) on the first start. Nothing
-to do; the database user already owns the schema.
+`spring_session_attributes` (V23), `saml_authn_request` (V24) and the license state,
+`ens_license_*` (V25), on the first start. Nothing to do; the database user already owns the
+schema.
+
+### The license is kept in the database
+
+The license library (ens-license 1.2.0) now keeps the license, the installation id and the
+revisions seen in the database. On the first start after upgrading, with the license volume
+mounted as before, it imports them from `/var/lib/ens/certalert`, so the installation id - and
+the license bound to it - is unchanged. Nothing to do, but keep the volume for that first
+start: an installation started against an empty database without it gets a new id. After
+that the files are not read; the license screen's uploads go to the database. A license given
+as `ENS_LICENSE` (Helm: `license.file` / `license.existingSecret`) is installed into the
+database if none is, or if it is a newer revision.
 
 ### Sessions are kept in the database
 
@@ -3077,10 +3091,10 @@ database and survive a restart. The session cookie is now called `SESSION` inste
 
 `strategy` now defaults to empty, which chooses `Recreate` for one replica (as before) and
 `RollingUpdate` above one; a values file that sets `strategy.type` keeps it. `replicaCount`
-may now be above 1, with `persistence.license.readWriteMany: true` and a ReadWriteMany license
-volume. The access mode of an existing claim cannot be changed: create a ReadWriteMany claim,
-copy `/var/lib/ens/certalert` into it with the pod stopped, and name it in
-`persistence.license.existingClaim`. See [High availability](#high-availability).
+may now be above 1. Upgrade with one replica first, so the license volume is mounted for the
+import above; then scale. Above one replica the license volume is mounted only if it is
+ReadWriteMany and `persistence.license.readWriteMany: true` says so. See
+[High availability](#high-availability).
 
 ### Single sign-on and the auditor role are new, and off
 

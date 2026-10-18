@@ -203,7 +203,7 @@ A release without audit logging ignores these variables.
 | `persistence.license.enabled` | `true` | PVC at `/var/lib/ens`. `false` uses an `emptyDir`: the license and id go with the pod |
 | `persistence.license.size` / `.storageClass` / `.accessModes` | `100Mi` / `""` / `[ReadWriteOnce]` | `storageClass: "-"` means `""` (no dynamic provisioning) |
 | `persistence.license.existingClaim` | `""` | A PVC of your own, kept across uninstalls |
-| `persistence.license.readWriteMany` | `false` | Says the license volume is ReadWriteMany; required for `replicaCount` above 1 |
+| `persistence.license.readWriteMany` | `false` | Says the license volume is ReadWriteMany, so it stays mounted above one replica (only needed to import from it while scaled up) |
 | `license.existingSecret` / `.existingSecretKey` | `""` / `license.lic` | A Secret holding the license |
 | `license.file` | `""` | `--set-file license.file=./license.lic` |
 | `license.initImage.*` | the application image | The init container's image (it needs `sh`, `cp`, `mv`) |
@@ -476,11 +476,6 @@ start over.
 
 ```yaml
 replicaCount: 2
-persistence:
-  license:
-    accessModes: [ReadWriteMany]
-    storageClass: nfs-client        # any class that provides ReadWriteMany
-    readWriteMany: true
 ```
 
 Every scheduled job takes a lock in the database, so it runs on one replica at a time, and
@@ -490,17 +485,15 @@ replica the chart renders a `RollingUpdate` strategy (`maxUnavailable: 0`), a
 PodDisruptionBudget (`minAvailable: 1`), a soft anti-affinity across nodes (unless `affinity`
 is set) and a 5-second `preStop` pause.
 
-**Why the license volume must be ReadWriteMany.** The license library keeps this
-installation's id and the license revisions it has seen in files under `/var/lib/ens`. Every
-replica has to read and write the same ones: separate volumes would give each replica its
-own installation id, which the license is not bound to, and a ReadWriteOnce volume cannot be
-mounted by pods on different nodes. So the chart refuses `replicaCount` above 1 unless
-`persistence.license.readWriteMany: true` says the volume is shared, and, for a claim the
-chart creates, unless its `accessModes` include `ReadWriteMany`. The access mode of an
-existing claim cannot be changed: to move an installation, scale to 0, copy
-`/var/lib/ens/certalert` from the old claim to a new ReadWriteMany one, and name that in
-`persistence.license.existingClaim`. (A shared store for the license state, in the database,
-is on its way in the license library; this requirement goes once it is wired in.)
+**The license volume.** The license, the installation id and the revisions seen are kept in
+the database, shared by every replica. The license volume is only where an installation
+upgraded from a release that kept them in files has them imported from, on the first start.
+So upgrade with one replica (the volume is mounted, as before), then raise `replicaCount`.
+Above one replica the volume is not mounted - a ReadWriteOnce claim cannot follow pods across
+nodes - unless it is ReadWriteMany and `persistence.license.readWriteMany: true` says so; keep
+the claim anyway (scaling does not delete it). A license given with `license.file` or
+`license.existingSecret` is passed as `ENS_LICENSE` and installed into the database if none
+is, or if it is a newer revision.
 
 `session.store: memory` is refused above one replica: sessions would then be each pod's own.
 

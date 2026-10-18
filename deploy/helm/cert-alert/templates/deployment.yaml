@@ -67,7 +67,7 @@ spec:
       terminationGracePeriodSeconds: {{ $v.terminationGracePeriodSeconds }}
       securityContext:
         {{- include "cert-alert.securityContext" (dict "ctx" $v.podSecurityContext "root" .) | nindent 8 }}
-      {{- if and (include "cert-alert.licenseSupplied" .) $v.persistence.license.enabled }}
+      {{- if and (include "cert-alert.licenseSupplied" .) (include "cert-alert.licenseVolumeMounted" .) }}
       initContainers:
         # Installs the supplied license into the license volume only if none is there yet,
         # as the release bundle's install.sh does: a license already installed - perhaps a
@@ -139,6 +139,15 @@ spec:
                   name: {{ $ref.name }}
                   key: {{ $ref.key }}
             {{- end }}
+            {{- end }}
+            {{- if include "cert-alert.licenseSupplied" . }}
+            # The supplied license, installed if none is (or if it is a newer revision of the
+            # one that is) - into the database, whichever replica checks first.
+            - name: ENS_LICENSE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cert-alert.licenseSecretName" . }}
+                  key: {{ ternary $v.license.existingSecretKey "license.lic" (ne $v.license.existingSecret "") }}
             {{- end }}
             # After CA_TRUSTSTORE_PASSWORD, which it may reference.
             - name: JAVA_OPTS
@@ -244,15 +253,16 @@ spec:
         - name: tmp
           emptyDir: {}
         - name: license-state
-          {{- if $v.persistence.license.enabled }}
+          {{- if include "cert-alert.licenseVolumeMounted" . }}
+          # The license state is in the database; this volume is where an installation
+          # upgraded from a file-based release has its id and license imported from.
           persistentVolumeClaim:
             claimName: {{ include "cert-alert.licenseClaimName" . }}
           {{- else }}
-          # persistence.license.enabled=false: the license and installation id go with the
-          # pod. Evaluation only.
+          # The license state is in the database. Nothing to import from here.
           emptyDir: {}
           {{- end }}
-        {{- if and (include "cert-alert.licenseSupplied" .) $v.persistence.license.enabled }}
+        {{- if and (include "cert-alert.licenseSupplied" .) (include "cert-alert.licenseVolumeMounted" .) }}
         - name: license-source
           secret:
             secretName: {{ include "cert-alert.licenseSecretName" . }}

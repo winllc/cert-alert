@@ -69,7 +69,7 @@ public class LicenseScreenController {
         long people = users.count();
         model.addAttribute("check", check);
         model.addAttribute("installationId", licensing.installationId());
-        model.addAttribute("licenseFile", licensing.manager().licenseFile().toString());
+        model.addAttribute("licenseFile", licensing.manager().licenseLocation());
         model.addAttribute("features", features(check));
         model.addAttribute("people", people);
         model.addAttribute("usage", check.license().isPresent() ? check.usage(people).name() : null);
