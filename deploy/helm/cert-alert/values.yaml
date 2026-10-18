@@ -378,8 +378,8 @@ revocation:
   allowedHosts: []
 
 # Session limits: ENS_SESSION_IDLE_TIMEOUT / _ADMIN_IDLE_TIMEOUT / _ABSOLUTE_TIMEOUT /
-# _MAX_PER_USER. Empty (or null) keeps the application's default: 30m, the same as idle, 12h
-# and 0 (no limit). The STIG suggests adminIdleTimeout 15m and maxPerUser 3.
+# _MAX_PER_USER. Empty (or null) keeps the application's default: 15m (30m before this
+# release), the same as idle, 12h and 0 (no limit). The STIG suggests maxPerUser 3.
 session:
   idleTimeout: ""
   adminIdleTimeout: ""

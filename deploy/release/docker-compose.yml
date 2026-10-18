@@ -79,8 +79,11 @@ services:
       ENS_AUDIT_SYSLOG_FACILITY: ${ENS_AUDIT_SYSLOG_FACILITY:-local0}
     ports:
       # 8080 inside whichever way it is served: plain HTTP, or HTTPS once
-      # CERT_ALERT_TLS_ENABLED=true. Only the host side moves.
-      - "${CERT_ALERT_BIND_ADDRESS:-0.0.0.0}:${CERT_ALERT_PORT:-8080}:8080"
+      # CERT_ALERT_TLS_ENABLED=true. Only the host side moves. This host only by default,
+      # for a TLS-terminating reverse proxy in front; another address with TLS off is
+      # refused by install.sh unless CERT_ALERT_ALLOW_PLAIN_HTTP=true. (Releases before
+      # this one defaulted to 0.0.0.0; an upgrade keeps that - see the README.)
+      - "${CERT_ALERT_BIND_ADDRESS:-127.0.0.1}:${CERT_ALERT_PORT:-8080}:8080"
     volumes:
       # The ENS license, this installation's id (licenses are bound to it) and the license
       # revisions seen - writable, because the license screen saves uploads here. A named
