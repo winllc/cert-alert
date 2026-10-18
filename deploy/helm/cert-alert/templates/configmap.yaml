@@ -64,7 +64,7 @@ data:
   {{- if include "cert-alert.x509CaConfigured" . }}
   ENS_X509_TRUSTED_CA_FILE: "/etc/cert-alert/x509-ca/ca.pem"
   {{- end }}
-  ENS_X509_REVOCATION: {{ $v.x509.revocation | toString | quote }}
+  {{- include "cert-alert.envLine" (dict "name" "ENS_X509_REVOCATION" "value" $v.x509.revocation) }}
   {{- include "cert-alert.envLine" (dict "name" "ENS_X509_OCSP_RESPONDER_URL" "value" $v.x509.ocspResponderUrl) }}
   {{- include "cert-alert.envLine" (dict "name" "ENS_X509_REVOCATION_FAIL" "value" $v.x509.revocationFail) }}
   {{- include "cert-alert.envLine" (dict "name" "ENS_X509_REVOCATION_CACHE" "value" $v.x509.revocationCache) }}

@@ -593,13 +593,15 @@ ens:
   # certificates forwarded by a TLS-terminating proxy. See the README's "A client
   # certificate" section.
   x509:
-    # off, ocsp, crl or ocsp-then-crl.
-    revocation: ${ENS_X509_REVOCATION:off}
+    # off, ocsp, crl or ocsp-then-crl. Unset is ocsp-then-crl, soft-fail: a certificate
+    # found revoked is refused, and one nobody can answer for signs in with a warning.
+    revocation: ${ENS_X509_REVOCATION:}
     ocsp-responder-url: ${ENS_X509_OCSP_RESPONDER_URL:}
     # CRL files (DER or PEM), re-read when they change; with it set nothing is fetched.
     crl-dir: ${ENS_X509_CRL_DIR:}
     # closed refuses a certificate whose status cannot be found; open allows it, warning.
-    revocation-fail: ${ENS_X509_REVOCATION_FAIL:closed}
+    # Unset: open while ENS_X509_REVOCATION is unset too, closed once it is set.
+    revocation-fail: ${ENS_X509_REVOCATION_FAIL:}
     revocation-cache: ${ENS_X509_REVOCATION_CACHE:10m}
     # Issuer DNs, separated by semicolons (a DN has commas of its own). Empty: any the
     # trust store accepts.

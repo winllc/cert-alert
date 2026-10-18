@@ -127,8 +127,8 @@ The license screen shows the installation id; after the first sign-in it is also
 | `x509.trustedProxies` | private ranges | `ENS_X509_TRUSTED_PROXIES` | Where the header is accepted from: the ingress controller's pods |
 | `x509.proxySecret.existingSecret` / `.existingSecretKey` / `.value` | `""` / `proxy-secret` / `""` | `ENS_X509_PROXY_SECRET_FILE` | The secret the proxy sends in `X-ENS-Proxy-Secret`, 32+ characters. Required in header mode |
 | `x509.trustedCa.existingSecret` / `.existingSecretKey` / `.value` | `""` / `ca.pem` / `""` | `ENS_X509_TRUSTED_CA_FILE` | PEM CAs a forwarded certificate must chain to. Required in header mode |
-| `x509.revocation` | `off` | `ENS_X509_REVOCATION` | `off`, `ocsp`, `crl`, `ocsp-then-crl`: checked live at sign-in |
-| `x509.ocspResponderUrl` / `.revocationFail` / `.revocationCache` | `""` / `closed` / `""` | `ENS_X509_OCSP_RESPONDER_URL` / `_REVOCATION_FAIL` / `_REVOCATION_CACHE` | |
+| `x509.revocation` | `""` (`ocsp-then-crl`) | `ENS_X509_REVOCATION` | `off`, `ocsp`, `crl`, `ocsp-then-crl`: checked live at sign-in. Empty: `ocsp-then-crl`, soft-fail |
+| `x509.ocspResponderUrl` / `.revocationFail` / `.revocationCache` | `""` / `""` / `""` | `ENS_X509_OCSP_RESPONDER_URL` / `_REVOCATION_FAIL` / `_REVOCATION_CACHE` | `revocationFail` empty: `open` while `revocation` is empty, `closed` once it is set |
 | `x509.allowedIssuers` | `""` | `ENS_X509_ALLOWED_ISSUERS` | Issuer DNs separated by `;` |
 | `x509.userFilter` | `""` | `ENS_X509_USER_FILTER` | e.g. `(uid={edipi})`, with `CERT_ALERT_SECURITY_X509_REQUIRE_KNOWN_CERTIFICATE=false` in `extraEnv` |
 

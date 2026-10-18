@@ -694,7 +694,9 @@ Not appropriate on a FIPS system, and off by default:
   signature could not be checked; set `false` and configure `issuer-directory`.
 - Plain `ldap://`, plain syslog (`udp`/`tcp`), SMTP without `STARTTLS`, and a PostgreSQL
   URL without `sslmode=verify-full`.
-- `ENS_X509_REVOCATION_FAIL=open`, and `ENS_X509_REVOCATION=off` (the default).
+- `ENS_X509_REVOCATION_FAIL=open`, and the soft-fail default it stands for when
+  `ENS_X509_REVOCATION` is unset; set `ENS_X509_REVOCATION_FAIL=closed`. And
+  `ENS_X509_REVOCATION=off`.
 - `ENS_X509_SOURCE=header`, or a Helm install whose ingress or edge/reencrypt Route
   terminates TLS: the browser's TLS then ends at the proxy, so it is the proxy's
   cryptographic module, not this platform's, that has to be validated.
@@ -879,10 +881,10 @@ certificates.
 
 | Setting | Default | |
 |---|---|---|
-| `ENS_X509_REVOCATION` | `off` | `off`, `ocsp`, `crl` or `ocsp-then-crl`: checked live, for every certificate presented, before it is matched to anybody |
+| `ENS_X509_REVOCATION` | `ocsp-then-crl` | `off`, `ocsp`, `crl` or `ocsp-then-crl`: checked live, for every certificate presented, before it is matched to anybody |
 | `ENS_X509_OCSP_RESPONDER_URL` | — | Ask this responder instead of the one the certificate names — a local OCSP relay on an air-gapped network |
 | `ENS_X509_CRL_DIR` | — | A directory of CRL files (DER or PEM), re-read when they change. With it set, no distribution point is fetched over the network: the air-gapped option |
-| `ENS_X509_REVOCATION_FAIL` | `closed` | `closed`: when the status cannot be found, refuse. `open`: allow, and log a warning |
+| `ENS_X509_REVOCATION_FAIL` | `open` while `ENS_X509_REVOCATION` is unset, otherwise `closed` | `closed`: when the status cannot be found, refuse. `open`: allow, and log a warning |
 | `ENS_X509_REVOCATION_CACHE` | `10m` | How long a good or revoked answer is reused, per issuer and serial number. No answer is reused for 30 seconds |
 | `ENS_X509_ALLOWED_ISSUERS` | — | Issuer DNs, separated by `;`. When set, a certificate from any other issuer is refused even if the trust store accepts it. Compared as names (RFC 4514), so spacing and case do not matter |
 | `ENS_X509_USER_FILTER` | — | An LDAP filter that finds the holder of a certificate the directory does not publish, with `{upn}`, `{edipi}`, `{email}` and `{uuid}` filled in — e.g. `(uid={edipi})`. Used instead of the uid/address matching above, and only with `require-known-certificate: false` |
@@ -894,9 +896,20 @@ certificates.
   past its next update. Fetches have 5 s to connect and 10 s to answer, follow redirects to
   http and https only, and never go to link-local or metadata addresses
   (`cert-alert.revocation.allowed-hosts` applies here too). A refusal is a failed
-  `auth.login` with reason `certificate revoked` or `revocation unknown`. **The default is
-  `off`, for upgrades** — and with certificate sign-in on and revocation off, a warning at
-  startup says the STIG requires it.
+  `auth.login` with reason `certificate revoked` or `revocation unknown`.
+- **The default is a live check that soft-fails.** With neither setting given, every
+  certificate is checked over OCSP and then its CRL. One found revoked is refused. One that
+  no responder or list answers for (the network is closed, the responder is down, the
+  certificate names neither) signs in, and a warning naming it is logged:
+  `Allowing client certificate '…' although no OCSP responder or CRL answered for it
+  (soft-fail; …)`. A warning at startup says the check is soft-fail and how to change it.
+  The STIG expects fail-closed, so set `ENS_X509_REVOCATION_FAIL=closed` once responders or
+  `ENS_X509_CRL_DIR` answer reliably. On an air-gapped network, `ENS_X509_CRL_DIR` (or an
+  `ENS_X509_OCSP_RESPONDER_URL` relay) gives the check something to answer with, and saves
+  each sign-in waiting on fetches that cannot succeed. `ENS_X509_REVOCATION=off` still turns
+  the check off, with a warning at startup that the STIG requires it. Choosing a mode
+  yourself (`ocsp`, `crl` or `ocsp-then-crl`) keeps `closed` as the failure behaviour, as in
+  earlier releases.
 - **`{upn}`** is the SAN otherName UserPrincipalName; **`{edipi}`** the digits of a
   `1234567890@mil` UPN, or else the trailing number of a `LAST.FIRST.MI.1234567890` common
   name; **`{email}`** the rfc822Name SAN, or else the subject's emailAddress; **`{uuid}`** the

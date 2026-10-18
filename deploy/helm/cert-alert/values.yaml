@@ -236,12 +236,16 @@ x509:
     existingSecret: ""
     existingSecretKey: ca.pem
     value: ""
-  # ENS_X509_REVOCATION: off, ocsp, crl or ocsp-then-crl. The STIG requires it on.
-  revocation: "off"
+  # ENS_X509_REVOCATION: off, ocsp, crl or ocsp-then-crl. Empty: the application default,
+  # ocsp-then-crl, soft-fail - a certificate found revoked is refused, and one no OCSP
+  # responder or CRL answers for signs in with a warning in the log. The STIG requires a
+  # check; "off" turns it off.
+  revocation: ""
   # ENS_X509_OCSP_RESPONDER_URL: ask here instead of the certificate's own responder.
   ocspResponderUrl: ""
-  # ENS_X509_REVOCATION_FAIL: closed (refuse when unknown) or open.
-  revocationFail: closed
+  # ENS_X509_REVOCATION_FAIL: closed (refuse when unknown, as the STIG expects) or open.
+  # Empty: open while revocation is empty, closed once revocation is set.
+  revocationFail: ""
   # ENS_X509_REVOCATION_CACHE, e.g. 10m. Empty: the application default.
   revocationCache: ""
   # ENS_X509_ALLOWED_ISSUERS: issuer DNs separated by semicolons. Empty: any trusted issuer.

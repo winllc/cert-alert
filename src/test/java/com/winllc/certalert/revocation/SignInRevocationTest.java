@@ -56,12 +56,27 @@ class SignInRevocationTest {
 
     @Test
     void offAsksNothing() {
+        settings.setRevocation("off");
         TestCa.Issued issued = issue(null, responder.url());
 
         SignInRevocation.Answer answer = checker().check(issued.certificate(), ca.certificate());
 
         assertThat(answer.status()).isEqualTo(RevocationStatus.NOT_CHECKED);
         assertThat(responder.requestCount()).isZero();
+    }
+
+    /** Left unset, the check is on: the responder the certificate names is asked. */
+    @Test
+    void unsetAsksTheResponder() {
+        TestCa.Issued good = issue(null, responder.url());
+        TestCa.Issued revoked = issue(null, responder.url());
+        responder.revoke(revoked.serial(), clock.instant().minus(Duration.ofDays(1)));
+
+        assertThat(checker().isEnabled()).isTrue();
+        assertThat(checker().check(good.certificate(), ca.certificate()).status()).isEqualTo(RevocationStatus.GOOD);
+        assertThat(checker().check(revoked.certificate(), ca.certificate()).status())
+                .isEqualTo(RevocationStatus.REVOKED);
+        assertThat(responder.requestCount()).isEqualTo(2);
     }
 
     @Test
