@@ -36,7 +36,7 @@ management:
 cert-alert:
   security:
     # The sample directory gives everyone the password "password"; alice is the admin.
-    admin-identifiers: [alice@intelink.ic.gov]
+    admin-identifiers: [alice]
     ldap:
       user-search-base: ou=people
       user-search-filter: "(uid={0})"

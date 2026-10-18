@@ -185,9 +185,9 @@ public final class EmbeddedDirectory implements AutoCloseable {
      * has heard of is accepted exactly as a real directory with its own schema would.
      */
     public String addUserWithExtraAttributes(
-            String uid, String displayName, String icEmail, Map<String, List<String>> extra) {
+            String uid, String displayName, String icEmail, Map<String, List<String>> extra, byte[]... certificates) {
 
-        Entry entry = userEntry(uid, displayName, icEmail);
+        Entry entry = userEntry(uid, displayName, icEmail, certificates);
         extra.forEach((name, values) -> entry.addAttribute(new Attribute(name, values)));
         add(entry);
         return "uid=" + uid + "," + PEOPLE_DN;

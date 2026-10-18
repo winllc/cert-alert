@@ -22,9 +22,12 @@ public class EnsX509Properties {
     public enum Revocation {
         OFF, OCSP, CRL, OCSP_THEN_CRL;
 
+        /** What an unset {@code ENS_X509_REVOCATION} means: the STIG asks for a live check. */
+        public static final Revocation DEFAULT = OCSP_THEN_CRL;
+
         static Revocation parse(String value) {
             if (value == null || value.isBlank()) {
-                return OFF;
+                return DEFAULT;
             }
             try {
                 return valueOf(value.trim().toUpperCase(Locale.ROOT).replace('-', '_'));
@@ -51,8 +54,11 @@ public class EnsX509Properties {
         HEADER
     }
 
-    /** {@code ENS_X509_REVOCATION}: off, ocsp, crl or ocsp-then-crl. */
-    private String revocation = "off";
+    /**
+     * {@code ENS_X509_REVOCATION}: off, ocsp, crl or ocsp-then-crl. Unset is ocsp-then-crl,
+     * soft-fail (see {@link #isFailOpen}).
+     */
+    private String revocation;
 
     /** {@code ENS_X509_OCSP_RESPONDER_URL}: ask here rather than where the certificate says. */
     private String ocspResponderUrl;
@@ -63,8 +69,12 @@ public class EnsX509Properties {
      */
     private String crlDir;
 
-    /** {@code ENS_X509_REVOCATION_FAIL}: closed refuses when the status cannot be found; open allows, with a warning. */
-    private String revocationFail = "closed";
+    /**
+     * {@code ENS_X509_REVOCATION_FAIL}: closed refuses when the status cannot be found; open
+     * allows, with a warning. Unset follows {@code ENS_X509_REVOCATION}: open where that is
+     * unset too, closed where it was chosen.
+     */
+    private String revocationFail;
 
     /** {@code ENS_X509_REVOCATION_CACHE}: how long a good or revoked answer is reused, per serial and issuer. */
     private Duration revocationCache = Duration.ofMinutes(10);
@@ -143,14 +153,27 @@ public class EnsX509Properties {
         this.revocationFail = revocationFail;
     }
 
-    /** Whether an unknown status is let through: {@code open}, rather than {@code closed}. */
+    /** Whether {@code ENS_X509_REVOCATION} was left unset, and so means the default check. */
+    public boolean isRevocationDefaulted() {
+        return revocation == null || revocation.isBlank();
+    }
+
+    /**
+     * Whether an unknown status is let through: {@code open}, rather than {@code closed}.
+     *
+     * <p>Unset, it is open when {@code ENS_X509_REVOCATION} is unset as well. That default
+     * is a live check that refuses what it finds revoked and lets through, with a warning,
+     * what it cannot get an answer about - so a site whose responders cannot be reached,
+     * an air-gapped one above all, still signs people in. A site that chose a mode itself
+     * chose closed by leaving this unset in earlier releases, and still gets it.
+     */
     public boolean isFailOpen() {
         String value = revocationFail == null ? "" : revocationFail.trim().toLowerCase(Locale.ROOT);
         if (!value.isEmpty() && !value.equals("closed") && !value.equals("open")) {
             throw new IllegalArgumentException(
                     "ENS_X509_REVOCATION_FAIL must be closed or open, not '" + revocationFail + "'");
         }
-        return value.equals("open");
+        return value.isEmpty() ? isRevocationDefaulted() : value.equals("open");
     }
 
     public Duration getRevocationCache() {

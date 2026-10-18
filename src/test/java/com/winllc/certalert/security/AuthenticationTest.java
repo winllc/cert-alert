@@ -51,7 +51,13 @@ import org.springframework.web.context.WebApplicationContext;
  * Both ways in: a client certificate the directory publishes, and a directory password for
  * a browser that presents none.
  */
-@SpringBootTest
+@SpringBootTest(properties = {
+    // A configuration written for an earlier release, which listed administrators by
+    // address as well: the address is ignored, the uid and the DN still count.
+    "cert-alert.security.admin-identifiers[0]=admin",
+    "cert-alert.security.admin-identifiers[1]=admin@example.gov",
+    "cert-alert.security.admin-identifiers[2]=" + AuthenticationTest.BOSS_DN
+})
 @ActiveProfiles("test")
 class AuthenticationTest {
 
@@ -75,6 +81,18 @@ class AuthenticationTest {
      * name with the administrator and with somebody else the cache holds.
      */
     private static final String NEWCOMER_DN = "uid=ada.newcomer," + EmbeddedDirectory.PEOPLE_DN;
+
+    /** Listed in admin-identifiers by the DN of their entry. */
+    static final String BOSS_DN = "uid=boss," + EmbeddedDirectory.PEOPLE_DN;
+
+    /**
+     * Cached, with a certificate, and has set their own {@code mail} to the administrator's
+     * address - which plenty of directories let a person do.
+     */
+    private static X509Certificate malloryCertificate;
+
+    /** Never cached, and has done the same. */
+    private static final String SELF_MAILER_DN = "uid=self.mailer," + EmbeddedDirectory.PEOPLE_DN;
 
     /** Also never cached, and called by the administrator's address. */
     private static final String NAMESAKE_DN = "uid=namesake," + EmbeddedDirectory.PEOPLE_DN;
@@ -130,6 +148,16 @@ class AuthenticationTest {
         directory.addUser("ada.other", "Ada Admin", "ada.other@example.gov");
         directory.add(uncachedPerson(NEWCOMER_DN, "ada.newcomer", "Ada Admin"));
         directory.add(uncachedPerson(NAMESAKE_DN, "namesake", "admin@example.gov"));
+        directory.addUser("boss", "Bo Ss", "boss@example.gov");
+
+        byte[] mallory = TestCertificates.der("mallory@example.gov", now.minus(Duration.ofDays(30)),
+                now.plus(Duration.ofDays(365)));
+        malloryCertificate = TestCertificates.certificateOf(mallory);
+        directory.addUserWithExtraAttributes("mallory", "Mal Lory", "mallory@example.gov",
+                java.util.Map.of("mail", List.of("admin@example.gov")), mallory);
+        Entry selfMailer = uncachedPerson(SELF_MAILER_DN, "self.mailer", "Self Mailer");
+        selfMailer.addAttribute(new Attribute("mail", "admin@example.gov"));
+        directory.add(selfMailer);
 
         revocableCertificate = TestCertificates.der("revoked@example.gov", now.minus(Duration.ofDays(30)),
                 now.plus(Duration.ofDays(365)));
@@ -438,7 +466,7 @@ class AuthenticationTest {
 
     @Test
     void anAdministratorCan() throws Exception {
-        // admin@example.gov is listed in cert-alert.security.admin-identifiers for tests.
+        // The test profile lists the administrator by uid.
         mockMvc.perform(post("/api/v1/sync/refresh").with(csrf())
                         .with(SecurityMockMvcRequestPostProcessors.user("admin@example.gov")
                                 .roles("USER", "ADMIN")))
@@ -446,9 +474,13 @@ class AuthenticationTest {
     }
 
     @Test
-    void theAdminListGrantsTheRoleByAnyIdentifierTheDirectoryKnows() throws Exception {
+    void theAdminListGrantsTheRoleByUid() throws Exception {
         mockMvc.perform(formLogin().user("admin").password("password"))
-                .andExpect(authenticated().withUsername("admin@example.gov"));
+                .andExpect(authenticated()
+                        .withUsername("admin@example.gov")
+                        .withAuthentication(authentication -> assertThat(authentication.getAuthorities())
+                                .extracting(GrantedAuthority::getAuthority)
+                                .contains(DirectoryPrincipalResolver.ROLE_ADMIN)));
 
         assertThat(userRepository
                         .findByIdentifier("admin@example.gov")
@@ -468,6 +500,64 @@ class AuthenticationTest {
                         .withAuthentication(authentication -> assertThat(authentication.getAuthorities())
                                 .extracting(GrantedAuthority::getAuthority)
                                 .contains(DirectoryPrincipalResolver.ROLE_ADMIN)));
+    }
+
+    // --- administrator rights come from the DN or the uid, never an address ----------------
+
+    /**
+     * The 389 Directory Server default: a person may write their own {@code mail}. Setting
+     * it to an administrator's address - which the configuration even lists - grants
+     * nothing, by password or by certificate.
+     */
+    @Test
+    void somebodyWhoSetsTheirMailToAnAdministratorsAddressIsNotOne() throws Exception {
+        assertThat(userRepository.findByDn("uid=mallory," + EmbeddedDirectory.PEOPLE_DN))
+                .get()
+                .extracting(user -> user.getMail())
+                .isEqualTo("admin@example.gov");
+
+        mockMvc.perform(formLogin().user("mallory").password("password"))
+                .andExpect(authenticated().withAuthentication(authentication -> {
+                    assertThat(((DirectoryPrincipal) authentication.getPrincipal()).getDirectoryUserId()).isNotNull();
+                    assertThat(authentication.getAuthorities())
+                            .extracting(GrantedAuthority::getAuthority)
+                            .contains(DirectoryPrincipalResolver.ROLE_USER)
+                            .doesNotContain(DirectoryPrincipalResolver.ROLE_ADMIN);
+                }));
+        mockMvc.perform(post("/api/v1/sync/refresh").with(x509(malloryCertificate)).with(csrf()))
+                .andExpect(status().isForbidden());
+    }
+
+    /** And the same for somebody the cache has never seen, judged by the entry they bound as. */
+    @Test
+    void anUncachedEntryWhoseMailIsAnAdministratorsAddressIsNotOne() throws Exception {
+        mockMvc.perform(formLogin().user("self.mailer").password("password"))
+                .andExpect(authenticated().withAuthentication(authentication -> {
+                    assertThat(((DirectoryPrincipal) authentication.getPrincipal()).getDirectoryUserId()).isNull();
+                    assertThat(authentication.getAuthorities())
+                            .extracting(GrantedAuthority::getAuthority)
+                            .contains(DirectoryPrincipalResolver.ROLE_USER)
+                            .doesNotContain(DirectoryPrincipalResolver.ROLE_ADMIN);
+                }));
+    }
+
+    /** Listed by the DN of their entry: an administrator, cached or not. */
+    @Test
+    void theDnOfAnEntryStillGrantsIt() throws Exception {
+        mockMvc.perform(formLogin().user("boss").password("password"))
+                .andExpect(authenticated().withAuthentication(authentication -> assertThat(
+                                authentication.getAuthorities())
+                        .extracting(GrantedAuthority::getAuthority)
+                        .contains(DirectoryPrincipalResolver.ROLE_ADMIN)));
+
+        userRepository.deleteAll();
+        mockMvc.perform(formLogin().user("boss").password("password"))
+                .andExpect(authenticated().withAuthentication(authentication -> {
+                    assertThat(((DirectoryPrincipal) authentication.getPrincipal()).getDirectoryUserId()).isNull();
+                    assertThat(authentication.getAuthorities())
+                            .extracting(GrantedAuthority::getAuthority)
+                            .contains(DirectoryPrincipalResolver.ROLE_ADMIN);
+                }));
     }
 
     @Test

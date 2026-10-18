@@ -694,7 +694,9 @@ Not appropriate on a FIPS system, and off by default:
   signature could not be checked; set `false` and configure `issuer-directory`.
 - Plain `ldap://`, plain syslog (`udp`/`tcp`), SMTP without `STARTTLS`, and a PostgreSQL
   URL without `sslmode=verify-full`.
-- `ENS_X509_REVOCATION_FAIL=open`, and `ENS_X509_REVOCATION=off` (the default).
+- `ENS_X509_REVOCATION_FAIL=open`, and the soft-fail default it stands for when
+  `ENS_X509_REVOCATION` is unset; set `ENS_X509_REVOCATION_FAIL=closed`. And
+  `ENS_X509_REVOCATION=off`.
 - `ENS_X509_SOURCE=header`, or a Helm install whose ingress or edge/reencrypt Route
   terminates TLS: the browser's TLS then ends at the proxy, so it is the proxy's
   cryptographic module, not this platform's, that has to be validated.
@@ -740,7 +742,7 @@ The ENS platform baseline:
 | `ens_auth_attempts_total{method,outcome}` | counter | Sign-ins and refusals: `x509` (once per session) or `ldap`, `success` or `failure` |
 | `ens_certalert_certificates{status}` | gauge | Cached certificates by state: `none`, `valid`, `expiring_soon`, `expired` |
 | `ens_certalert_job_last_success_seconds{job}` | gauge | When each job last finished without failing (Unix time), since startup |
-| `ens_certalert_digest_truncated_total` | counter | Round-ups that stopped at `cert-alert.notifications.digest.scan-limit` |
+| `ens_certalert_digest_truncated_total` | counter | Round-ups that stopped at `cert-alert.notifications.digest.scan-limit` (either read) |
 | `ens_certalert_revocation_unknown` | gauge | Cached certificates whose authority gave no revocation answer |
 | `ens_certalert_mail_outbox{state}` | gauge | Email `pending` in the outbox, and `failed` (given up on) |
 
@@ -879,10 +881,10 @@ certificates.
 
 | Setting | Default | |
 |---|---|---|
-| `ENS_X509_REVOCATION` | `off` | `off`, `ocsp`, `crl` or `ocsp-then-crl`: checked live, for every certificate presented, before it is matched to anybody |
+| `ENS_X509_REVOCATION` | `ocsp-then-crl` | `off`, `ocsp`, `crl` or `ocsp-then-crl`: checked live, for every certificate presented, before it is matched to anybody |
 | `ENS_X509_OCSP_RESPONDER_URL` | — | Ask this responder instead of the one the certificate names — a local OCSP relay on an air-gapped network |
 | `ENS_X509_CRL_DIR` | — | A directory of CRL files (DER or PEM), re-read when they change. With it set, no distribution point is fetched over the network: the air-gapped option |
-| `ENS_X509_REVOCATION_FAIL` | `closed` | `closed`: when the status cannot be found, refuse. `open`: allow, and log a warning |
+| `ENS_X509_REVOCATION_FAIL` | `open` while `ENS_X509_REVOCATION` is unset, otherwise `closed` | `closed`: when the status cannot be found, refuse. `open`: allow, and log a warning |
 | `ENS_X509_REVOCATION_CACHE` | `10m` | How long a good or revoked answer is reused, per issuer and serial number. No answer is reused for 30 seconds |
 | `ENS_X509_ALLOWED_ISSUERS` | — | Issuer DNs, separated by `;`. When set, a certificate from any other issuer is refused even if the trust store accepts it. Compared as names (RFC 4514), so spacing and case do not matter |
 | `ENS_X509_USER_FILTER` | — | An LDAP filter that finds the holder of a certificate the directory does not publish, with `{upn}`, `{edipi}`, `{email}` and `{uuid}` filled in — e.g. `(uid={edipi})`. Used instead of the uid/address matching above, and only with `require-known-certificate: false` |
@@ -894,9 +896,20 @@ certificates.
   past its next update. Fetches have 5 s to connect and 10 s to answer, follow redirects to
   http and https only, and never go to link-local or metadata addresses
   (`cert-alert.revocation.allowed-hosts` applies here too). A refusal is a failed
-  `auth.login` with reason `certificate revoked` or `revocation unknown`. **The default is
-  `off`, for upgrades** — and with certificate sign-in on and revocation off, a warning at
-  startup says the STIG requires it.
+  `auth.login` with reason `certificate revoked` or `revocation unknown`.
+- **The default is a live check that soft-fails.** With neither setting given, every
+  certificate is checked over OCSP and then its CRL. One found revoked is refused. One that
+  no responder or list answers for (the network is closed, the responder is down, the
+  certificate names neither) signs in, and a warning naming it is logged:
+  `Allowing client certificate '…' although no OCSP responder or CRL answered for it
+  (soft-fail; …)`. A warning at startup says the check is soft-fail and how to change it.
+  The STIG expects fail-closed, so set `ENS_X509_REVOCATION_FAIL=closed` once responders or
+  `ENS_X509_CRL_DIR` answer reliably. On an air-gapped network, `ENS_X509_CRL_DIR` (or an
+  `ENS_X509_OCSP_RESPONDER_URL` relay) gives the check something to answer with, and saves
+  each sign-in waiting on fetches that cannot succeed. `ENS_X509_REVOCATION=off` still turns
+  the check off, with a warning at startup that the STIG requires it. Choosing a mode
+  yourself (`ocsp`, `crl` or `ocsp-then-crl`) keeps `closed` as the failure behaviour, as in
+  earlier releases.
 - **`{upn}`** is the SAN otherName UserPrincipalName; **`{edipi}`** the digits of a
   `1234567890@mil` UPN, or else the trailing number of a `LAST.FIRST.MI.1234567890` common
   name; **`{email}`** the rfc822Name SAN, or else the subject's emailAddress; **`{uuid}`** the
@@ -966,19 +979,41 @@ nothing else, and there will be no password path at all.
 | `ROLE_ADMIN` | Also trigger the jobs and reach the management endpoints   |
 
 Everyone who authenticates gets `ROLE_USER`. `ROLE_ADMIN` comes from
-`cert-alert.security.admin-identifiers`, matched against what the directory says identifies
-a person — any address it publishes for them, their uid, or the DN of their entry:
+`cert-alert.security.admin-identifiers`, matched against two things only: a person's uid,
+and the DN of their entry.
 
 ```yaml
 cert-alert:
   security:
     admin-identifiers:
-      - alice@intelink.ic.gov
+      - alice
       - uid=bob,ou=people,dc=example,dc=gov
 ```
 
-A common name, display name or preferred name is never matched: two people can share one,
-and the directory lets anybody be called anything. A DN has commas in it, so name one as a
+An address is never matched, not even one the directory publishes. Plenty of directories
+let people edit their own `mail`, and 389 Directory Server's default access controls do.
+Matching on it would let anybody set their address to an administrator's and get the
+role at their next sign-in. A common name, display name or preferred name is never
+matched either: two people can share one, and the directory lets anybody be called
+anything.
+
+**An address in `admin-identifiers` is ignored.** Releases before this one also matched
+the addresses the directory publishes, so an existing configuration may list
+administrators that way. The application still starts, and every uid and DN in the list
+still counts. Each address entry, though, grants nothing, and startup logs a warning for
+it:
+
+```
+cert-alert.security.admin-identifiers lists 'alice@intelink.ic.gov', an e-mail address, and it is ignored: administrator rights match only a uid or the DN of a directory entry, because a directory may let people change their own mail. The directory cache has it as the address of uid 'alice' (uid=alice,ou=people,dc=example,dc=gov): list 'alice', or that DN, instead.
+```
+
+Replace each one with the uid or DN the warning names. If the list holds nothing but
+addresses, a second warning says that nobody is an administrator until it is fixed. Where
+a directory uses addresses as uids, list the DN, because an entry that looks like an
+address is treated as one. An address entry still blocks anyone from adding that address
+to their own entry (see [Addresses a person answers to](#addresses-a-person-answers-to)).
+
+A DN has commas in it, so name one as a
 block-style list item as above: not in a flow list (`[...]`), and not in the comma-separated
 `CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS`, both of which split it at its commas. From the
 environment, use indexed variables instead (`CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS_0`,
@@ -986,8 +1021,8 @@ environment, use indexed variables instead (`CERT_ALERT_SECURITY_ADMIN_IDENTIFIE
 
 A password sign-in is resolved to the cached person at the DN it bound as, and to nobody
 else. On a fresh deployment the cache is empty, so roles for someone signing in with a
-password are resolved from the directory entry they just bound against — its DN, uid and
-addresses, and the username typed. Otherwise nobody could trigger the first sync.
+password are resolved from the directory entry they just bound against: its DN and its uid,
+never its addresses or the username typed. Otherwise nobody could trigger the first sync.
 
 `/actuator/health` stays open so the thing can be monitored. Everything else requires
 authentication; an unauthenticated API call gets a 401 rather than a login page, because a
@@ -1347,7 +1382,7 @@ An address added there joins the set a `serverPOC` is matched against, and the s
 named after it become theirs immediately — not at the next sweep.
 
 That is all it does. An address added here never makes anybody an administrator:
-`admin-identifiers` is matched only against what the directory publishes. And an address
+`admin-identifiers` is matched only against a uid or a DN. And an address
 `admin-identifiers` names cannot be added at all — the request is refused with a 400 saying
 so — because where `contact-editors: AUTHENTICATED` lets anyone signed in add addresses,
 that would be somebody naming themselves after an administrator. One added before this was
@@ -1924,13 +1959,28 @@ the email looks.
 
 **What one run reads.** The certificates about to expire, and — with
 `cert-alert.notifications.digest.include-expired`, on by default — those already expired,
-are read separately, each up to `cert-alert.notifications.digest.scan-limit` (10,000), and
-the ones about to expire first. However many old certificates a directory goes on
-publishing, they cannot push next week's out of the round-up. An expired certificate on an
-entry that holds a current one is left out by the read itself, so the leftovers of renewals
-use none of the limit; of what remains, a capped read keeps the most recently expired. A run
-that reaches the limit logs a warning naming which of the two it was, and leaves earlier
-round-ups in place rather than clearing ones it may simply not have reached.
+are read separately, the ones about to expire first. However many old certificates a
+directory goes on publishing, they cannot push next week's out of the round-up.
+
+- **A page at a time.** Each read is paged
+  (`cert-alert.notifications.digest.page-size`, 1,000 per query) by expiry date and id, so a
+  page costs the same however deep the read goes. Each read stops at
+  `cert-alert.notifications.digest.scan-limit` (50,000 per kind). That limit bounds one
+  run's memory. It is not a target.
+- **A bounded look-back.** Only certificates that expired in the last
+  `cert-alert.notifications.digest.expired-look-back` (`CERT_ALERT_NOTIFICATIONS_DIGEST_EXPIRED_LOOK_BACK`,
+  `90d`) are reported as expired. One that lapsed longer ago is either finished with or has
+  been reported every day since. `0` removes the bound.
+- **Renewals left out by the query.** A certificate whose entry has published a later one
+  with the same subject and key usage, not itself expired, has been renewed. The query skips
+  it, as it skips an expired certificate on an entry that holds a current one, so neither
+  uses up the limit. The same renewal rule then runs again in the application, which also
+  pairs a person's signing and encryption certificates.
+- **Truncation is reported.** Of what remains, a capped read keeps the soonest to expire,
+  or the most recently expired. A run that reaches the limit logs a warning naming which of
+  the two it was. It counts the run in `ens_certalert_digest_truncated_total`, so you can
+  alert on it, and leaves earlier round-ups in place rather than clearing ones it may simply
+  not have reached.
 
 Email is off until `cert-alert.notifications.email.enabled` is set and `spring.mail.*` is
 configured. The notifications are written and shown on the page either way.
@@ -2692,7 +2742,7 @@ Access, under `cert-alert.security`:
 | Property                          | Default | Purpose                                      |
 |-----------------------------------|---------|----------------------------------------------|
 | `enabled`                         | `true`  | Off leaves the application open; local development only |
-| `admin-identifiers`               | `[]`    | Identifiers granted `ROLE_ADMIN`              |
+| `admin-identifiers`               | `[]`    | uids or entry DNs granted `ROLE_ADMIN`; an address is ignored, with a warning |
 | `x509.enabled`                    | `true`  | Accept client certificates                    |
 | `x509.require-known-certificate`  | `true`  | Match by fingerprint against the cache        |
 | `ldap.enabled`                    | `true`  | Offer the password fallback                   |
@@ -2734,6 +2784,65 @@ class SlackAlertNotifier implements AlertNotifier {
     }
 }
 ```
+
+## Upgrade notes
+
+Read these before upgrading. They apply to the compose bundle, the Helm chart and a plain
+`java -jar` alike.
+
+### Administrators are matched by uid or DN only
+
+`cert-alert.security.admin-identifiers` (`CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS`,
+`security.adminIdentifiers` in Helm) is matched against a person's uid and the DN of their
+entry, and nothing else. An e-mail address in the list is **ignored**: a directory may let
+people change their own `mail`, so matching on it let anybody make themselves an
+administrator.
+
+- **What happens on upgrade.** The application starts as before. Every uid and DN in the
+  list still counts. For each address, startup logs a warning that names the uid and DN the
+  directory cache holds for it. If the list holds only addresses, a second warning says that
+  nobody is an administrator. A Helm install also warns in its NOTES.
+- **What to do.** Replace each address with the uid the warning names, e.g.
+  `CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS=alice` instead of `alice@example.gov`. List a DN
+  through indexed variables (`CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS_0=uid=alice,ou=people,dc=example,dc=gov`)
+  or a block-style YAML list. Where uids are themselves addresses, list the DN.
+- The compose file's default administrator is now `alice`, not `alice@intelink.ic.gov`.
+
+### Client certificates are checked for revocation at sign-in by default
+
+With `ENS_X509_REVOCATION` unset, a client certificate is now checked live, over OCSP and
+then its CRL. Before, nothing was checked live.
+
+- **Soft-fail by default.** A certificate found revoked is refused and audited
+  (`auth.login`, reason `certificate revoked`). One that no responder or CRL answers for
+  signs in, with a warning in the log. Startup says the check is soft-fail.
+- **What to do.**
+  - For the STIG's fail-closed behaviour, set `ENS_X509_REVOCATION_FAIL=closed`.
+  - On an air-gapped network, set `ENS_X509_CRL_DIR`, or an `ENS_X509_OCSP_RESPONDER_URL`
+    relay, so the check has an answer and sign-in does not wait on fetches that cannot
+    succeed.
+  - To keep the old behaviour, set `ENS_X509_REVOCATION=off`.
+- **Already set?** If you set `ENS_X509_REVOCATION` yourself and left
+  `ENS_X509_REVOCATION_FAIL` unset, nothing changes: that combination stays fail-closed.
+- **Helm.** `x509.revocation` and `x509.revocationFail` now default to `""`, the application
+  default. A values file that sets `revocation: "off"` keeps the check off.
+- **Outbound access.** Sign-in now fetches from the OCSP and CRL addresses that client
+  certificates name. These are held to the same `cert-alert.revocation.allowed-hosts` and
+  address rules as the nightly revocation job.
+
+### The expiry round-up has a look-back and pages its reads
+
+- **Look-back for expired certificates.** Only certificates that expired in the last 90
+  days are reported as expired (`cert-alert.notifications.digest.expired-look-back`,
+  `CERT_ALERT_NOTIFICATIONS_DIGEST_EXPIRED_LOOK_BACK`). Older ones, which were reported in
+  every round-up until now, no longer are. Set `0` to report them all again.
+- **Renewed certificates are left out by the query.** A certificate already renewed under
+  the same subject is skipped in the query and no longer uses up the limit. The log line's
+  "already replaced" count includes these.
+- **A higher limit, read in pages.** Each read is paged
+  (`cert-alert.notifications.digest.page-size`, 1,000), and `scan-limit` rises from 10,000
+  to 50,000 per kind. A run that reaches it still logs a warning and counts in
+  `ens_certalert_digest_truncated_total`.
 
 ## Releases
 

@@ -100,7 +100,7 @@ The license screen shows the installation id; after the first sign-in it is also
 | `ldap.binaryCertificateOption` | `null` | `CERT_ALERT_LDAP_BINARY_CERTIFICATE_OPTION` | `false` for a directory with no `userCertificate;binary` |
 | `ldap.pageSize` / `ldap.paged` | `null` | `CERT_ALERT_LDAP_PAGE_SIZE` / `_PAGED` | |
 | `ldap.changelogEnabled` | `null` | `CERT_ALERT_LDAP_CHANGELOG_ENABLED` | Follow the directory's changelog |
-| `security.adminIdentifiers` | `[]` | `CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS` | Addresses or uids of administrators (not common names) |
+| `security.adminIdentifiers` | `[]` | `CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS` | uids (or entry DNs) of administrators. An address is ignored, with a warning: see the upgrade notes below |
 | `security.ldap.enabled` | `null` | `CERT_ALERT_SECURITY_LDAP_ENABLED` | The password fallback |
 | `security.ldap.userSearchBase` | `""` | `CERT_ALERT_SECURITY_LDAP_USER_SEARCH_BASE` | e.g. `ou=people` |
 | `security.ldap.userSearchFilter` | `""` | `CERT_ALERT_SECURITY_LDAP_USER_SEARCH_FILTER` | e.g. `(uid={0})` |
@@ -127,8 +127,8 @@ The license screen shows the installation id; after the first sign-in it is also
 | `x509.trustedProxies` | private ranges | `ENS_X509_TRUSTED_PROXIES` | Where the header is accepted from: the ingress controller's pods |
 | `x509.proxySecret.existingSecret` / `.existingSecretKey` / `.value` | `""` / `proxy-secret` / `""` | `ENS_X509_PROXY_SECRET_FILE` | The secret the proxy sends in `X-ENS-Proxy-Secret`, 32+ characters. Required in header mode |
 | `x509.trustedCa.existingSecret` / `.existingSecretKey` / `.value` | `""` / `ca.pem` / `""` | `ENS_X509_TRUSTED_CA_FILE` | PEM CAs a forwarded certificate must chain to. Required in header mode |
-| `x509.revocation` | `off` | `ENS_X509_REVOCATION` | `off`, `ocsp`, `crl`, `ocsp-then-crl`: checked live at sign-in |
-| `x509.ocspResponderUrl` / `.revocationFail` / `.revocationCache` | `""` / `closed` / `""` | `ENS_X509_OCSP_RESPONDER_URL` / `_REVOCATION_FAIL` / `_REVOCATION_CACHE` | |
+| `x509.revocation` | `""` (`ocsp-then-crl`) | `ENS_X509_REVOCATION` | `off`, `ocsp`, `crl`, `ocsp-then-crl`: checked live at sign-in. Empty: `ocsp-then-crl`, soft-fail |
+| `x509.ocspResponderUrl` / `.revocationFail` / `.revocationCache` | `""` / `""` / `""` | `ENS_X509_OCSP_RESPONDER_URL` / `_REVOCATION_FAIL` / `_REVOCATION_CACHE` | `revocationFail` empty: `open` while `revocation` is empty, `closed` once it is set |
 | `x509.allowedIssuers` | `""` | `ENS_X509_ALLOWED_ISSUERS` | Issuer DNs separated by `;` |
 | `x509.userFilter` | `""` | `ENS_X509_USER_FILTER` | e.g. `(uid={edipi})`, with `CERT_ALERT_SECURITY_X509_REQUIRE_KNOWN_CERTIFICATE=false` in `extraEnv` |
 
@@ -247,7 +247,7 @@ database:
   host: postgres.example.gov
   password: change-me
 security:
-  adminIdentifiers: [pki-admin@example.gov]
+  adminIdentifiers: [pki-admin]
 ```
 
 ```bash
@@ -446,6 +446,12 @@ The pod is replaced (`Recreate`), the database schema is migrated on start, and 
 is kept, with the installed license and the installation id. A license given with
 `license.file` or `license.existingSecret` is not copied again while one is installed. Back up
 the database first: migrations are not undone by `helm rollback`.
+
+Before upgrading, read the [upgrade notes](../../../README.md#upgrade-notes). In particular:
+
+- `security.adminIdentifiers` now matches a uid or an entry DN only. An e-mail address there
+  is ignored, and the NOTES and the startup log warn about it.
+- `x509.revocation` now defaults to the application's live, soft-fail check.
 
 ### Uninstall
 

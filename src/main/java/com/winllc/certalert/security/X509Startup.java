@@ -20,8 +20,9 @@ import org.springframework.stereotype.Component;
  *       {@code ENS_X509_TRUSTED_CA_FILE} to validate the forwarded chain against, or with
  *       {@code SERVER_FORWARD_HEADERS_STRATEGY=native}, which rewrites the connection's
  *       address in place and so would let a client choose the address the proxy check sees.
- *   <li>Certificate sign-in with revocation checking off is allowed - it is the default, for
- *       upgrades - and warned about, since the STIG requires it.
+ *   <li>Certificate sign-in with revocation checking off is allowed, and warned about, since
+ *       the STIG requires it. Left unset, revocation is checked live and soft-fails, and
+ *       startup says so: what that lets through, and what to set instead.
  * </ul>
  */
 @Component
@@ -86,12 +87,21 @@ public class X509Startup {
                     + "revocation checking at sign-in; set ENS_X509_REVOCATION to ocsp, crl or ocsp-then-crl");
         }
         if (certificatesArrive && revocation != EnsX509Properties.Revocation.OFF && failOpen) {
-            log.warn("ENS_X509_REVOCATION_FAIL=open: a certificate whose revocation status cannot be found signs in "
-                    + "anyway. The STIG expects closed");
+            if (x509.isRevocationDefaulted() && (x509.getRevocationFail() == null || x509.getRevocationFail().isBlank())) {
+                log.warn("Client certificates are checked for revocation at sign-in by default (ocsp-then-crl), "
+                        + "soft-fail: one found revoked is refused, and one no OCSP responder or CRL answers for "
+                        + "signs in with a warning. Set ENS_X509_REVOCATION_FAIL=closed to refuse those as the STIG "
+                        + "expects, ENS_X509_CRL_DIR to read CRLs from disk where nothing can be fetched, or "
+                        + "ENS_X509_REVOCATION=off to check nothing");
+            } else {
+                log.warn("ENS_X509_REVOCATION_FAIL=open: a certificate whose revocation status cannot be found "
+                        + "signs in anyway. The STIG expects closed");
+            }
         }
         if (revocation != EnsX509Properties.Revocation.OFF) {
-            log.info("Client certificates are checked for revocation at sign-in: {}{}{}",
-                    x509.getRevocation(),
+            log.info("Client certificates are checked for revocation at sign-in: {}{}{}{}",
+                    x509.isRevocationDefaulted() ? "ocsp-then-crl (the default)" : x509.getRevocation(),
+                    failOpen ? ", soft-fail" : ", fail-closed",
                     x509.getCrlDir() == null ? "" : ", CRLs from " + x509.getCrlDir(),
                     x509.getOcspResponderUrl() == null ? "" : ", OCSP at " + x509.getOcspResponderUrl());
         }

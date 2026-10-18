@@ -2,6 +2,7 @@ package com.winllc.certalert.security;
 
 import com.winllc.certalert.demo.DemoAccounts;
 import com.winllc.certalert.domain.DirectoryUser;
+import com.winllc.certalert.domain.EmailAddresses;
 import com.winllc.certalert.repository.DirectoryUserRepository;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -35,6 +36,11 @@ import org.springframework.transaction.annotation.Transactional;
  * of whoever was cached first under it. The same goes for the addresses added in this
  * application: they say what a person answers to for notifications, which is not the
  * directory saying who they are.
+ *
+ * <p>Roles are narrower still: {@code admin-identifiers} is matched against the DN of the
+ * entry and its uid only, never an address, because a directory may let people write their
+ * own {@code mail}. An entry in the list that is an address grants nothing, and is named in
+ * a warning at startup.
  */
 @Service
 public class DirectoryPrincipalResolver {
@@ -127,7 +133,7 @@ public class DirectoryPrincipalResolver {
                 user.getId(),
                 user.getDn(),
                 method,
-                authoritiesFor(directoryIdentifiersOf(user)));
+                authoritiesFor(roleIdentifiersOf(user)));
     }
 
     /**
@@ -139,28 +145,53 @@ public class DirectoryPrincipalResolver {
      * they typed. On a fresh deployment the cache is empty, and deciding admin rights from
      * the cache alone would leave nobody able to trigger the first sync.
      *
+     * <p>From its DN and its uid only, as for anybody the cache does hold (see
+     * {@link #roleIdentifiersOf}). Not from the name typed at the sign-in page either: a
+     * search filter that also matches on {@code mail} would let somebody who wrote an
+     * administrator's uid into their own {@code mail} type that uid and bind as themselves.
+     *
      * @param dn the entry they bound as
-     * @param identifiers that entry's uid and addresses - never its common or display name,
-     *     which anybody can share
+     * @param uids that entry's own uid values - never its addresses, nor its common or
+     *     display name, which its holder or anybody else may be able to set
      */
     public DirectoryPrincipal unknownPrincipal(
             String username,
             String dn,
-            Collection<String> identifiers,
+            Collection<String> uids,
             DirectoryPrincipal.AuthenticationMethod method) {
         Set<String> candidates = new LinkedHashSet<>();
-        candidates.add(normalise(username));
         if (dn != null) {
             candidates.add(normalise(dn));
         }
-        identifiers.forEach(identifier -> candidates.add(normalise(identifier)));
+        uids.forEach(uid -> candidates.add(normalise(uid)));
+        candidates.remove("");
         return new DirectoryPrincipal(username, username, null, dn, method, authoritiesFor(candidates));
     }
 
     /**
-     * What the directory itself says names this person, and so all that
-     * {@code admin-identifiers} is matched against: their DN, their uid and every address
-     * the directory publishes for them.
+     * What {@code admin-identifiers} is matched against: the DN of the person's entry and
+     * their uid, and nothing else.
+     *
+     * <p>Not the addresses the directory publishes for them. Plenty of directories let a
+     * person write their own {@code mail} - 389 Directory Server's default access controls
+     * do - so matching on one let anybody set theirs to an administrator's address and be
+     * one at their next sign-in. A DN is where the entry is, and a uid is what the
+     * directory's administrators assign; neither is the person's to change.
+     */
+    public Set<String> roleIdentifiersOf(DirectoryUser user) {
+        Set<String> identifiers = new LinkedHashSet<>();
+        Stream.of(user.getDn(), user.getUid())
+                .map(DirectoryPrincipalResolver::normalise)
+                .filter(value -> !value.isEmpty())
+                .forEach(identifiers::add);
+        return identifiers;
+    }
+
+    /**
+     * What the directory itself says names this person: their DN, their uid and every
+     * address the directory publishes for them. What a certificate the directory does not
+     * publish is matched to a person by - never what decides their roles, which is
+     * {@link #roleIdentifiersOf}.
      *
      * <p>Not their identifier set, which is wider for a reason of its own - a server's
      * {@code serverPOC} may name a person by their common name, and an address added here
@@ -183,11 +214,45 @@ public class DirectoryPrincipalResolver {
     }
 
     /**
-     * Whether {@code admin-identifiers} names this value, compared the way roles are
-     * decided - so an address that would be one can be refused where it is not allowed.
+     * Whether {@code admin-identifiers} lists this value at all - an address it lists
+     * included, although an address grants nothing - so an address added here that reads
+     * like an administrator's can be refused.
      */
     public boolean isAdminIdentifier(String value) {
-        return adminIdentifiers().contains(normalise(value));
+        String candidate = normalise(value);
+        return properties.getAdminIdentifiers().stream()
+                .map(DirectoryPrincipalResolver::normalise)
+                .anyMatch(candidate::equals);
+    }
+
+    /**
+     * The {@code admin-identifiers} entries that are addresses rather than a DN or a uid,
+     * and so grant nothing (see {@link #roleIdentifiersOf}). Said at startup by
+     * {@link AdminIdentifierCheck}.
+     */
+    public List<String> ignoredAdminIdentifiers() {
+        return properties.getAdminIdentifiers().stream()
+                .filter(value -> value != null && !value.isBlank())
+                .filter(DirectoryPrincipalResolver::isAddressNotDn)
+                .map(String::trim)
+                .toList();
+    }
+
+    /** An entry is an address, and ignored, when it reads as one and is not a DN. */
+    static boolean isAddressNotDn(String value) {
+        String trimmed = value == null ? "" : value.trim();
+        return EmailAddresses.isAddress(trimmed) && !isDn(trimmed);
+    }
+
+    private static boolean isDn(String value) {
+        if (value.indexOf('=') <= 0) {
+            return false;
+        }
+        try {
+            return !new LdapName(value).isEmpty();
+        } catch (InvalidNameException e) {
+            return false;
+        }
     }
 
     private Collection<GrantedAuthority> authoritiesFor(Collection<String> identifiers) {
@@ -201,9 +266,12 @@ public class DirectoryPrincipalResolver {
         return authorities;
     }
 
+    /** The entries that can grant the role: DNs and uids, without the addresses. */
     private Set<String> adminIdentifiers() {
         return properties.getAdminIdentifiers().stream()
+                .filter(value -> value != null && !isAddressNotDn(value))
                 .map(DirectoryPrincipalResolver::normalise)
+                .filter(value -> !value.isEmpty())
                 .collect(java.util.stream.Collectors.toSet());
     }
 

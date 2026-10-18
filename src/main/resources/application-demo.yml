@@ -57,7 +57,7 @@ cert-alert:
     # Only the administrator account. The other three on the sign-in page are deliberately
     # not here: an administrator who was the only account anybody could be would make the
     # roles the sign-in page offers indistinguishable.
-    admin-identifiers: [demo.admin@intelink.ic.gov]
+    admin-identifiers: [demo.admin]
     ldap:
       # A demo signs people in by binding to its own directory, exactly as a deployment
       # binds to a real one. The generated entries are all under ou=people and are found

@@ -8,4 +8,4 @@ database:
   host: postgres.example.gov
   password: change-me
 security:
-  adminIdentifiers: [pki-admin@example.gov]
+  adminIdentifiers: [pki-admin]

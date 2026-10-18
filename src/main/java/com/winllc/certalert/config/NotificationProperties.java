@@ -67,17 +67,31 @@ public class NotificationProperties {
         private boolean includeExpired = true;
 
         /**
+         * How far back, with {@link #includeExpired}, a certificate that has already expired
+         * is still reported. One that lapsed longer ago than this is either finished with -
+         * somebody forgot to take it out of the directory - or has been reported every day
+         * since, and either way it is not what a round-up is for. Bounded so that a
+         * directory publishing years of old certificates is not read end to end every day.
+         */
+        private Duration expiredLookBack = Duration.ofDays(90);
+
+        /**
          * The most certificates one run reads of each kind: those about to expire, and,
-         * with {@link #includeExpired}, those already expired that their entry still
-         * depends on. A bound on one run's memory, not a target.
+         * with {@link #includeExpired}, those already expired inside
+         * {@link #expiredLookBack} that their entry still depends on. A bound on one run's
+         * memory, not a target.
          *
          * <p>Each kind has its own, and the ones about to expire are read first, so however
          * many expired certificates a directory goes on publishing they cannot push next
          * week's out of the round-up. Reaching it is logged as a warning naming which kind
-         * was cut short; that run then leaves earlier round-ups in place rather than
-         * clearing ones it may simply not have reached.
+         * was cut short, and counted ({@code ens_certalert_digest_truncated_total}); that
+         * run then leaves earlier round-ups in place rather than clearing ones it may simply
+         * not have reached.
          */
-        private int scanLimit = 10_000;
+        private int scanLimit = 50_000;
+
+        /** How many certificates each query of the round-up reads at a time, up to {@link #scanLimit}. */
+        private int pageSize = 1_000;
 
         public boolean isEnabled() {
             return enabled;
@@ -109,6 +123,22 @@ public class NotificationProperties {
 
         public void setIncludeExpired(boolean includeExpired) {
             this.includeExpired = includeExpired;
+        }
+
+        public Duration getExpiredLookBack() {
+            return expiredLookBack;
+        }
+
+        public void setExpiredLookBack(Duration expiredLookBack) {
+            this.expiredLookBack = expiredLookBack;
+        }
+
+        public int getPageSize() {
+            return pageSize;
+        }
+
+        public void setPageSize(int pageSize) {
+            this.pageSize = pageSize;
         }
 
         public int getScanLimit() {

@@ -1,5 +1,6 @@
 package com.winllc.certalert.security;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -7,10 +8,14 @@ import com.winllc.certalert.support.TestCa;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.mock.env.MockEnvironment;
 
 /** Header mode refuses to start without what makes a forwarded certificate believable. */
+@ExtendWith(OutputCaptureExtension.class)
 class X509StartupTest {
 
     private static final String SECRET = "a-secret-of-at-least-thirty-two-characters";
@@ -77,9 +82,22 @@ class X509StartupTest {
                 .hasMessageContaining("ENS_X509_REVOCATION_FAIL");
     }
 
+    /** The default - a live check, soft-fail - starts, and says what it lets through. */
+    @Test
+    void theDefaultRevocationCheckStartsAndSaysItIsSoftFail(CapturedOutput output) {
+        assertThatCode(() -> startup(new EnsX509Properties(),
+                        new MockEnvironment().withProperty("server.ssl.enabled", "true")).check())
+                .doesNotThrowAnyException();
+        assertThat(output.getOut())
+                .contains("checked for revocation at sign-in by default (ocsp-then-crl), soft-fail")
+                .contains("ENS_X509_REVOCATION_FAIL=closed");
+    }
+
     @Test
     void servletModeWithRevocationOffStartsAsBefore() {
-        assertThatCode(() -> startup(new EnsX509Properties(),
+        EnsX509Properties off = new EnsX509Properties();
+        off.setRevocation("off");
+        assertThatCode(() -> startup(off,
                         new MockEnvironment().withProperty("server.ssl.enabled", "true")).check())
                 .doesNotThrowAnyException();
     }

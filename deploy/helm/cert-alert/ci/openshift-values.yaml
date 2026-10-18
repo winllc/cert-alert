@@ -13,7 +13,7 @@ database:
   existingSecret: cert-alert-db
   existingSecretKey: password
 security:
-  adminIdentifiers: [pki-admin@example.gov]
+  adminIdentifiers: [pki-admin]
 tls:
   enabled: true
   keystore:

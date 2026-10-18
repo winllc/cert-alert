@@ -37,6 +37,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers;
@@ -54,6 +57,7 @@ import org.springframework.web.context.WebApplicationContext;
  */
 @SpringBootTest
 @ActiveProfiles("test")
+@ExtendWith(OutputCaptureExtension.class)
 class X509SignInTest {
 
     private static EmbeddedDirectory directory;
@@ -132,8 +136,9 @@ class X509SignInTest {
 
     @AfterEach
     void restore() {
-        x509.setRevocation("off");
-        x509.setRevocationFail("closed");
+        // Back to the defaults: ocsp-then-crl, soft-fail.
+        x509.setRevocation(null);
+        x509.setRevocationFail(null);
         x509.setAllowedIssuers(null);
         x509.setUserFilter(null);
         security.getX509().setRequireKnownCertificate(true);
@@ -186,6 +191,74 @@ class X509SignInTest {
         } finally {
             x509.setOcspResponderUrl(null);
         }
+    }
+
+    // --- the default: a live check that refuses what is revoked and soft-fails -----------
+
+    /** Nothing configured: the responder the certificate names is asked, and a revocation refused. */
+    @Test
+    void byDefaultARevokedCertificateIsRefused() throws Exception {
+        assertThat(x509.getRevocation()).isNull();
+        TestCa.Issued jill = ca.issue("jill@example.gov", Instant.now().minus(Duration.ofDays(10)),
+                Instant.now().plus(Duration.ofDays(300)), null, responder.url());
+        responder.revoke(jill.serial(), Instant.now().minus(Duration.ofHours(1)));
+        int asked = responder.requestCount();
+
+        List<String> refused = refusals(() -> mockMvc
+                .perform(get("/users").with(x509(jill.certificate(), ca.certificate())))
+                .andExpect(unauthenticated()));
+        assertThat(refused).singleElement()
+                .satisfies(line -> assertThat(line).contains("\"reason\":\"certificate revoked\""));
+        assertThat(responder.requestCount()).isEqualTo(asked + 1);
+
+        // And a good one still signs in, having been asked about.
+        mockMvc.perform(get("/users").with(x509(graceCertificate.certificate(), ca.certificate())))
+                .andExpect(authenticated().withUsername("grace@example.gov"));
+        assertThat(responder.requestCount()).isEqualTo(asked + 2);
+    }
+
+    /**
+     * Nothing configured, and nothing answers - no responder reachable, no CRL named: an
+     * air-gapped site. The certificate signs in, and the log says why it was not checked.
+     */
+    @Test
+    void byDefaultAnUnansweredCheckSignsInWithAWarning(CapturedOutput output) throws Exception {
+        x509.setOcspResponderUrl("http://localhost:1/ocsp");
+        try {
+            mockMvc.perform(get("/users").with(x509(graceCertificate.certificate(), ca.certificate())))
+                    .andExpect(authenticated().withUsername("grace@example.gov"));
+            assertThat(output.getOut())
+                    .contains("Allowing client certificate")
+                    .contains("no OCSP responder or CRL answered for it (soft-fail");
+        } finally {
+            x509.setOcspResponderUrl(null);
+        }
+    }
+
+    /** Fail-closed is still a setting away, without having to choose a mode. */
+    @Test
+    void failClosedRefusesAnUnansweredCheck() throws Exception {
+        x509.setRevocationFail("closed");
+        x509.setOcspResponderUrl("http://localhost:1/ocsp");
+        try {
+            List<String> refused = refusals(() -> mockMvc
+                    .perform(get("/users").with(x509(graceCertificate.certificate(), ca.certificate())))
+                    .andExpect(unauthenticated()));
+            assertThat(refused).singleElement()
+                    .satisfies(line -> assertThat(line).contains("\"reason\":\"revocation unknown\""));
+        } finally {
+            x509.setOcspResponderUrl(null);
+        }
+    }
+
+    /** And off asks nobody. */
+    @Test
+    void offAsksNobody() throws Exception {
+        x509.setRevocation("off");
+        int asked = responder.requestCount();
+        mockMvc.perform(get("/users").with(x509(graceCertificate.certificate(), ca.certificate())))
+                .andExpect(authenticated().withUsername("grace@example.gov"));
+        assertThat(responder.requestCount()).isEqualTo(asked);
     }
 
     @Test

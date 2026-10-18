@@ -84,8 +84,9 @@ public class ClientCertificateChecks {
         }
         if (answer.status() == RevocationStatus.UNKNOWN) {
             if (settings.isFailOpen()) {
-                log.warn("Allowing client certificate '{}' although its revocation status is unknown "
-                        + "(ENS_X509_REVOCATION_FAIL=open): {}", subject, answer.detail());
+                log.warn("Allowing client certificate '{}' although no OCSP responder or CRL answered for it "
+                        + "(soft-fail; ENS_X509_REVOCATION_FAIL=closed refuses it instead): {}",
+                        subject, answer.detail());
                 return;
             }
             log.warn("Refusing client certificate '{}': its revocation status is unknown: {}", subject, answer.detail());

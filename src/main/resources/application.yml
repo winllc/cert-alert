@@ -500,10 +500,16 @@ cert-alert:
       # Clearing the row the page writes (notification_setting) comes back to this.
       window: 30d
       include-expired: true
+      # How far back an expired certificate is still reported. Older ones are left out:
+      # finished with, or reported every day since. 0 means no limit.
+      expired-look-back: ${CERT_ALERT_NOTIFICATIONS_DIGEST_EXPIRED_LOOK_BACK:90d}
       # The most certificates one run reads of each kind - about to expire, and already
-      # expired but still depended on - each to its own limit, the first read first. A
-      # run that reaches either says which in a warning; raise this if it does.
-      scan-limit: 10000
+      # expired (inside the look-back) but still depended on - each to its own limit, the
+      # first read first, page-size at a time. Certificates already renewed are left out by
+      # the query and count against neither. A run that reaches either limit says which in
+      # a warning and counts it in ens_certalert_digest_truncated_total; raise this if it does.
+      scan-limit: 50000
+      page-size: 1000
     email:
       # Off by default, and needs spring.mail.* configured. This writes to the contact of
       # the certificate rather than to a fixed list. The message is rendered from the
@@ -593,13 +599,15 @@ ens:
   # certificates forwarded by a TLS-terminating proxy. See the README's "A client
   # certificate" section.
   x509:
-    # off, ocsp, crl or ocsp-then-crl.
-    revocation: ${ENS_X509_REVOCATION:off}
+    # off, ocsp, crl or ocsp-then-crl. Unset is ocsp-then-crl, soft-fail: a certificate
+    # found revoked is refused, and one nobody can answer for signs in with a warning.
+    revocation: ${ENS_X509_REVOCATION:}
     ocsp-responder-url: ${ENS_X509_OCSP_RESPONDER_URL:}
     # CRL files (DER or PEM), re-read when they change; with it set nothing is fetched.
     crl-dir: ${ENS_X509_CRL_DIR:}
     # closed refuses a certificate whose status cannot be found; open allows it, warning.
-    revocation-fail: ${ENS_X509_REVOCATION_FAIL:closed}
+    # Unset: open while ENS_X509_REVOCATION is unset too, closed once it is set.
+    revocation-fail: ${ENS_X509_REVOCATION_FAIL:}
     revocation-cache: ${ENS_X509_REVOCATION_CACHE:10m}
     # Issuer DNs, separated by semicolons (a DN has commas of its own). Empty: any the
     # trust store accepts.

@@ -40,15 +40,55 @@ public interface CachedCertificateRepository extends JpaRepository<CachedCertifi
     List<CachedCertificate> findByFingerprint(@Param("fingerprint") String fingerprint);
 
     /**
-     * What the digest reports as about to expire: everything whose notAfter is after the
-     * floor - the present, when the digest asks - and by the horizon, soonest first, owner
-     * attached so the round-up can name what it is about.
+     * Whether {@code r}, a certificate of the same entry, renews {@code c}. Kept apart from
+     * the owner, so that each subquery of {@link #REPLACED} looks its candidates up by one indexed column:
+     * one subquery matching either owner made H2 read every certificate for every row.
+     */
+    String RENEWAL_OF_C = """
+            r.id <> c.id
+                  and r.status <> :expired
+                  and c.notBefore is not null and r.notBefore is not null and r.notBefore > c.notBefore
+                  and c.subjectDn is not null and trim(c.subjectDn) <> ''
+                  and lower(trim(r.subjectDn)) = lower(trim(c.subjectDn))
+                  and (r.keyUsage = c.keyUsage or (r.keyUsage is null and c.keyUsage is null))
+            """;
+
+    /**
+     * The renewal rule of {@code service.Renewals}, as a condition on {@code c}: the entry
+     * holds another certificate, not expired, with the same subject and the same key usage,
+     * issued later. Such a certificate has been dealt with, and the round-up leaves it out
+     * in the query, so it reads no page and uses none of the limit.
+     *
+     * <p>Narrower than the Java rule, never wider - the same key usage implies the same use,
+     * not the other way round - so what this drops the round-up would have dropped anyway,
+     * and the Java rule still runs on what is left.
+     */
+    String REPLACED = """
+            ((c.user is not null and exists (
+                select r.id from CachedCertificate r
+                where r.user = c.user
+                  and\s""" + RENEWAL_OF_C + """
+                ))
+             or (c.server is not null and exists (
+                select r.id from CachedCertificate r
+                where r.server = c.server
+                  and\s""" + RENEWAL_OF_C + """
+                )))
+            """;
+
+    /**
+     * One page of what the digest reports as about to expire: notAfter after the floor -
+     * the present, when the digest asks - and by the horizon, soonest first, owner attached
+     * so the round-up can name what it is about. Paged by key: the next page starts after
+     * the last certificate of this one ({@code afterNotAfter}, {@code afterId}), so a page
+     * costs the same however deep into the read it is.
      *
      * <p>Dates rather than cached statuses, because how far ahead the round-up looks is set
      * from the UI and may be further than the window a certificate is marked EXPIRING_SOON
      * in. Asking for status would then quietly report nothing beyond that window, whatever
-     * the setting said. What has already expired is {@link #findLapsedBetween}'s, read on
-     * its own so that it cannot take this read's place.
+     * the setting said. What has already expired is {@link #findLapsedPage}'s, read on its
+     * own so that it cannot take this read's place. A certificate already renewed is left
+     * out (see {@link #REPLACED}).
      */
     @Query("""
             select c from CachedCertificate c
@@ -57,24 +97,45 @@ public interface CachedCertificateRepository extends JpaRepository<CachedCertifi
             where c.notAfter is not null
               and c.notAfter <= :horizon
               and c.notAfter > :floor
-            order by c.notAfter
+              and (c.notAfter > :afterNotAfter or (c.notAfter = :afterNotAfter and c.id > :afterId))
+              and not\s""" + REPLACED + """
+            order by c.notAfter, c.id
             """)
-    List<CachedCertificate> findExpiringBetween(
-            @Param("floor") Instant floor, @Param("horizon") Instant horizon, Pageable pageable);
+    List<CachedCertificate> findExpiringPage(
+            @Param("floor") Instant floor,
+            @Param("horizon") Instant horizon,
+            @Param("afterNotAfter") Instant afterNotAfter,
+            @Param("afterId") long afterId,
+            @Param("expired") CertificateStatus expired,
+            Pageable pageable);
+
+    /** How many {@link #findExpiringPage} leaves out as already renewed, for the run's account of itself. */
+    @Query("""
+            select count(c) from CachedCertificate c
+            where c.notAfter is not null
+              and c.notAfter <= :horizon
+              and c.notAfter > :floor
+              and\s""" + REPLACED)
+    long countReplacedExpiringBetween(
+            @Param("floor") Instant floor,
+            @Param("horizon") Instant horizon,
+            @Param("expired") CertificateStatus expired);
 
     /**
-     * What the digest reports as already expired: certificates whose notAfter is between
-     * the floor and {@code before}, owner attached, most recently expired first - so a
-     * capped read keeps the ones somebody is likeliest still to be relying on.
+     * One page of what the digest reports as already expired: notAfter between the floor -
+     * the end of the look-back - and {@code before}, owner attached, most recently expired
+     * first, so a capped read keeps the ones somebody is likeliest still to be relying on.
+     * Paged by key, as {@link #findExpiringPage} is, going backwards from
+     * ({@code beforeNotAfter}, {@code beforeId}).
      *
      * <p>Without the ones the entry has plainly moved on from. A directory keeps publishing
      * a certificate after it has been renewed, so in a directory of any age most expired
      * certificates are leftovers beside a current one, and reading them all only to drop
      * them after would spend the read on nothing. The rule is the first half of
      * {@link com.winllc.certalert.domain.DirectoryEntry#standingCertificates()}: a
-     * certificate marked expired is passed over when its entry holds another that is not.
-     * The rest of that question - which of several a server stands on, and whether one has
-     * been reissued - is the caller's, because it compares subjects and names.
+     * certificate marked expired is passed over when its entry holds another that is not -
+     * and, for one not yet marked, {@link #REPLACED}. The rest of that question - which of
+     * several a server stands on - is the caller's, because it compares subjects and names.
      */
     @Query("""
             select c from CachedCertificate c
@@ -83,6 +144,7 @@ public interface CachedCertificateRepository extends JpaRepository<CachedCertifi
             where c.notAfter is not null
               and c.notAfter <= :before
               and c.notAfter > :floor
+              and (c.notAfter < :beforeNotAfter or (c.notAfter = :beforeNotAfter and c.id < :beforeId))
               and (c.status <> :expired
                    or ((c.user is null or not exists (
                             select o.id from CachedCertificate o
@@ -90,11 +152,14 @@ public interface CachedCertificateRepository extends JpaRepository<CachedCertifi
                        and (c.server is null or not exists (
                             select o.id from CachedCertificate o
                             where o.server = c.server and o.id <> c.id and o.status <> :expired))))
+              and not\s""" + REPLACED + """
             order by c.notAfter desc, c.id desc
             """)
-    List<CachedCertificate> findLapsedBetween(
+    List<CachedCertificate> findLapsedPage(
             @Param("floor") Instant floor,
             @Param("before") Instant before,
+            @Param("beforeNotAfter") Instant beforeNotAfter,
+            @Param("beforeId") long beforeId,
             @Param("expired") CertificateStatus expired,
             Pageable pageable);
 

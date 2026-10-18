@@ -1,7 +1,9 @@
 package com.winllc.certalert.repository;
 
 import com.winllc.certalert.domain.Notification;
+import jakarta.persistence.QueryHint;
 import java.time.Instant;
+import org.hibernate.jpa.HibernateHints;
 import java.util.Collection;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
@@ -9,6 +11,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.QueryHints;
 import org.springframework.data.repository.query.Param;
 
 public interface NotificationRepository extends JpaRepository<Notification, Long> {
@@ -79,11 +82,20 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
      *
      * <p>One per recipient rather than one per run: it reports what is expiring now, so a
      * second copy of it is not more news, it is the same news twice.
+     *
+     * <p>Asked once per person in a round-up, inside the transaction that has just read
+     * every certificate it reports, so it does not flush first: an automatic flush
+     * dirty-checks everything the transaction holds, and on a directory of any size doing
+     * that once per person made the round-up quadratic. Nothing the round-up has changed
+     * by then is anything this asks about - each person's round-up is looked up before
+     * theirs is written.
      */
+    @QueryHints(@QueryHint(name = HibernateHints.HINT_FLUSH_MODE, value = "COMMIT"))
     Optional<Notification> findFirstByRecipientUserIdAndKindOrderByCreatedAtDesc(
             Long recipientUserId, com.winllc.certalert.domain.NotificationKind kind);
 
-    /** The same for a recipient who is only an address. */
+    /** The same for a recipient who is only an address, and without a flush for the same reason. */
+    @QueryHints(@QueryHint(name = HibernateHints.HINT_FLUSH_MODE, value = "COMMIT"))
     Optional<Notification> findFirstByRecipientAddressAndRecipientUserIdIsNullAndKindOrderByCreatedAtDesc(
             String recipientAddress, com.winllc.certalert.domain.NotificationKind kind);
 

@@ -21,6 +21,12 @@ cert-alert {{ .Chart.AppVersion }} is installed as release "{{ .Release.Name }}"
    The license screen is /admin/license (Administration -> License). Sign in as one of
    security.adminIdentifiers{{ if not .Values.security.adminIdentifiers }} - NONE ARE SET: set security.adminIdentifiers, or nobody can
    reach it{{ end }}. Until a license is installed only sign-in and that screen work.
+{{- range .Values.security.adminIdentifiers }}
+{{- if and (contains "@" (toString .)) (not (contains "=" (toString .))) }}
+   WARNING: security.adminIdentifiers lists {{ . }}, an e-mail address. It is ignored and
+   grants nothing: list that administrator's uid, or the DN of their entry, instead.
+{{- end }}
+{{- end }}
 {{- if include "cert-alert.licenseSupplied" . }}
    The license you supplied was copied into the license volume, unless one was already
    installed there (a later upload on the license screen is never overwritten).
