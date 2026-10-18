@@ -113,9 +113,9 @@ services:
       # Where the password fallback looks a person up. The stand-in keeps them in one
       # place; a real directory may want this empty, to search the whole tree.
       CERT_ALERT_SECURITY_LDAP_USER_SEARCH_BASE: ${CERT_ALERT_LDAP_USER_SEARCH_BASE:-ou=people}
-      # Whoever should be able to trigger jobs; any value the directory knows them by.
-      # alice is the generated directory's administrator.
-      CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS: ${CERT_ALERT_ADMINS:-alice@intelink.ic.gov}
+      # Whoever should be able to trigger jobs: their uid or the DN of their entry, never an
+      # address. alice is the generated directory's administrator.
+      CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS: ${CERT_ALERT_ADMINS:-alice}
       # The audit trail (ens-audit/1): every ENS_AUDIT_* setting, passed through. Unset
       # means the application's default; see env.template and the README.
       ENS_AUDIT_STDOUT: ${ENS_AUDIT_STDOUT:-true}

@@ -246,6 +246,7 @@
       "type": "object",
       "properties": {
         "adminIdentifiers": {
+          "description": "uids or entry DNs granted the admin role. An e-mail address is ignored, with a warning at startup.",
           "type": "array",
           "items": {
             "type": "string"

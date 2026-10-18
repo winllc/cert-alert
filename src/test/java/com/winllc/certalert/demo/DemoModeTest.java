@@ -297,7 +297,7 @@ class DemoModeTest {
      * the real one is - rightly - refused like every other write.
      */
     /**
-     * The deployed failure, exactly. This profile's admin-identifiers names admin@example.gov
+     * The deployed failure, exactly. This profile's admin-identifiers names admin
      * and nobody else - as a deployment's environment did, carrying a value meant for a
      * different directory - and the seeded administrator was signing in as a reader: no
      * administration page, no audit trail, and a rehearsal refused as a write, with the

@@ -48,7 +48,7 @@ import org.springframework.web.context.WebApplicationContext;
 @SpringBootTest(properties = {
     "ENS_SESSION_IDLE_TIMEOUT=20m",
     "ENS_SESSION_ADMIN_IDLE_TIMEOUT=10m",
-    "cert-alert.security.admin-identifiers=erin@example.gov"
+    "cert-alert.security.admin-identifiers=erin"
 })
 @ActiveProfiles("test")
 class SessionControlsTest {

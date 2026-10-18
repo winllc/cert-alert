@@ -99,7 +99,7 @@ Before cert-alert can start, edit .env and set at least:
   CERT_ALERT_LDAP_URL                     your directory, e.g. ldaps://directory.example.gov:636
   CERT_ALERT_LDAP_BASE                    the search base, e.g. dc=example,dc=gov
   CERT_ALERT_LDAP_USER / _PASSWORD        the service account it binds as
-  CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS   who administers it (addresses or uids)
+  CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS   who administers it (uids; addresses are ignored)
 
 and, if you use them, SMTP (SPRING_MAIL_*), TLS (CERT_ALERT_TLS_* with keystores in
 $(pwd)/tls) and the banner. Every setting is described in .env.

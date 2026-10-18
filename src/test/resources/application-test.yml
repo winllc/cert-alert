@@ -18,7 +18,8 @@ cert-alert:
     allowed-hosts: [localhost, 127.0.0.1]
 
   security:
-    admin-identifiers: [admin@example.gov]
+    # A uid: an address here would be ignored (see AdminIdentifierCheck).
+    admin-identifiers: [admin]
     ldap:
       user-search-base: ou=people
       user-search-filter: "(uid={0})"

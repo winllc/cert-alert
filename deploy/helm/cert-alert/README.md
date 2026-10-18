@@ -100,7 +100,7 @@ The license screen shows the installation id; after the first sign-in it is also
 | `ldap.binaryCertificateOption` | `null` | `CERT_ALERT_LDAP_BINARY_CERTIFICATE_OPTION` | `false` for a directory with no `userCertificate;binary` |
 | `ldap.pageSize` / `ldap.paged` | `null` | `CERT_ALERT_LDAP_PAGE_SIZE` / `_PAGED` | |
 | `ldap.changelogEnabled` | `null` | `CERT_ALERT_LDAP_CHANGELOG_ENABLED` | Follow the directory's changelog |
-| `security.adminIdentifiers` | `[]` | `CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS` | Addresses or uids of administrators (not common names) |
+| `security.adminIdentifiers` | `[]` | `CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS` | uids (or entry DNs) of administrators. An address is ignored, with a warning: see the upgrade notes below |
 | `security.ldap.enabled` | `null` | `CERT_ALERT_SECURITY_LDAP_ENABLED` | The password fallback |
 | `security.ldap.userSearchBase` | `""` | `CERT_ALERT_SECURITY_LDAP_USER_SEARCH_BASE` | e.g. `ou=people` |
 | `security.ldap.userSearchFilter` | `""` | `CERT_ALERT_SECURITY_LDAP_USER_SEARCH_FILTER` | e.g. `(uid={0})` |
@@ -247,7 +247,7 @@ database:
   host: postgres.example.gov
   password: change-me
 security:
-  adminIdentifiers: [pki-admin@example.gov]
+  adminIdentifiers: [pki-admin]
 ```
 
 ```bash

@@ -155,9 +155,10 @@ ldap:
 # Signing in and roles
 # ---------------------------------------------------------------------------------------
 security:
-  # CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS. Who may trigger jobs and administer: an address the
-  # directory publishes for them, or their uid - not a common name. Name at least one, or
-  # nobody can run the first sync or reach the license screen.
+  # CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS. Who may trigger jobs and administer: their uid, or
+  # the DN of their entry - never an address, which a directory may let people change
+  # themselves (an address is ignored, with a warning), and never a common name. Name at
+  # least one, or nobody can run the first sync or reach the license screen.
   adminIdentifiers: []
   ldap:
     # CERT_ALERT_SECURITY_LDAP_ENABLED. The directory-password fallback; false for

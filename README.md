@@ -966,19 +966,41 @@ nothing else, and there will be no password path at all.
 | `ROLE_ADMIN` | Also trigger the jobs and reach the management endpoints   |
 
 Everyone who authenticates gets `ROLE_USER`. `ROLE_ADMIN` comes from
-`cert-alert.security.admin-identifiers`, matched against what the directory says identifies
-a person — any address it publishes for them, their uid, or the DN of their entry:
+`cert-alert.security.admin-identifiers`, matched against two things only: a person's uid,
+and the DN of their entry.
 
 ```yaml
 cert-alert:
   security:
     admin-identifiers:
-      - alice@intelink.ic.gov
+      - alice
       - uid=bob,ou=people,dc=example,dc=gov
 ```
 
-A common name, display name or preferred name is never matched: two people can share one,
-and the directory lets anybody be called anything. A DN has commas in it, so name one as a
+An address is never matched, not even one the directory publishes. Plenty of directories
+let people edit their own `mail`, and 389 Directory Server's default access controls do.
+Matching on it would let anybody set their address to an administrator's and get the
+role at their next sign-in. A common name, display name or preferred name is never
+matched either: two people can share one, and the directory lets anybody be called
+anything.
+
+**An address in `admin-identifiers` is ignored.** Releases before this one also matched
+the addresses the directory publishes, so an existing configuration may list
+administrators that way. The application still starts, and every uid and DN in the list
+still counts. Each address entry, though, grants nothing, and startup logs a warning for
+it:
+
+```
+cert-alert.security.admin-identifiers lists 'alice@intelink.ic.gov', an e-mail address, and it is ignored: administrator rights match only a uid or the DN of a directory entry, because a directory may let people change their own mail. The directory cache has it as the address of uid 'alice' (uid=alice,ou=people,dc=example,dc=gov): list 'alice', or that DN, instead.
+```
+
+Replace each one with the uid or DN the warning names. If the list holds nothing but
+addresses, a second warning says that nobody is an administrator until it is fixed. Where
+a directory uses addresses as uids, list the DN, because an entry that looks like an
+address is treated as one. An address entry still blocks anyone from adding that address
+to their own entry (see [Addresses a person answers to](#addresses-a-person-answers-to)).
+
+A DN has commas in it, so name one as a
 block-style list item as above: not in a flow list (`[...]`), and not in the comma-separated
 `CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS`, both of which split it at its commas. From the
 environment, use indexed variables instead (`CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS_0`,
@@ -986,8 +1008,8 @@ environment, use indexed variables instead (`CERT_ALERT_SECURITY_ADMIN_IDENTIFIE
 
 A password sign-in is resolved to the cached person at the DN it bound as, and to nobody
 else. On a fresh deployment the cache is empty, so roles for someone signing in with a
-password are resolved from the directory entry they just bound against — its DN, uid and
-addresses, and the username typed. Otherwise nobody could trigger the first sync.
+password are resolved from the directory entry they just bound against: its DN and its uid,
+never its addresses or the username typed. Otherwise nobody could trigger the first sync.
 
 `/actuator/health` stays open so the thing can be monitored. Everything else requires
 authentication; an unauthenticated API call gets a 401 rather than a login page, because a
@@ -1347,7 +1369,7 @@ An address added there joins the set a `serverPOC` is matched against, and the s
 named after it become theirs immediately — not at the next sweep.
 
 That is all it does. An address added here never makes anybody an administrator:
-`admin-identifiers` is matched only against what the directory publishes. And an address
+`admin-identifiers` is matched only against a uid or a DN. And an address
 `admin-identifiers` names cannot be added at all — the request is refused with a 400 saying
 so — because where `contact-editors: AUTHENTICATED` lets anyone signed in add addresses,
 that would be somebody naming themselves after an administrator. One added before this was
@@ -2692,7 +2714,7 @@ Access, under `cert-alert.security`:
 | Property                          | Default | Purpose                                      |
 |-----------------------------------|---------|----------------------------------------------|
 | `enabled`                         | `true`  | Off leaves the application open; local development only |
-| `admin-identifiers`               | `[]`    | Identifiers granted `ROLE_ADMIN`              |
+| `admin-identifiers`               | `[]`    | uids or entry DNs granted `ROLE_ADMIN`; an address is ignored, with a warning |
 | `x509.enabled`                    | `true`  | Accept client certificates                    |
 | `x509.require-known-certificate`  | `true`  | Match by fingerprint against the cache        |
 | `ldap.enabled`                    | `true`  | Offer the password fallback                   |

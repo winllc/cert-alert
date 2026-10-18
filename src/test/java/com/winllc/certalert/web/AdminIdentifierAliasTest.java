@@ -37,10 +37,14 @@ import org.springframework.web.context.WebApplicationContext;
  *
  * <p>Run with address editing open to anyone signed in, the documented option that made
  * this matter: there, a reader could add an administrator's address to their own entry and
- * be one at their next sign-in. {@code admin@example.gov} is the test profile's
- * administrator.
+ * be one at their next sign-in. The administrator is listed by uid, and by address as well,
+ * as a configuration written for an earlier release may: the address grants nothing, and
+ * is still refused as somebody else's.
  */
-@SpringBootTest(properties = "cert-alert.security.contact-editors=AUTHENTICATED")
+@SpringBootTest(properties = {
+    "cert-alert.security.contact-editors=AUTHENTICATED",
+    "cert-alert.security.admin-identifiers=admin,admin@example.gov"
+})
 @ActiveProfiles("test")
 class AdminIdentifierAliasTest {
 

@@ -1,6 +1,5 @@
 package com.winllc.certalert.security;
 
-import com.winllc.certalert.domain.EmailAddresses;
 import com.winllc.certalert.ldap.LdapProperties;
 import com.winllc.certalert.ldap.UserField;
 import java.util.Collection;
@@ -46,34 +45,19 @@ public class DirectoryUserDetailsContextMapper implements UserDetailsContextMapp
                 .findByDn(dn)
                 .map(user -> (UserDetails) resolver.principalFor(user, DirectoryPrincipal.AuthenticationMethod.LDAP))
                 .orElseGet(() -> resolver.unknownPrincipal(
-                        username, dn, identifiersOf(ctx), DirectoryPrincipal.AuthenticationMethod.LDAP));
+                        username, dn, uidsOf(ctx), DirectoryPrincipal.AuthenticationMethod.LDAP));
     }
 
     /**
-     * What the bound entry itself publishes as its uid and its addresses, for deciding the
-     * roles of somebody the cache does not hold yet: a directory that lets people bind by
-     * uid may name its administrators by address. The same attributes a sweep would cache
-     * them under, and never a common or display name.
+     * What the bound entry itself publishes as its uid, for deciding the roles of somebody
+     * the cache does not hold yet - the same attribute a sweep would cache it from. Never
+     * its addresses, which a directory may let the person set themselves, nor a common or
+     * display name.
      */
-    private Set<String> identifiersOf(DirContextOperations ctx) {
-        LdapProperties.User mapping = ldapProperties.getUser();
-        Set<String> identifiers = new LinkedHashSet<>();
-        for (UserField field : new UserField[] {
-            UserField.UID, UserField.MAIL, UserField.IC_EMAIL,
-            UserField.INTERNET_EMAIL, UserField.NIPRNET_EMAIL, UserField.SIPRNET_EMAIL
-        }) {
-            addAll(identifiers, ctx, field.attributeName(mapping));
-        }
-        // Read the way the sweep reads them: split, and only what is an address.
-        for (String attribute : mapping.getAdditionalEmailAttributes()) {
-            Set<String> values = new LinkedHashSet<>();
-            addAll(values, ctx, attribute);
-            values.stream()
-                    .flatMap(value -> EmailAddresses.split(value).stream())
-                    .filter(EmailAddresses::isAddress)
-                    .forEach(identifiers::add);
-        }
-        return identifiers;
+    private Set<String> uidsOf(DirContextOperations ctx) {
+        Set<String> uids = new LinkedHashSet<>();
+        addAll(uids, ctx, UserField.UID.attributeName(ldapProperties.getUser()));
+        return uids;
     }
 
     private void addAll(Set<String> identifiers, DirContextOperations ctx, String attribute) {

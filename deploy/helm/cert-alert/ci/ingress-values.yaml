@@ -14,7 +14,7 @@ database:
   params: sslmode=require
   poolSize: 20
 security:
-  adminIdentifiers: [pki-admin@example.gov, jdoe]
+  adminIdentifiers: [pki-admin, jdoe]
   ldap:
     userSearchBase: ou=people
     userSearchFilter: "(uid={0})"
