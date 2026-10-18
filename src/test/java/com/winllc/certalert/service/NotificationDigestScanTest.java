@@ -26,10 +26,12 @@ import org.springframework.test.context.ActiveProfiles;
  * out what is about to.
  *
  * <p>Run with a limit of three so a handful of rows stands in for a directory publishing
- * tens of thousands of old certificates.
+ * tens of thousands of old certificates, read two at a time so every read crosses a page.
+ * {@link NotificationDigestScaleTest} does it with a hundred thousand.
  */
 @SpringBootTest(properties = {
     "cert-alert.notifications.digest.scan-limit=" + NotificationDigestScanTest.LIMIT,
+    "cert-alert.notifications.digest.page-size=2",
     // Spring Boot's tests record no metrics unless asked; ens_certalert_digest_truncated_total is.
     "management.defaults.metrics.export.enabled=true"
 })
@@ -143,6 +145,67 @@ class NotificationDigestScanTest {
 
         assertThat(addressedTo("renewed@example.gov")).isEmpty();
         assertThat(addressedTo("gone@example.gov")).hasSize(1);
+        assertThat(output.getOut()).doesNotContain("Raise cert-alert.notifications.digest.scan-limit");
+    }
+
+    /**
+     * The look-back: a certificate that expired longer ago than it is not read at all - so
+     * a directory of old leftovers neither fills the read nor gets reported every day.
+     */
+    @Test
+    void anExpiredCertificateOlderThanTheLookBackIsNotReported(CapturedOutput output) {
+        for (int i = 0; i < LIMIT + 2; i++) {
+            DirectoryUser old = user("old" + i, "old" + i + "@example.gov");
+            old.addCertificate(certificate(
+                    "CN=old" + i, now.minus(Duration.ofDays(500)), now.minus(Duration.ofDays(91 + i)),
+                    CertificateStatus.EXPIRED));
+            save(old);
+        }
+        DirectoryUser recent = user("recent", "recent@example.gov");
+        recent.addCertificate(certificate(
+                "CN=recent", now.minus(Duration.ofDays(400)), now.minus(Duration.ofDays(89)),
+                CertificateStatus.EXPIRED));
+        save(recent);
+
+        double truncatedBefore = truncated();
+        notificationService.digest();
+
+        assertThat(addressedTo("recent@example.gov")).hasSize(1);
+        assertThat(addressedTo("old0@example.gov")).isEmpty();
+        assertThat(truncated()).isEqualTo(truncatedBefore);
+        assertThat(output.getOut()).doesNotContain("Raise cert-alert.notifications.digest.scan-limit");
+    }
+
+    /**
+     * Certificates already renewed - published again under the same subject, still live -
+     * are left out by the query, so however many there are they use none of the limit and
+     * cannot push one nobody has renewed out of the round-up.
+     */
+    @Test
+    void renewedCertificatesDoNotCountAgainstTheLimit(CapturedOutput output) {
+        for (int i = 0; i < LIMIT + 2; i++) {
+            DirectoryUser renewed = user("renewed" + i, "renewed" + i + "@example.gov");
+            renewed.addCertificate(certificate(
+                    "CN=renewed" + i, now.minus(Duration.ofDays(360)), now.plus(Duration.ofDays(1 + i)),
+                    CertificateStatus.EXPIRING_SOON));
+            renewed.addCertificate(certificate(
+                    "CN=renewed" + i, now.minus(Duration.ofDays(1)), now.plus(Duration.ofDays(364)),
+                    CertificateStatus.VALID));
+            save(renewed);
+        }
+        DirectoryUser forgotten = user("forgotten", "forgotten@example.gov");
+        forgotten.addCertificate(certificate(
+                "CN=forgotten", now.minus(Duration.ofDays(358)), now.plus(Duration.ofDays(20)),
+                CertificateStatus.EXPIRING_SOON));
+        save(forgotten);
+
+        double truncatedBefore = truncated();
+        NotificationService.DigestResult result = notificationService.digest();
+
+        assertThat(addressedTo("forgotten@example.gov")).hasSize(1);
+        assertThat(addressedTo("renewed0@example.gov")).isEmpty();
+        assertThat(result.certificates()).isEqualTo(1);
+        assertThat(truncated()).isEqualTo(truncatedBefore);
         assertThat(output.getOut()).doesNotContain("Raise cert-alert.notifications.digest.scan-limit");
     }
 

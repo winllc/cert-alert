@@ -320,29 +320,35 @@ public class NotificationService {
         // Two reads, each to its own limit, and what is about to expire first. Read as one,
         // soonest first, the expired came first: a directory publishing more old
         // certificates than the limit filled the read with them, and what expires next week
-        // was never reached - the one thing a round-up is for.
+        // was never reached - the one thing a round-up is for. Each is read a page at a
+        // time, renewed certificates left out by the query itself, and the expired only as
+        // far back as the look-back.
         int limit = Math.clamp(digestSettings.getScanLimit(), 1, Integer.MAX_VALUE - 1);
-        Scan upcoming = Scan.of(certificates.findExpiringBetween(now, horizon, PageRequest.of(0, limit + 1)), limit);
+        int pageSize = Math.clamp(digestSettings.getPageSize(), 1, limit + 1);
+        Scan upcoming = readUpcoming(now, horizon, limit, pageSize);
+        Instant lookBackFloor = lookBackFloor(now, digestSettings.getExpiredLookBack());
         Scan lapsed = digestSettings.isIncludeExpired()
-                // Nothing has a notAfter before the epoch, so it excludes nothing.
-                ? Scan.of(certificates.findLapsedBetween(
-                                Instant.EPOCH, now, CertificateStatus.EXPIRED, PageRequest.of(0, limit + 1)),
-                        limit)
+                ? readLapsed(lookBackFloor, now, limit, pageSize)
                 : Scan.NONE;
-        warnIfCutShort(upcoming, lapsed, limit, leadDays);
+        warnIfCutShort(upcoming, lapsed, limit, leadDays, digestSettings.getExpiredLookBack());
         boolean complete = !upcoming.truncated() && !lapsed.truncated();
+        int replacedInQuery = (int) Math.min(Integer.MAX_VALUE,
+                certificates.countReplacedExpiringBetween(now, horizon, CertificateStatus.EXPIRED));
 
         // In the order the single read used to give, soonest to expire first: the lapsed
         // ones were read most recent first so a cap keeps those, and are turned around here.
         List<CachedCertificate> expiring = new ArrayList<>(lapsed.certificates().reversed());
         expiring.addAll(upcoming.certificates());
         if (expiring.isEmpty()) {
-            log.debug("Expiry digest: nothing expiring in the next {} day(s)", leadDays);
+            log.debug("Expiry digest: nothing expiring in the next {} day(s) that has not been renewed", leadDays);
             // Nothing expiring means nobody's round-up still says anything true.
             if (!dryRun && !properties.getEmail().isDryRun()) {
                 clearRoundUpsExcept(Set.of(), complete);
             }
-            return Prepared.finished(nothing(dryRun, "Nothing is expiring in the next " + leadDays + " day(s)"));
+            return Prepared.finished(nothing(dryRun, replacedInQuery > 0
+                    ? "All " + replacedInQuery + " certificate(s) expiring in the next " + leadDays
+                            + " day(s) have already been published again, so nobody needs telling"
+                    : "Nothing is expiring in the next " + leadDays + " day(s)"));
         }
 
         // Grouped by who has to do something about it, rather than by what is expiring:
@@ -351,7 +357,9 @@ public class NotificationService {
         // What each owner still depends on, worked out once per owner rather than per
         // certificate: the entry is the same object for all of its own certificates.
         Map<DirectoryEntry, Set<Long>> dependedOn = new IdentityHashMap<>();
-        int superseded = 0;
+        // Counted with the ones the query already left out, so the run's account of itself
+        // says how many were renewed, not just how many of those it happened to read.
+        int superseded = replacedInQuery;
 
         // Held per entry before anything is reported, because a person's signing and key
         // encipherment certificates are one credential and have to be seen together to be
@@ -424,9 +432,9 @@ public class NotificationService {
         return new Prepared(
                 null,
                 rehearsing,
-                expiring.size(),
+                expiring.size() + replacedInQuery,
                 superseded,
-                expiring.size() - superseded,
+                expiring.size() + replacedInQuery - superseded,
                 told,
                 unaddressed,
                 leadDays,
@@ -564,7 +572,7 @@ public class NotificationService {
      * Says which read stopped at its limit, if either did, and what was left out by it - the
      * certificates furthest from expiring, or the longest expired.
      */
-    private void warnIfCutShort(Scan upcoming, Scan lapsed, int limit, int leadDays) {
+    private void warnIfCutShort(Scan upcoming, Scan lapsed, int limit, int leadDays, Duration lookBack) {
         EnsMetrics counting = metrics.getIfAvailable();
         if (counting != null && (upcoming.truncated() || lapsed.truncated())) {
             counting.digestTruncated();
@@ -577,11 +585,69 @@ public class NotificationService {
         }
         if (lapsed.truncated()) {
             log.warn("Expiry digest: more than {} expired certificate(s) are still published by entries holding "
-                            + "nothing current; this round-up reports the {} most recently expired and leaves out "
-                            + "older ones. Raise cert-alert.notifications.digest.scan-limit to report them all, "
-                            + "or clear what has been finished with out of the directory",
-                    limit, limit);
+                            + "nothing current (looking back {}); this round-up reports the {} most recently expired "
+                            + "and leaves out older ones. Raise cert-alert.notifications.digest.scan-limit to report "
+                            + "them all, shorten cert-alert.notifications.digest.expired-look-back, or clear what "
+                            + "has been finished with out of the directory",
+                    limit, lookBack == null || lookBack.isZero() || lookBack.isNegative()
+                            ? "without limit" : lookBack.toDays() + " day(s)", limit);
         }
+    }
+
+    /** Where the look-back for expired certificates starts; the epoch for none, or one too long to subtract. */
+    private static Instant lookBackFloor(Instant now, Duration lookBack) {
+        if (lookBack == null || lookBack.isNegative() || lookBack.isZero()) {
+            return Instant.EPOCH;
+        }
+        try {
+            Instant floor = now.minus(lookBack);
+            return floor.isBefore(Instant.EPOCH) ? Instant.EPOCH : floor;
+        } catch (java.time.DateTimeException | ArithmeticException e) {
+            return Instant.EPOCH;
+        }
+    }
+
+    /**
+     * Everything about to expire, soonest first, a page at a time, up to the limit - read
+     * one past it, which is how it knows there were more.
+     */
+    private Scan readUpcoming(Instant now, Instant horizon, int limit, int pageSize) {
+        List<CachedCertificate> read = new ArrayList<>();
+        Instant afterNotAfter = now;
+        long afterId = 0;
+        while (read.size() <= limit) {
+            int want = Math.min(pageSize, limit + 1 - read.size());
+            List<CachedCertificate> page = certificates.findExpiringPage(
+                    now, horizon, afterNotAfter, afterId, CertificateStatus.EXPIRED, PageRequest.of(0, want));
+            read.addAll(page);
+            if (page.size() < want) {
+                break;
+            }
+            CachedCertificate last = page.getLast();
+            afterNotAfter = last.getNotAfter();
+            afterId = last.getId();
+        }
+        return Scan.of(read, limit);
+    }
+
+    /** What has already expired inside the look-back, most recently first, read the same way. */
+    private Scan readLapsed(Instant floor, Instant now, int limit, int pageSize) {
+        List<CachedCertificate> read = new ArrayList<>();
+        Instant beforeNotAfter = now;
+        long beforeId = Long.MAX_VALUE;
+        while (read.size() <= limit) {
+            int want = Math.min(pageSize, limit + 1 - read.size());
+            List<CachedCertificate> page = certificates.findLapsedPage(
+                    floor, now, beforeNotAfter, beforeId, CertificateStatus.EXPIRED, PageRequest.of(0, want));
+            read.addAll(page);
+            if (page.size() < want) {
+                break;
+            }
+            CachedCertificate last = page.getLast();
+            beforeNotAfter = last.getNotAfter();
+            beforeId = last.getId();
+        }
+        return Scan.of(read, limit);
     }
 
     /** What one read of the digest returned, and whether it stopped at its limit. */
