@@ -748,6 +748,10 @@ The ENS platform baseline:
 - **Logs**: `LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs` (Spring Boot's own setting) writes the
   application log as one ECS JSON object per line. The Helm chart does so by default
   (`logFormat: json`). The audit trail's stdout lines are raw `ens-audit/1` JSON either way.
+- **Alerts**: the Helm chart's `metrics.prometheusRule.enabled` (off by default) renders a
+  Prometheus Operator PrometheusRule from these metrics: a job that has not succeeded for too
+  long, a round-up cut short at its scan limit, certificates with no revocation answer, and
+  certificates expiring. See the chart's README, "Metrics and logs".
 
 ## Security headers, cookies and TLS
 

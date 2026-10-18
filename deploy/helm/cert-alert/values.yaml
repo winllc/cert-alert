@@ -426,6 +426,55 @@ metrics:
     scrapeTimeout: 10s
     # Extra labels, e.g. the one your Prometheus selects ServiceMonitors by.
     labels: {}
+  # A Prometheus Operator PrometheusRule (monitoring.coreos.com/v1) alerting on the business
+  # metrics. Needs Prometheus to scrape the metrics port: serviceMonitor.enabled, or a scrape
+  # of your own that labels series with namespace and service the same way (or see selector).
+  prometheusRule:
+    enabled: false
+    # Extra labels, e.g. the one your Prometheus selects PrometheusRules by.
+    labels: {}
+    # Added to every alert, e.g. {team: pki}.
+    alertLabels: {}
+    # PromQL label matchers picking this release's series. Empty: namespace and service, as
+    # the ServiceMonitor labels them, e.g. namespace="pki", service="cert-alert".
+    selector: ""
+    # The label a job's name ends up in. The metric's own label is "job", which Prometheus
+    # renames to exported_job because the scrape target has a job label of its own; "job"
+    # only for a scrape with honor_labels.
+    jobLabel: exported_job
+    # CertAlertJobNotSucceeding: one entry per job, alerting when it has not finished without
+    # failing for maxAgeSeconds (or not at all since a restart that long ago). Job names as
+    # in the audit trail's job.completed events. The defaults allow two hours on top of the
+    # default schedules (users-cron and servers-cron daily, refresh-cron hourly). Add
+    # {job: revocation, maxAgeSeconds: 93600} with revocation checking licensed, and
+    # {job: expiry digest, maxAgeSeconds: 93600} with the round-up on.
+    jobs:
+      - job: user sweep
+        maxAgeSeconds: 93600
+      - job: server sweep
+        maxAgeSeconds: 93600
+      - job: expiry refresh
+        maxAgeSeconds: 10800
+    jobFor: 10m
+    jobSeverity: warning
+    # CertAlertDigestTruncated: a round-up stopped at its scan limit in the last day.
+    digestTruncated:
+      enabled: true
+      severity: warning
+    # CertAlertRevocationUnknown: more than threshold certificates with no revocation answer
+    # from their CA, for this long.
+    revocationUnknown:
+      enabled: true
+      threshold: 0
+      for: 6h
+      severity: warning
+    # CertAlertCertificatesExpiring: more than threshold certificates inside
+    # thresholds.warningDays, for this long.
+    certificatesExpiring:
+      enabled: true
+      threshold: 0
+      for: 15m
+      severity: warning
   # With networkPolicy.enabled: the NetworkPolicyPeers allowed to reach the metrics port,
   # e.g. [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: monitoring}}}].
   # Empty: nothing is admitted to it beyond what the policy already allows (kubelet probes

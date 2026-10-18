@@ -1,0 +1,94 @@
+{{- $m := .Values.metrics -}}
+{{- if and $m.enabled $m.prometheusRule.enabled -}}
+{{- $r := $m.prometheusRule -}}
+{{- $sel := $r.selector | default (printf "namespace=%q, service=%q" .Release.Namespace (include "cert-alert.fullname" .)) -}}
+{{- $by := "namespace, service" -}}
+# Prometheus Operator: alerts on cert-alert's business metrics (see the README's "Metrics,
+# health and logs"). Each expression keeps to this release's series with the selector, and
+# aggregates by namespace and service so a pod restart does not split an alert in two.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "cert-alert.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cert-alert.labels" . | nindent 4 }}
+    {{- with $r.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: cert-alert.rules
+      rules:
+        {{- range $r.jobs }}
+        {{- $last := printf "max by (%s) (ens_certalert_job_last_success_seconds{%s, %s=%q})" $by $sel $r.jobLabel .job }}
+        # The job has not finished without failing for too long - or, since the last
+        # restart, not at all (the gauge only appears after the first success).
+        - alert: CertAlertJobNotSucceeding
+          expr: |-
+            (
+              (time() - {{ $last }})
+              or
+              (
+                (time() - max by ({{ $by }}) (process_start_time_seconds{{ printf "{%s}" $sel }}))
+                unless on ({{ $by }}) {{ $last }}
+              )
+            ) > {{ .maxAgeSeconds | int64 }}
+          for: {{ $r.jobFor | default "10m" }}
+          labels:
+            severity: {{ .severity | default $r.jobSeverity | default "warning" }}
+            certalert_job: {{ .job | quote }}
+            {{- with $r.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: {{ printf "cert-alert's %s job has not succeeded recently" .job | quote }}
+            description: {{ printf "The %s job in {{ $labels.namespace }}/{{ $labels.service }} last finished without failing {{ $value | humanizeDuration }} ago (or not since cert-alert started), more than %s. See the job.failed events on /admin/audit and the application log." .job (printf "%ds" (.maxAgeSeconds | int64)) | quote }}
+        {{- end }}
+        {{- if $r.digestTruncated.enabled }}
+        # A daily round-up stopped at cert-alert.notifications.digest.scan-limit, so some
+        # points of contact were not told about their certificates.
+        - alert: CertAlertDigestTruncated
+          expr: |-
+            sum by ({{ $by }}) (increase(ens_certalert_digest_truncated_total{{ printf "{%s}" $sel }}[25h])) > 0
+          labels:
+            severity: {{ $r.digestTruncated.severity | default "warning" }}
+            {{- with $r.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "cert-alert's expiry round-up was cut short"
+            description: {{ "The expiry round-up in {{ $labels.namespace }}/{{ $labels.service }} stopped at its scan limit in the last day, so not every point of contact was told. Raise cert-alert.notifications.digest.scan-limit (CERT_ALERT_NOTIFICATIONS_DIGEST_SCAN_LIMIT in extraEnv)." | quote }}
+        {{- end }}
+        {{- if $r.revocationUnknown.enabled }}
+        # Certificates whose CA gave no revocation answer - a CRL or OCSP responder that
+        # cannot be reached, or one not answering for them.
+        - alert: CertAlertRevocationUnknown
+          expr: |-
+            max by ({{ $by }}) (ens_certalert_revocation_unknown{{ printf "{%s}" $sel }}) > {{ $r.revocationUnknown.threshold | int64 }}
+          for: {{ $r.revocationUnknown.for | default "6h" }}
+          labels:
+            severity: {{ $r.revocationUnknown.severity | default "warning" }}
+            {{- with $r.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "cert-alert cannot find the revocation status of some certificates"
+            description: {{ "{{ $value }} certificates in {{ $labels.namespace }}/{{ $labels.service }} have no revocation answer from their CA. See the revocation page for which, and check that their CRL and OCSP URLs are reachable (and in revocation.allowedHosts, if set)." | quote }}
+        {{- end }}
+        {{- if $r.certificatesExpiring.enabled }}
+        # Certificates inside the warning threshold (thresholds.warningDays), not yet renewed.
+        - alert: CertAlertCertificatesExpiring
+          expr: |-
+            max by ({{ $by }}) (ens_certalert_certificates{{ printf "{%s, status=\"expiring_soon\"}" $sel }}) > {{ $r.certificatesExpiring.threshold | int64 }}
+          for: {{ $r.certificatesExpiring.for | default "15m" }}
+          labels:
+            severity: {{ $r.certificatesExpiring.severity | default "warning" }}
+            {{- with $r.alertLabels }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          annotations:
+            summary: "Certificates are about to expire"
+            description: {{ "{{ $value }} certificates known to cert-alert in {{ $labels.namespace }}/{{ $labels.service }} expire within the warning threshold. The dashboard lists them, with their points of contact." | quote }}
+        {{- end }}
+{{- end }}

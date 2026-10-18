@@ -744,6 +744,119 @@
             }
           }
         },
+        "prometheusRule": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "labels": {
+              "type": "object"
+            },
+            "alertLabels": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "selector": {
+              "type": "string"
+            },
+            "jobLabel": {
+              "type": "string",
+              "minLength": 1
+            },
+            "jobs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "job",
+                  "maxAgeSeconds"
+                ],
+                "properties": {
+                  "job": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "maxAgeSeconds": {
+                    "type": "integer",
+                    "minimum": 60
+                  },
+                  "severity": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            },
+            "jobFor": {
+              "type": "string",
+              "pattern": "^([0-9]+(ms|s|m|h|d|w|y))+$"
+            },
+            "jobSeverity": {
+              "type": "string",
+              "minLength": 1
+            },
+            "digestTruncated": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "severity": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "revocationUnknown": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "severity": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "threshold": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "for": {
+                  "type": "string",
+                  "pattern": "^([0-9]+(ms|s|m|h|d|w|y))+$"
+                }
+              }
+            },
+            "certificatesExpiring": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "severity": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "threshold": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "for": {
+                  "type": "string",
+                  "pattern": "^([0-9]+(ms|s|m|h|d|w|y))+$"
+                }
+              }
+            }
+          }
+        },
         "allowFrom": {
           "type": "array",
           "items": {
