@@ -90,6 +90,14 @@ lists any settings new in this release, backs up the database to `backups/`, loa
 new images and restarts on them. The database is kept and migrated on start; migrations
 are not undone, so going back to an older release means restoring that backup into it.
 
+Read the upgrade notes in the main README first. Two of them change what `.env` needs:
+
+- `CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS` now matches uids (or entry DNs) only. An e-mail
+  address there is ignored, and a warning at startup names the uid to use instead.
+- With `ENS_X509_REVOCATION` unset, client certificates are now checked for revocation at
+  sign-in, soft-fail. Set `ENS_X509_REVOCATION_FAIL=closed` for the STIG, `ENS_X509_CRL_DIR`
+  on an air-gapped network, or `ENS_X509_REVOCATION=off` for the old behaviour.
+
 ## Day to day
 
 ```bash

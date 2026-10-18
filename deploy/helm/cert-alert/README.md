@@ -447,6 +447,12 @@ is kept, with the installed license and the installation id. A license given wit
 `license.file` or `license.existingSecret` is not copied again while one is installed. Back up
 the database first: migrations are not undone by `helm rollback`.
 
+Before upgrading, read the [upgrade notes](../../../README.md#upgrade-notes). In particular:
+
+- `security.adminIdentifiers` now matches a uid or an entry DN only. An e-mail address there
+  is ignored, and the NOTES and the startup log warn about it.
+- `x509.revocation` now defaults to the application's live, soft-fail check.
+
 ### Uninstall
 
 ```bash

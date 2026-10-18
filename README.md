@@ -742,7 +742,7 @@ The ENS platform baseline:
 | `ens_auth_attempts_total{method,outcome}` | counter | Sign-ins and refusals: `x509` (once per session) or `ldap`, `success` or `failure` |
 | `ens_certalert_certificates{status}` | gauge | Cached certificates by state: `none`, `valid`, `expiring_soon`, `expired` |
 | `ens_certalert_job_last_success_seconds{job}` | gauge | When each job last finished without failing (Unix time), since startup |
-| `ens_certalert_digest_truncated_total` | counter | Round-ups that stopped at `cert-alert.notifications.digest.scan-limit` |
+| `ens_certalert_digest_truncated_total` | counter | Round-ups that stopped at `cert-alert.notifications.digest.scan-limit` (either read) |
 | `ens_certalert_revocation_unknown` | gauge | Cached certificates whose authority gave no revocation answer |
 | `ens_certalert_mail_outbox{state}` | gauge | Email `pending` in the outbox, and `failed` (given up on) |
 
@@ -1959,13 +1959,28 @@ the email looks.
 
 **What one run reads.** The certificates about to expire, and — with
 `cert-alert.notifications.digest.include-expired`, on by default — those already expired,
-are read separately, each up to `cert-alert.notifications.digest.scan-limit` (10,000), and
-the ones about to expire first. However many old certificates a directory goes on
-publishing, they cannot push next week's out of the round-up. An expired certificate on an
-entry that holds a current one is left out by the read itself, so the leftovers of renewals
-use none of the limit; of what remains, a capped read keeps the most recently expired. A run
-that reaches the limit logs a warning naming which of the two it was, and leaves earlier
-round-ups in place rather than clearing ones it may simply not have reached.
+are read separately, the ones about to expire first. However many old certificates a
+directory goes on publishing, they cannot push next week's out of the round-up.
+
+- **A page at a time.** Each read is paged
+  (`cert-alert.notifications.digest.page-size`, 1,000 per query) by expiry date and id, so a
+  page costs the same however deep the read goes. Each read stops at
+  `cert-alert.notifications.digest.scan-limit` (50,000 per kind). That limit bounds one
+  run's memory. It is not a target.
+- **A bounded look-back.** Only certificates that expired in the last
+  `cert-alert.notifications.digest.expired-look-back` (`CERT_ALERT_NOTIFICATIONS_DIGEST_EXPIRED_LOOK_BACK`,
+  `90d`) are reported as expired. One that lapsed longer ago is either finished with or has
+  been reported every day since. `0` removes the bound.
+- **Renewals left out by the query.** A certificate whose entry has published a later one
+  with the same subject and key usage, not itself expired, has been renewed. The query skips
+  it, as it skips an expired certificate on an entry that holds a current one, so neither
+  uses up the limit. The same renewal rule then runs again in the application, which also
+  pairs a person's signing and encryption certificates.
+- **Truncation is reported.** Of what remains, a capped read keeps the soonest to expire,
+  or the most recently expired. A run that reaches the limit logs a warning naming which of
+  the two it was. It counts the run in `ens_certalert_digest_truncated_total`, so you can
+  alert on it, and leaves earlier round-ups in place rather than clearing ones it may simply
+  not have reached.
 
 Email is off until `cert-alert.notifications.email.enabled` is set and `spring.mail.*` is
 configured. The notifications are written and shown on the page either way.
@@ -2769,6 +2784,65 @@ class SlackAlertNotifier implements AlertNotifier {
     }
 }
 ```
+
+## Upgrade notes
+
+Read these before upgrading. They apply to the compose bundle, the Helm chart and a plain
+`java -jar` alike.
+
+### Administrators are matched by uid or DN only
+
+`cert-alert.security.admin-identifiers` (`CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS`,
+`security.adminIdentifiers` in Helm) is matched against a person's uid and the DN of their
+entry, and nothing else. An e-mail address in the list is **ignored**: a directory may let
+people change their own `mail`, so matching on it let anybody make themselves an
+administrator.
+
+- **What happens on upgrade.** The application starts as before. Every uid and DN in the
+  list still counts. For each address, startup logs a warning that names the uid and DN the
+  directory cache holds for it. If the list holds only addresses, a second warning says that
+  nobody is an administrator. A Helm install also warns in its NOTES.
+- **What to do.** Replace each address with the uid the warning names, e.g.
+  `CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS=alice` instead of `alice@example.gov`. List a DN
+  through indexed variables (`CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS_0=uid=alice,ou=people,dc=example,dc=gov`)
+  or a block-style YAML list. Where uids are themselves addresses, list the DN.
+- The compose file's default administrator is now `alice`, not `alice@intelink.ic.gov`.
+
+### Client certificates are checked for revocation at sign-in by default
+
+With `ENS_X509_REVOCATION` unset, a client certificate is now checked live, over OCSP and
+then its CRL. Before, nothing was checked live.
+
+- **Soft-fail by default.** A certificate found revoked is refused and audited
+  (`auth.login`, reason `certificate revoked`). One that no responder or CRL answers for
+  signs in, with a warning in the log. Startup says the check is soft-fail.
+- **What to do.**
+  - For the STIG's fail-closed behaviour, set `ENS_X509_REVOCATION_FAIL=closed`.
+  - On an air-gapped network, set `ENS_X509_CRL_DIR`, or an `ENS_X509_OCSP_RESPONDER_URL`
+    relay, so the check has an answer and sign-in does not wait on fetches that cannot
+    succeed.
+  - To keep the old behaviour, set `ENS_X509_REVOCATION=off`.
+- **Already set?** If you set `ENS_X509_REVOCATION` yourself and left
+  `ENS_X509_REVOCATION_FAIL` unset, nothing changes: that combination stays fail-closed.
+- **Helm.** `x509.revocation` and `x509.revocationFail` now default to `""`, the application
+  default. A values file that sets `revocation: "off"` keeps the check off.
+- **Outbound access.** Sign-in now fetches from the OCSP and CRL addresses that client
+  certificates name. These are held to the same `cert-alert.revocation.allowed-hosts` and
+  address rules as the nightly revocation job.
+
+### The expiry round-up has a look-back and pages its reads
+
+- **Look-back for expired certificates.** Only certificates that expired in the last 90
+  days are reported as expired (`cert-alert.notifications.digest.expired-look-back`,
+  `CERT_ALERT_NOTIFICATIONS_DIGEST_EXPIRED_LOOK_BACK`). Older ones, which were reported in
+  every round-up until now, no longer are. Set `0` to report them all again.
+- **Renewed certificates are left out by the query.** A certificate already renewed under
+  the same subject is skipped in the query and no longer uses up the limit. The log line's
+  "already replaced" count includes these.
+- **A higher limit, read in pages.** Each read is paged
+  (`cert-alert.notifications.digest.page-size`, 1,000), and `scan-limit` rises from 10,000
+  to 50,000 per kind. A run that reaches it still logs a warning and counts in
+  `ens_certalert_digest_truncated_total`.
 
 ## Releases
 
