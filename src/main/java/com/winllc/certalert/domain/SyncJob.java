@@ -19,5 +19,13 @@ public enum SyncJob {
     REVOCATION,
 
     /** Removes certificates from the directory that it should not still be publishing. */
-    CERTIFICATE_CLEANUP
+    CERTIFICATE_CLEANUP;
+
+    /**
+     * The name of the lock a run of this job holds (see {@code JobLocks}), whether it was
+     * started by the schedule or by hand.
+     */
+    public String lockName() {
+        return name().toLowerCase(java.util.Locale.ROOT).replace('_', '-');
+    }
 }

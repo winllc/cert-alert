@@ -467,10 +467,11 @@ class AuthenticationTest {
     @Test
     void anAdministratorCan() throws Exception {
         // The test profile lists the administrator by uid.
+        // Accepted: it runs in the background, and the answer says where to ask after it.
         mockMvc.perform(post("/api/v1/sync/refresh").with(csrf())
                         .with(SecurityMockMvcRequestPostProcessors.user("admin@example.gov")
                                 .roles("USER", "ADMIN")))
-                .andExpect(status().isOk());
+                .andExpect(status().isAccepted());
     }
 
     @Test

@@ -401,6 +401,25 @@ cert-alert:
       # anonymous search, e.g. ["uid={0},ou=people"].
       user-dn-patterns: []
 
+  # Where signed-in sessions are kept. memory: in the servlet container, as before - lost
+  # when it restarts, and seen by that replica only. jdbc: in the database (spring_session),
+  # so a session survives a restart and any replica can serve it. The postgres profile, which
+  # the chart and the release bundle run, defaults to jdbc.
+  session:
+    store: ${CERT_ALERT_SESSION_STORE:memory}
+
+  # More than one replica. Every scheduled job, and the same job started by hand, takes a
+  # lock in the database (shedlock) first, so it runs on one replica at a time; a run started
+  # by hand answers 202 and is asked after at /api/v1/jobs/{id} (job_run).
+  cluster:
+    # How long a job's lock lasts before it is renewed (at half this, while the job runs).
+    # A replica that dies holding one releases it after this long.
+    lock-at-most-for: ${CERT_ALERT_CLUSTER_LOCK_AT_MOST_FOR:10m}
+    # How long a run started by hand is kept for the page to ask after.
+    run-retention: 7d
+    # A run whose replica has not said it is still at work for this long is marked failed.
+    stale-run-after: 5m
+
   # The history of directory entries: what happened to an entry, and who did it. Written
   # for changes only - a sweep that finds everything as it left it writes nothing. These
   # records are part of the ens-audit/1 trail (ens.audit, below), alongside sign-ins,

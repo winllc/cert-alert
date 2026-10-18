@@ -16,6 +16,17 @@ java {
 
 repositories {
     mavenCentral()
+    // OpenSAML 5, which Spring Security's SAML 2.0 service provider is built on, is published
+    // by the Shibboleth project to its own repository and not to Maven Central. Limited to
+    // those groups, so nothing else can ever be resolved from it.
+    maven {
+        url = uri("https://build.shibboleth.net/maven/releases/")
+        content {
+            includeGroup("org.opensaml")
+            includeGroup("net.shibboleth")
+            includeGroup("net.shibboleth.utilities")
+        }
+    }
 }
 
 // Ahead of the versions Spring Boot 4.1.1 manages, for fixes the image scan in CI holds
@@ -39,6 +50,19 @@ dependencies {
     // X.509 authenticates most people; this backs the password fallback onto the directory.
     implementation("org.springframework.security:spring-security-ldap")
     implementation("org.springframework.boot:spring-boot-starter-thymeleaf")
+    // Single sign-on, both off until configured (see SsoProperties): OpenID Connect
+    // (authorization code with PKCE) and a SAML 2.0 service provider. Used directly rather
+    // than through Spring Boot's starters, whose auto-configuration would read
+    // spring.security.oauth2.* and spring.security.saml2.* as well as cert-alert.sso.*.
+    implementation("org.springframework.security:spring-security-oauth2-client")
+    implementation("org.springframework.security:spring-security-oauth2-jose")
+    implementation("org.springframework.security:spring-security-saml2-service-provider")
+
+    // More than one replica: sessions in the database (cert-alert.session.store=jdbc), and a
+    // lock in the database around every job so only one replica runs it at a time.
+    implementation("org.springframework.session:spring-session-jdbc")
+    implementation("net.javacrumbs.shedlock:shedlock-spring:7.10.1")
+    implementation("net.javacrumbs.shedlock:shedlock-provider-jdbc-template:7.10.1")
 
     // Maps DataTables' paging/ordering/search request straight onto a JPA query.
     implementation("com.github.darrachequesne:spring-data-jpa-datatables:8.0.0")

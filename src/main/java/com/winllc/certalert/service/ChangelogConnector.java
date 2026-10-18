@@ -1,5 +1,6 @@
 package com.winllc.certalert.service;
 
+import com.winllc.certalert.cluster.JobLocks;
 import com.winllc.certalert.audit.JobAudit;
 import com.winllc.certalert.domain.ChangelogCursor;
 import com.winllc.certalert.ldap.ChangelogBounds;
@@ -64,6 +65,10 @@ public class ChangelogConnector implements SmartLifecycle {
     private final Licensing licensing;
     private final JobAudit jobs;
     private final Clock clock;
+    private final JobLocks locks;
+
+    /** The lock a poll holds, from the loop or started by hand. */
+    public static final String LOCK = "changelog";
 
     private final AtomicBoolean running = new AtomicBoolean(false);
     private volatile Thread worker;
@@ -76,7 +81,8 @@ public class ChangelogConnector implements SmartLifecycle {
             ChangelogProperties properties,
             Licensing licensing,
             JobAudit jobs,
-            Clock clock) {
+            Clock clock,
+            JobLocks locks) {
         this.changelogClient = changelogClient;
         this.applier = applier;
         this.cursorStore = cursorStore;
@@ -85,6 +91,7 @@ public class ChangelogConnector implements SmartLifecycle {
         this.licensing = licensing;
         this.jobs = jobs;
         this.clock = clock;
+        this.locks = locks;
     }
 
     // --- lifecycle ---------------------------------------------------------------------
@@ -160,7 +167,9 @@ public class ChangelogConnector implements SmartLifecycle {
             waitingForLicense = false;
             Instant started = Instant.now(clock);
             try {
-                int applied = pollOnce();
+                // One replica follows the changelog at a time; on the others this finds the
+                // lock taken and waits out an interval before asking again.
+                int applied = locks.runExclusively(LOCK, this::pollOnce).orElse(0);
                 // One audit event per poll that found something, and one per run of
                 // failures - an idle poll every few seconds is not worth recording.
                 if (applied > 0) {

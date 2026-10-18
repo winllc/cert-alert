@@ -17,6 +17,7 @@ import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.repository.AuditEventRepository;
 import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.DirectoryUserRepository;
+import com.winllc.certalert.support.JobRunsAwait;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -305,11 +306,11 @@ class AdminPageTest {
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("id=\"revocation-admin\"")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("Refresh revocation statuses")));
 
-        mockMvc.perform(post(REVOCATION_CHECK).with(csrf()).with(admin()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.entries").exists())
-                .andExpect(jsonPath("$.certificatesChecked").exists())
-                .andExpect(jsonPath("$.durationMillis").exists());
+        JobRunsAwait.finished(mockMvc, mockMvc.perform(post(REVOCATION_CHECK).with(csrf()).with(admin())), admin())
+                .andExpect(jsonPath("$.state").value("SUCCEEDED"))
+                .andExpect(jsonPath("$.result.entries").exists())
+                .andExpect(jsonPath("$.result.certificatesChecked").exists())
+                .andExpect(jsonPath("$.result.durationMillis").exists());
     }
 
     /** Reading the counts beside the button is not: they are a count of what the cache holds. */

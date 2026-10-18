@@ -87,6 +87,58 @@
         return false;
     }
 
+    /**
+     * Starts a job that runs in the background - a sweep, a revocation check, the round-up
+     * - and waits for it. The request answers 202 with a run to ask after; this asks until
+     * the run has finished, then resolves with what the job returned, or rejects with
+     * something shaped like a failed request ({status, responseJSON.detail}), so callers
+     * keep their .done and .fail handlers. A refusal of the request itself (401, 403, a
+     * license) rejects with the request as it was.
+     */
+    function runJob(url) {
+        var deferred = $.Deferred();
+        var delay = 1000;
+
+        function ask(statusUrl) {
+            $.getJSON(statusUrl)
+                .done(function (run) {
+                    if (!run.finished) {
+                        window.setTimeout(function () {
+                            ask(statusUrl);
+                        }, delay);
+                        delay = Math.min(delay * 1.5, 5000);
+                        return;
+                    }
+                    if (run.state === 'SUCCEEDED') {
+                        deferred.resolve(run.result, run);
+                        return;
+                    }
+                    deferred.reject({
+                        status: run.state === 'SKIPPED' ? 409 : 500,
+                        responseJSON: {detail: run.error || ('the run ' + run.state.toLowerCase())},
+                        run: run
+                    });
+                })
+                .fail(function (xhr) {
+                    deferred.reject(xhr);
+                });
+        }
+
+        $.ajax({url: url, type: 'POST'})
+            .done(function (run, textStatus, xhr) {
+                if (xhr.status !== 202 || !run || !run.statusUrl) {
+                    // An endpoint that answered straight away.
+                    deferred.resolve(run);
+                    return;
+                }
+                ask(run.statusUrl);
+            })
+            .fail(function (xhr) {
+                deferred.reject(xhr);
+            });
+        return deferred.promise();
+    }
+
     // Every refusal, wherever it came from. Each page's own handler says something
     // sensible for the deployment it was written for - "only an administrator can change
     // this" - and on a demo all of those are wrong in the same way: the visitor is an
@@ -548,6 +600,7 @@
         loadStats: loadStats,
         escapeHtml: escapeHtml,
         handleUnauthorized: handleUnauthorized,
+        runJob: runJob,
         isDemo: function () {
             return demo;
         },

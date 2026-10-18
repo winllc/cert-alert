@@ -1,6 +1,9 @@
 package com.winllc.certalert.web;
 
-import com.winllc.certalert.audit.JobAudit;
+import com.winllc.certalert.cluster.JobRunController;
+import com.winllc.certalert.cluster.JobRunView;
+import com.winllc.certalert.cluster.JobRuns;
+import com.winllc.certalert.domain.SyncJob;
 import com.winllc.certalert.domain.CachedCertificate;
 import com.winllc.certalert.license.Licensing;
 import com.winllc.certalert.license.RequiresFeature;
@@ -26,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -37,12 +41,17 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * Manual triggers for the scheduled jobs, the run log, and the cached certificate detail
  * behind a table row.
+ *
+ * <p>A job started here answers 202 at once with a run to ask after ({@code /api/v1/jobs/{id}},
+ * see {@link JobRuns}) and runs in the background, under the same lock as its schedule: one
+ * started while the job is already running, on any replica, is skipped rather than run twice.
+ * The run's result, once it has one, is what these endpoints used to answer with.
  */
 @RestController
 @RequestMapping("/api/v1")
 public class DirectoryApiController {
 
-    private final JobAudit jobs;
+    private final JobRuns runs;
 
     private static final int MAX_RUN_HISTORY = 100;
 
@@ -71,8 +80,8 @@ public class DirectoryApiController {
             ChangelogProperties changelogProperties,
             Optional<ChangelogConnector> connector,
             Licensing licensing,
-            JobAudit jobs) {
-        this.jobs = jobs;
+            JobRuns runs) {
+        this.runs = runs;
         this.syncService = syncService;
         this.refreshService = refreshService;
         this.pruneService = pruneService;
@@ -89,38 +98,46 @@ public class DirectoryApiController {
     /** Scrapes IC Persons now, rather than waiting for the schedule. */
     @RequiresFeature("directory-sync")
     @PostMapping("/sync/users")
-    public SyncResponse syncUsers() {
-        return SyncResponse.from(jobs.run("user sweep", syncService::syncUsers));
+    public ResponseEntity<JobRunView> syncUsers() {
+        return JobRunController.accepted(runs, "user sweep", step -> sweepUsers(step));
     }
 
     /** Scrapes IC Non-Person Entities now. */
     @RequiresFeature("directory-sync")
     @PostMapping("/sync/servers")
-    public SyncResponse syncServers() {
-        return SyncResponse.from(jobs.run("server sweep", syncService::syncServers));
+    public ResponseEntity<JobRunView> syncServers() {
+        return JobRunController.accepted(runs, "server sweep", step -> sweepServers(step));
     }
 
     /** Runs both sweeps, in the order the schedule would. */
     @RequiresFeature("directory-sync")
     @PostMapping("/sync")
-    public List<SyncResponse> sync() {
-        return List.of(
-                SyncResponse.from(jobs.run("user sweep", syncService::syncUsers)),
-                SyncResponse.from(jobs.run("server sweep", syncService::syncServers)));
+    public ResponseEntity<JobRunView> sync() {
+        return JobRunController.accepted(runs, "directory sync", step -> List.of(sweepUsers(step), sweepServers(step)));
+    }
+
+    private SyncResponse sweepUsers(JobRuns.Step step) {
+        return SyncResponse.from(step.exclusive(SyncJob.USERS.lockName(), "user sweep", syncService::syncUsers));
+    }
+
+    private SyncResponse sweepServers(JobRuns.Step step) {
+        return SyncResponse.from(step.exclusive(SyncJob.SERVERS.lockName(), "server sweep", syncService::syncServers));
     }
 
     /** Re-evaluates cached expiry without reading the directory. */
     @RequiresFeature("directory-sync")
     @PostMapping("/sync/refresh")
-    public SyncResponse refresh() {
-        return SyncResponse.from(jobs.run("expiry refresh", refreshService::refresh));
+    public ResponseEntity<JobRunView> refresh() {
+        return JobRunController.accepted(runs, "expiry refresh", step -> SyncResponse.from(
+                step.exclusive(SyncJob.REFRESH.lockName(), "expiry refresh", refreshService::refresh)));
     }
 
     /** Removes entries the directory has stopped publishing. */
     @RequiresFeature("directory-cleanup")
     @PostMapping("/sync/prune")
-    public SyncResponse prune() {
-        return SyncResponse.from(jobs.run("prune", pruneService::prune));
+    public ResponseEntity<JobRunView> prune() {
+        return JobRunController.accepted(runs, "prune", step -> SyncResponse.from(
+                step.exclusive(SyncJob.PRUNE.lockName(), "prune", pruneService::prune)));
     }
 
     /** How many entries the next prune would remove, for checking before enabling it. */
@@ -139,8 +156,9 @@ public class DirectoryApiController {
      */
     @RequiresFeature("directory-cleanup")
     @PostMapping("/sync/certificate-cleanup")
-    public CertificateCleanupService.Result cleanUpCertificates() {
-        return jobs.run("certificate cleanup", cleanupService::run);
+    public ResponseEntity<JobRunView> cleanUpCertificates() {
+        return JobRunController.accepted(runs, "certificate cleanup", step -> step.exclusive(
+                SyncJob.CERTIFICATE_CLEANUP.lockName(), "certificate cleanup", cleanupService::run));
     }
 
     /** What that would remove, without removing it. */
@@ -183,9 +201,12 @@ public class DirectoryApiController {
      */
     @RequiresFeature("changelog-sync")
     @PostMapping("/changelog/poll")
-    public ChangelogStatus pollChangelog() {
-        connector.ifPresent(c -> jobs.run("changelog sync", c::pollOnce, applied -> java.util.Map.of("changes", applied)));
-        return changelog();
+    public ResponseEntity<JobRunView> pollChangelog() {
+        return JobRunController.accepted(runs, "changelog sync", step -> {
+            connector.ifPresent(c -> step.exclusive(
+                    ChangelogConnector.LOCK, "changelog sync", c::pollOnce, applied -> Map.of("changes", applied)));
+            return changelog();
+        });
     }
 
     /** The roll-up behind the cards at the top of each search page. */

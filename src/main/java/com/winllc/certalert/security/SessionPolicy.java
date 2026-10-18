@@ -18,9 +18,12 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
+import org.springframework.session.FindByIndexNameSessionRepository;
+import org.springframework.session.Session;
 import org.springframework.stereotype.Component;
 
 /**
@@ -49,8 +52,16 @@ import org.springframework.stereotype.Component;
  * that ends up signed in.
  *
  * <p>Ended sessions go to the sign-in page ({@code /login?expired}); an API call gets a 401.
- * One instance is assumed (see the chart's {@code replicaCount}): the register of who holds
- * which sessions is in memory, as the sessions themselves are.
+ *
+ * <p><b>Where the sessions are kept.</b> With the in-memory store (the default outside the
+ * postgres profile) the register of who holds which sessions is in memory too, and the
+ * container says when a session idles out. With sessions in the database
+ * ({@code cert-alert.session.store=jdbc}) neither would work across replicas, so both come
+ * from the database instead: a person's sessions are found by an index on who holds them,
+ * a session pushed out is marked so in the database for whichever replica serves its next
+ * request, and the idle limit is checked here, on the session's next request, against when
+ * it was last used - its stored expiry is set a little beyond that, and
+ * {@code SessionSweeper} records and clears the ones that never come back.
  */
 @Component
 public class SessionPolicy implements HttpSessionListener, HttpSessionIdListener {
@@ -68,14 +79,29 @@ public class SessionPolicy implements HttpSessionListener, HttpSessionIdListener
     public static final String SIGNED_IN_AS = SessionPolicy.class.getName() + ".signedInAs";
 
     /** Why the application ended this session, so its destruction is not mistaken for idling. */
-    static final String ENDED = SessionPolicy.class.getName() + ".ended";
+    public static final String ENDED = SessionPolicy.class.getName() + ".ended";
 
     /** The container's expiry runs on a timer, so a session can be a little past its time. */
     private static final Duration IDLE_SLACK = Duration.ofSeconds(5);
 
+    /** When this session was last used, with sessions in the database. */
+    static final String LAST_SEEN = SessionPolicy.class.getName() + ".lastSeen";
+
+    /** Its idle limit, with sessions in the database: its stored expiry is a little later. */
+    static final String IDLE_LIMIT = SessionPolicy.class.getName() + ".idleLimit";
+
+    /**
+     * How far beyond its idle limit a stored session's expiry is put, with sessions in the
+     * database: long enough that the session is still there to be refused - and recorded as
+     * idle - on its next request, rather than having vanished under it.
+     */
+    static final Duration STORED_SLACK = Duration.ofMinutes(5);
+
     private final EnsSecurityProperties properties;
     private final SessionAudit audit;
     private final Clock clock;
+    @SuppressWarnings("rawtypes")
+    private final ObjectProvider<FindByIndexNameSessionRepository> stored;
 
     /** Each person's signed-in sessions, by who they are. */
     private final Map<String, List<Held>> byUser = new ConcurrentHashMap<>();
@@ -84,10 +110,22 @@ public class SessionPolicy implements HttpSessionListener, HttpSessionIdListener
 
     private record Held(String sessionId, Instant signedInAt) {}
 
-    public SessionPolicy(EnsSecurityProperties properties, SessionAudit audit, Clock clock) {
+    @SuppressWarnings("rawtypes")
+    public SessionPolicy(
+            EnsSecurityProperties properties,
+            SessionAudit audit,
+            Clock clock,
+            ObjectProvider<FindByIndexNameSessionRepository> stored) {
         this.properties = properties;
         this.audit = audit;
         this.clock = clock;
+        this.stored = stored;
+    }
+
+    /** The database's sessions, where they are kept there; null where they are in memory. */
+    @SuppressWarnings("unchecked")
+    private FindByIndexNameSessionRepository<Session> stored() {
+        return stored.getIfAvailable();
     }
 
     /**
@@ -101,13 +139,25 @@ public class SessionPolicy implements HttpSessionListener, HttpSessionIdListener
             signedIn(request, authentication);
             return null;
         }
-        if (pushedOut.contains(session.getId())) {
+        if (pushedOut.contains(session.getId()) || "concurrent".equals(session.getAttribute(ENDED))) {
             return "concurrent";
         }
+        Instant now = Instant.now(clock);
         Duration absolute = properties.getSession().getAbsoluteTimeout();
-        if (absolute != null && !absolute.isZero() && !Instant.now(clock).isBefore(at.plus(absolute))) {
+        if (absolute != null && !absolute.isZero() && !now.isBefore(at.plus(absolute))) {
             audit.expired(authentication, session.getId(), "absolute", request.getRemoteAddr());
             return "absolute";
+        }
+        if (stored() != null) {
+            // The container is not watching a stored session's idle time; this is.
+            if (session.getAttribute(LAST_SEEN) instanceof Instant last
+                    && session.getAttribute(IDLE_LIMIT) instanceof Duration limit
+                    && !limit.isZero()
+                    && !now.isBefore(last.plus(limit))) {
+                audit.expired(authentication, session.getId(), "idle", request.getRemoteAddr());
+                return "idle";
+            }
+            session.setAttribute(LAST_SEEN, now);
         }
         return null;
     }
@@ -145,6 +195,11 @@ public class SessionPolicy implements HttpSessionListener, HttpSessionIdListener
         Duration idle = SignedInDirectoryUser.isAdmin(authentication)
                 ? properties.getSession().effectiveAdminIdleTimeout()
                 : properties.getSession().getIdleTimeout();
+        FindByIndexNameSessionRepository<Session> sessions = stored();
+        if (sessions != null) {
+            signedInStored(sessions, session, authentication, idle, now);
+            return;
+        }
         if (idle != null && !idle.isZero()) {
             session.setMaxInactiveInterval((int) Math.min(Integer.MAX_VALUE, idle.toSeconds()));
         }
@@ -167,6 +222,64 @@ public class SessionPolicy implements HttpSessionListener, HttpSessionIdListener
             log.info("Ending the oldest session of {}: over ENS_SESSION_MAX_PER_USER ({})",
                     authentication.getName(), properties.getSession().getMaxPerUser());
             audit.expired(authentication, oldest.sessionId(), "concurrent", null);
+        }
+    }
+
+    /**
+     * The same, with sessions in the database: the person's other sessions are found there,
+     * by the index on who holds them, and those beyond the limit marked as pushed out for
+     * whichever replica serves their next request.
+     */
+    private void signedInStored(
+            FindByIndexNameSessionRepository<Session> sessions,
+            HttpSession session,
+            Authentication authentication,
+            Duration idle,
+            Instant now) {
+        String holder = holderOf(authentication);
+        session.setAttribute(FindByIndexNameSessionRepository.PRINCIPAL_NAME_INDEX_NAME, holder);
+        session.setAttribute(LAST_SEEN, now);
+        if (idle != null && !idle.isZero()) {
+            session.setAttribute(IDLE_LIMIT, idle);
+            session.setMaxInactiveInterval(
+                    (int) Math.min(Integer.MAX_VALUE, idle.plus(STORED_SLACK).toSeconds()));
+        }
+        int max = properties.getSession().getMaxPerUser();
+        if (max <= 0) {
+            return;
+        }
+        // This session is not written until the request ends, so it is not among these.
+        List<Session> others = new ArrayList<>();
+        for (Session other : sessions.findByPrincipalName(holder).values()) {
+            if (!other.getId().equals(session.getId())
+                    && other.getAttribute(SIGNED_IN_AT) instanceof Instant
+                    && other.getAttribute(ENDED) == null) {
+                others.add(other);
+            }
+        }
+        others.sort(Comparator.comparing(other -> (Instant) other.getAttribute(SIGNED_IN_AT)));
+        int over = others.size() + 1 - max;
+        for (int i = 0; i < over; i++) {
+            Session oldest = others.get(i);
+            oldest.setAttribute(ENDED, "concurrent");
+            sessions.save(oldest);
+            log.info("Ending the oldest session of {}: over ENS_SESSION_MAX_PER_USER ({})",
+                    authentication.getName(), max);
+            audit.expired(authentication, oldest.getId(), "concurrent", null);
+        }
+    }
+
+    /**
+     * Who holds a stored session, as its index has it: {@link #keyOf}, hashed, because a DN
+     * can be longer than the column and need not be readable there.
+     */
+    static String holderOf(Authentication authentication) {
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(keyOf(authentication).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return "sha256:" + java.util.HexFormat.of().formatHex(digest);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
         }
     }
 

@@ -292,7 +292,7 @@
         $('#notifications-digest').on('click', function () {
             var $button = $(this).prop('disabled', true);
             $('#notifications-digest-status').text('Running…');
-            post('/api/v1/notifications/digest')
+            window.CertAlert.runJob('/api/v1/notifications/digest')
                 .done(function (result) {
                     $('#notifications-digest-status').text(
                         result.certificates + ' expiring, ' + result.peopleTold + ' told, '
@@ -307,7 +307,9 @@
                         $('#notifications-digest-status').text('');
                         return;
                     }
-                    $('#notifications-digest-status').text('The round-up failed; see the log.');
+                    $('#notifications-digest-status').text(xhr.status === 409
+                        ? 'A round-up is already running.'
+                        : 'The round-up failed; see the log.');
                 })
                 .always(function () {
                     $button.prop('disabled', false);

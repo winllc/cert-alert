@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.winllc.certalert.repository.NotificationSettingRepository;
+import com.winllc.certalert.support.JobRunsAwait;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -138,10 +139,12 @@ class NotificationSettingsApiTest {
     /** And a run without it says so, so the two are never confused on the page. */
     @Test
     void aRealRunSaysItWasNotARehearsal() throws Exception {
-        mockMvc.perform(post(DIGEST).with(user("alice").roles("ADMIN")).with(csrf()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.dryRun").value(false))
-                .andExpect(jsonPath("$.messages").isEmpty());
+        JobRunsAwait.finished(mockMvc,
+                        mockMvc.perform(post(DIGEST).with(user("alice").roles("ADMIN")).with(csrf())),
+                        user("alice").roles("ADMIN"))
+                .andExpect(jsonPath("$.state").value("SUCCEEDED"))
+                .andExpect(jsonPath("$.result.dryRun").value(false))
+                .andExpect(jsonPath("$.result.messages").isEmpty());
     }
 
     @Test

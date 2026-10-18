@@ -7,3 +7,10 @@ spring:
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: ${CERT_ALERT_DB_POOL_SIZE:10}
+
+cert-alert:
+  session:
+    # Sessions in the database, so they survive a restart and any replica can serve them.
+    # memory keeps them in the servlet container instead, for a single replica that does not
+    # mind everybody signing in again after a restart.
+    store: ${CERT_ALERT_SESSION_STORE:jdbc}

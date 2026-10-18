@@ -51,7 +51,7 @@
                 .html('<span class="spinner-border spinner-border-sm me-2" role="status"></span>Syncing…');
             $status.text('');
 
-            $.ajax({url: '/api/v1/sync', type: 'POST'})
+            CertAlert.runJob('/api/v1/sync')
                 .done(function (results) {
                     $status.html(results.map(function (result) {
                         var tone = result.errors > 0 ? 'bg-red-lt' : 'bg-green-lt';
@@ -70,6 +70,10 @@
                     }
                     if (xhr.status === 403) {
                         $status.html('<span class="badge bg-red-lt">not an administrator</span>');
+                        return;
+                    }
+                    if (xhr.status === 409) {
+                        $status.html('<span class="badge bg-yellow-lt">a sweep is already running</span>');
                         return;
                     }
                     if (xhr.status === 401) {
