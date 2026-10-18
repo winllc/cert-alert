@@ -61,8 +61,9 @@ Two details from the spec shape the design:
 ## Licensing
 
 cert-alert is proprietary software of ENS Solutions ([`LICENSE`](LICENSE), SPDX
-`LicenseRef-ENS-Commercial`, as the image's and the chart's license labels say): its source being
-visible does not license it. It needs an **ENS license** to run. Licenses are issued by the ENS licensing portal
+`LicenseRef-ENS-Commercial`, as the image's and the chart's license labels say), used under its
+end user license agreement ([`EULA`](EULA) - a placeholder until ENS Solutions puts its legal
+text there, to be replaced before a release): its source being visible does not license it. It needs an **ENS license** to run. Licenses are issued by the ENS licensing portal
 (an evaluation, or the license issued against an order) in the portal's `ens-license/1`
 format, for the product id **`certalert`**, and are checked offline: the application
 verifies the Ed25519 signature against the ENS public key built into it
@@ -750,6 +751,10 @@ The ENS platform baseline:
 - **Logs**: `LOGGING_STRUCTURED_FORMAT_CONSOLE=ecs` (Spring Boot's own setting) writes the
   application log as one ECS JSON object per line. The Helm chart does so by default
   (`logFormat: json`). The audit trail's stdout lines are raw `ens-audit/1` JSON either way.
+- **Alerts**: the Helm chart's `metrics.prometheusRule.enabled` (off by default) renders a
+  Prometheus Operator PrometheusRule from these metrics: a job that has not succeeded for too
+  long, a round-up cut short at its scan limit, certificates with no revocation answer, and
+  certificates expiring. See the chart's README, "Metrics and logs".
 
 ## Security headers, cookies and TLS
 
@@ -769,24 +774,46 @@ The ENS platform baseline, the same in every ENS product:
 - **The session cookie** is `HttpOnly` and `SameSite=Lax`, and `Secure` on any request that
   arrived over TLS. `ENS_COOKIE_SECURE=true` makes it `Secure` always, for a proxy that
   terminates TLS without saying so.
-- **TLS 1.2 and 1.3 only** when the application terminates TLS itself
-  (`server.ssl.enabled-protocols`).
+- **TLS 1.2 and 1.3 only, with FIPS-approved suites only**, when the application terminates
+  TLS itself (`server.ssl.enabled-protocols`, `server.ssl.ciphers`). The suites are those of
+  NIST SP 800-52 Rev. 2 with AES-GCM: `TLS_AES_256_GCM_SHA384` and `TLS_AES_128_GCM_SHA256` on
+  TLS 1.3, and `TLS_ECDHE_{ECDSA,RSA}_WITH_AES_{256,128}_GCM_{SHA384,SHA256}` on TLS 1.2 - no
+  ChaCha20, no CBC, no static RSA key exchange. `CERT_ALERT_TLS_CIPHERS` replaces the list
+  (comma-separated IANA names) for a client that can use none of them. `TlsPolicyTest` holds
+  the policy to real handshakes.
 - **Behind a proxy that terminates TLS**, set `SERVER_FORWARD_HEADERS_STRATEGY=framework` so
   the application trusts its `X-Forwarded-*` headers: redirects stay on https, HSTS and the
   `Secure` cookie follow the browser's request, and the audit trail records the client's
   address rather than the proxy's. Only with a proxy in front that sets those headers itself.
   The Helm chart sets it whenever its ingress or an edge or reencrypt Route terminates TLS.
-- **The release bundle** publishes on every interface by default, as it always has
-  (`CERT_ALERT_BIND_ADDRESS`, default `0.0.0.0`); with TLS off, `install.sh` now warns that
-  passwords and cookies would cross the network in clear text.
+- **The release bundle** listens on `127.0.0.1` by default (`CERT_ALERT_BIND_ADDRESS`), for
+  a TLS-terminating reverse proxy in front; to publish it to other hosts directly, turn TLS
+  on and set `CERT_ALERT_BIND_ADDRESS=0.0.0.0`. With TLS off on any other address,
+  `install.sh` refuses to start it unless `.env` sets `CERT_ALERT_ALLOW_PLAIN_HTTP=true`, and
+  warns every time it does. See `deploy/release/README.md`, "Listening, and TLS".
 - **PostgreSQL**: reach a database outside the bundle's internal network over TLS, with
   `sslmode=verify-full` in the JDBC URL (the chart's `database.params`).
+
+### Upgrading: listening address, TLS suites and idle timeout
+
+- **Release bundle.** Earlier bundles published on `0.0.0.0` and only warned about plain
+  HTTP. An upgrade keeps that: when the copied `.env` predates this release, `install.sh`
+  (and so `upgrade.sh`) adds `CERT_ALERT_BIND_ADDRESS=0.0.0.0` if it is not set, and
+  `CERT_ALERT_ALLOW_PLAIN_HTTP=true` if TLS is off on an address other than `127.0.0.1`,
+  under a comment saying why. Nothing else in `.env` changes. Move to a proxy on `127.0.0.1`
+  or to TLS in the application, then delete `CERT_ALERT_ALLOW_PLAIN_HTTP`.
+- **Idle timeout.** `ENS_SESSION_IDLE_TIMEOUT` now defaults to `15m` (was `30m`).
+  `ENS_SESSION_IDLE_TIMEOUT=30m` (the chart's `session.idleTimeout`) restores the old one.
+- **TLS suites.** With TLS terminated by the application, a client that could only use
+  ChaCha20, CBC or RSA-key-exchange suites no longer connects. Every browser and JDK of the
+  last decade negotiates AES-GCM; `CERT_ALERT_TLS_CIPHERS` is there for anything that does not.
+  Nothing changes when a proxy or ingress terminates TLS.
 
 ## Session controls
 
 | Setting | Default | |
 |---|---|---|
-| `ENS_SESSION_IDLE_TIMEOUT` | `30m` | A session nobody has used for this long ends. `SERVER_SERVLET_SESSION_TIMEOUT` still works as the same setting, and wins if both are set |
+| `ENS_SESSION_IDLE_TIMEOUT` | `15m` | A session nobody has used for this long ends. `SERVER_SERVLET_SESSION_TIMEOUT` still works as the same setting, and wins if both are set |
 | `ENS_SESSION_ADMIN_IDLE_TIMEOUT` | same as idle | The same for an administrator's session (the STIG suggests `15m`) |
 | `ENS_SESSION_ABSOLUTE_TIMEOUT` | `12h` | A session ends this long after sign-in, however busy |
 | `ENS_SESSION_MAX_PER_USER` | `0` (no limit) | Sessions one person may hold at once. Signing in beyond it ends their **oldest** session - the earliest sign-in (the STIG suggests `3`) |

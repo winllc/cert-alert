@@ -80,6 +80,21 @@ metrics:
     enabled: true
     labels:
       release: kube-prometheus-stack
+  # Its alerts too, with a job of its own and a team label on each.
+  prometheusRule:
+    enabled: true
+    labels:
+      release: kube-prometheus-stack
+    alertLabels:
+      team: pki
+    jobs:
+      - job: user sweep
+        maxAgeSeconds: 93600
+      - job: revocation
+        maxAgeSeconds: 93600
+        severity: critical
+    revocationUnknown:
+      threshold: 25
   allowFrom:
     - namespaceSelector:
         matchLabels:

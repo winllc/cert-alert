@@ -22,5 +22,5 @@ maintainers:
   - name: ENS Solutions
     url: https://github.com/winllc
 annotations:
-  # Proprietary: see LICENSE in the source repository. Use requires an ENS license.
+  # Proprietary: see LICENSE and EULA in the source repository. Use requires an ENS license.
   artifacthub.io/license: LicenseRef-ENS-Commercial

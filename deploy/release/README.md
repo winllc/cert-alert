@@ -49,9 +49,37 @@ cp /path/to/license.lic license/license.lic     # optional - or upload it once i
 ./install.sh          # validates .env, starts it, and installs license/license.lic
 ```
 
-The UI is then on port 8080 of this host (`CERT_ALERT_PORT` moves it). Sign in as one of
-`CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS` with a directory password - or a client
-certificate with TLS on - and press **Sync directory**.
+The UI is then on port 8080 (`CERT_ALERT_PORT` moves it) - of this host only, until you
+choose one of the two ways below. Sign in as one of `CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS`
+with a directory password - or a client certificate with TLS on - and press
+**Sync directory**.
+
+## Listening, and TLS
+
+A new install listens on `127.0.0.1` only (`CERT_ALERT_BIND_ADDRESS` in `.env`), so nothing
+crosses the network in clear text. To reach it from other hosts, either:
+
+- **Put a reverse proxy in front** (nginx, Apache, an F5) that terminates TLS and forwards to
+  `http://127.0.0.1:8080`. Keep `CERT_ALERT_BIND_ADDRESS=127.0.0.1` and set
+  `SERVER_FORWARD_HEADERS_STRATEGY=framework` and `ENS_COOKIE_SECURE=true`; or
+- **Turn TLS on in cert-alert** (`CERT_ALERT_TLS_ENABLED=true`, keystore and truststore in
+  `tls/`) and set `CERT_ALERT_BIND_ADDRESS=0.0.0.0` (or the interface's address). Client
+  certificate (CAC/PIV) sign-in needs this, or the proxy's header mode.
+
+`install.sh` refuses to start cert-alert on any address but `127.0.0.1` with TLS off, unless
+`.env` sets `CERT_ALERT_ALLOW_PLAIN_HTTP=true` - and warns every time it does. With TLS on,
+cert-alert offers TLS 1.2 and 1.3 only, with FIPS-approved suites only (AES-GCM, and ECDHE on
+TLS 1.2; `CERT_ALERT_TLS_CIPHERS` replaces the list). Idle sessions end after 15 minutes
+(`ENS_SESSION_IDLE_TIMEOUT`).
+
+**Upgrading from an earlier release**, which listened on `0.0.0.0` and allowed plain HTTP
+there: if `.env` does not set `CERT_ALERT_BIND_ADDRESS`, the upgrade adds
+`CERT_ALERT_BIND_ADDRESS=0.0.0.0` to it, and `CERT_ALERT_ALLOW_PLAIN_HTTP=true` when TLS is off
+on an address other than `127.0.0.1`, under a comment saying so - so the upgrade changes
+nothing, and `install.sh` warns about plain HTTP as before. Move to one of the two ways above,
+then delete `CERT_ALERT_ALLOW_PLAIN_HTTP`. Two defaults do change: idle sessions end after 15
+minutes rather than 30 (`ENS_SESSION_IDLE_TIMEOUT=30m` restores it), and with TLS on a client
+that can do only ChaCha20, CBC or RSA-key-exchange suites can no longer connect.
 
 ## License
 

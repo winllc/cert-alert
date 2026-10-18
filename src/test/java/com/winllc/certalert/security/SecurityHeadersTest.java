@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -39,6 +40,9 @@ class SecurityHeadersTest {
 
     @Autowired
     private Environment environment;
+
+    @Autowired
+    private EnsSecurityProperties ens;
 
     private MockMvc mockMvc;
 
@@ -91,6 +95,15 @@ class SecurityHeadersTest {
                 .bind("server.ssl.enabled-protocols", Bindable.listOf(String.class))
                 .get();
         assertThat(protocols).containsExactly("TLSv1.3", "TLSv1.2");
+    }
+
+    /** The STIG's 15 minutes, before sign-in and after, unless a deployment says otherwise. */
+    @Test
+    void anIdleSessionEndsAfterFifteenMinutesByDefault() {
+        assertThat(Binder.get(environment).bind("server.servlet.session.timeout", Duration.class).get())
+                .isEqualTo(Duration.ofMinutes(15));
+        assertThat(ens.getSession().getIdleTimeout()).isEqualTo(Duration.ofMinutes(15));
+        assertThat(new EnsSecurityProperties().getSession().getIdleTimeout()).isEqualTo(Duration.ofMinutes(15));
     }
 
     /**

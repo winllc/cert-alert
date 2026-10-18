@@ -101,7 +101,8 @@ server:
     session:
       # Before sign-in, and for anything that does not say otherwise. Set from
       # ENS_SESSION_IDLE_TIMEOUT; SERVER_SERVLET_SESSION_TIMEOUT still works and wins.
-      timeout: ${ENS_SESSION_IDLE_TIMEOUT:30m}
+      # 15 minutes by default, as the STIG asks; it was 30 before.
+      timeout: ${ENS_SESSION_IDLE_TIMEOUT:15m}
       cookie:
         # Never readable from script, and not sent on cross-site requests other than a
         # top-level navigation. Secure is set by the container on any request that arrived
@@ -120,6 +121,11 @@ server:
     # TLS 1.2 and 1.3 only. Everything older is broken or deprecated (RFC 8996), and a client
     # that cannot do 1.2 is not one to hand a session to.
     enabled-protocols: TLSv1.3,TLSv1.2
+    # FIPS-approved suites only (NIST SP 800-52 Rev. 2): AES-GCM, with ECDHE for TLS 1.2 so
+    # every session has forward secrecy. No ChaCha20, no CBC, no static RSA key exchange.
+    # CERT_ALERT_TLS_CIPHERS replaces the list (comma-separated, IANA names) for a client
+    # that cannot use any of these - say so to ENS support.
+    ciphers: ${CERT_ALERT_TLS_CIPHERS:TLS_AES_256_GCM_SHA384,TLS_AES_128_GCM_SHA256,TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256}
     client-auth: want
     key-store: ${CERT_ALERT_KEYSTORE:}
     key-store-password: ${CERT_ALERT_KEYSTORE_PASSWORD:}

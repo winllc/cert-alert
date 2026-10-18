@@ -144,8 +144,8 @@ jobs:
     # starts and passes the scan. Nothing is published from a pull request: a fork's token
     # cannot write packages, and an image built from code nobody has reviewed is not one to
     # leave in a registry. On a release tag the image and the chart are signed with cosign
-    # (keyless, by this workflow's GitHub identity) and the image's SBOM attached as an
-    # attestation.
+    # (keyless, by this workflow's GitHub identity), and the image's SBOM and its SLSA build
+    # provenance attached as attestations.
     runs-on: ubuntu-latest
     needs: build
 
@@ -154,6 +154,8 @@ jobs:
       packages: write
       # Keyless signing: cosign exchanges the workflow's OIDC token for a Fulcio certificate.
       id-token: write
+      # The build-provenance attestation is recorded on the repository as well as pushed.
+      attestations: write
 
     env:
       # The customer release bundle (see "Release bundle" below and the README's Releases).
@@ -294,6 +296,10 @@ jobs:
           if [ "$EVENT" = push ] && [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             version=${GITHUB_REF_NAME#v}
             release=true
+            # EULA ships as a placeholder until ENS Solutions supplies its legal text.
+            if grep -q '^PLACEHOLDER' EULA; then
+              echo "::warning file=EULA::EULA is still the placeholder; replace it with ENS Solutions' agreement."
+            fi
           elif [ "$EVENT" = pull_request ]; then
             version="0.0.0-pr${PR_NUMBER}"
             release=false
@@ -366,6 +372,7 @@ jobs:
           cosign-release: ${{ env.COSIGN_VERSION }}
 
       - name: Sign the image and the chart, and attest the image's SBOM
+        id: sign-image
         if: steps.release.outputs.enabled == 'true' && steps.release.outputs.release == 'true'
         env:
           VERSION: ${{ steps.release.outputs.version }}
@@ -378,6 +385,8 @@ jobs:
           case "$image" in "$IMAGE_NAME"@sha256:*) ;; *) echo "::error::no registry digest for $IMAGE_NAME:$VERSION"; exit 1 ;; esac
           cosign sign --yes "$image"
           cosign attest --yes --type spdxjson --predicate "$OUT_DIR/sbom-$PRODUCT_ID.spdx.json" "$image"
+          # For the provenance attestation below, which takes the digest on its own.
+          echo "digest=${image#*@}" >> "$GITHUB_OUTPUT"
 
           chart_digest=$(sed -n 's/^Digest: *//p' "$RUNNER_TEMP/helm-push.txt" | head -1)
           [ -n "$chart_digest" ] || { echo "::error::helm push printed no digest"; exit 1; }
@@ -385,7 +394,7 @@ jobs:
           {
             echo "### Signed"
             echo
-            echo "Image \`$image\` (with an SPDX SBOM attestation)"
+            echo "Image \`$image\` (with an SPDX SBOM attestation, and build provenance in the next step)"
             echo "Chart \`$CHART_REPO/$PRODUCT_ID@$chart_digest\`"
             echo
             echo "Verify:"
@@ -393,8 +402,23 @@ jobs:
             echo "cosign verify $image \\"
             echo "  --certificate-identity-regexp 'https://github.com/${{ github.repository }}/.github/workflows/.*' \\"
             echo "  --certificate-oidc-issuer https://token.actions.githubusercontent.com"
+            echo "gh attestation verify oci://$image --repo ${{ github.repository }}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attest the image's build provenance
+        # SLSA build provenance for the image just signed, by digest: which workflow, commit
+        # and runner built it. Signed through Sigstore with this workflow's identity, like the
+        # cosign signature, pushed to the registry beside the image and recorded on the
+        # repository; `gh attestation verify` (above) checks it. No artifact storage record,
+        # which would need a permission of its own.
+        if: steps.release.outputs.enabled == 'true' && steps.release.outputs.release == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.sign-image.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
 
       - name: Sign the checksums
         id: sign

@@ -140,26 +140,79 @@ check_env() {
     fi
 }
 
-warn_if_exposed() {
-    # Plain HTTP on every interface sends passwords and session cookies across the network
-    # in clear text. Allowed - a lab, or a firewall in front - but never silently.
+# Whether NAME is set (uncommented) in .env at all, even to an empty value.
+env_has() {
+    grep -qE "^[[:space:]]*$1=" .env
+}
+
+keep_previous_listen_address() {
+    # Releases before this one published on every interface by default, and only warned
+    # about plain HTTP. This one listens on 127.0.0.1 by default and refuses plain HTTP
+    # anywhere else unless CERT_ALERT_ALLOW_PLAIN_HTTP=true. An .env written for an earlier
+    # release says nothing about either, so the upgrade would leave cert-alert unreachable
+    # or not started; write the old behaviour into it instead, so the upgrade changes
+    # nothing. An .env from this env.template mentions CERT_ALERT_ALLOW_PLAIN_HTTP (commented
+    # out), and is never touched; neither is one this has already been through.
+    grep -qE '^#?[[:space:]]*CERT_ALERT_ALLOW_PLAIN_HTTP=' .env && return 0
+    local bind tls_on=false add_bind=false allow=false
+    [ "$(env_value CERT_ALERT_TLS_ENABLED)" = "true" ] && tls_on=true
+    env_has CERT_ALERT_BIND_ADDRESS || add_bind=true
+    bind=$(env_value CERT_ALERT_BIND_ADDRESS)
+    [ "$add_bind" = false ] || bind=0.0.0.0
+    if [ "$tls_on" = false ]; then
+        case "$bind" in 127.*|localhost|::1|'[::1]') ;; *) allow=true ;; esac
+    fi
+    {
+        printf '\n# Added by install.sh %s, so this upgrade changes nothing: earlier releases\n' "$VERSION"
+        printf '# listened on every interface by default and allowed plain HTTP there. New installs\n'
+        printf '# listen on 127.0.0.1 behind a TLS-terminating proxy, or turn TLS on - see the\n'
+        printf '# upgrade notes in the README.\n'
+        [ "$add_bind" = false ] || printf 'CERT_ALERT_BIND_ADDRESS=0.0.0.0\n'
+        if [ "$allow" = true ]; then
+            printf 'CERT_ALERT_ALLOW_PLAIN_HTTP=true\n'
+        else
+            printf '# CERT_ALERT_ALLOW_PLAIN_HTTP=false\n'
+        fi
+    } >> .env
+    [ "$add_bind" = false ] \
+        || say "Kept the previous listen address: added CERT_ALERT_BIND_ADDRESS=0.0.0.0 to .env."
+    [ "$allow" = false ] \
+        || say "Kept plain HTTP allowed, as before: added CERT_ALERT_ALLOW_PLAIN_HTTP=true to .env (TLS is off)."
+}
+
+check_exposure() {
+    # Plain HTTP on an interface other hosts reach sends passwords and session cookies across
+    # the network in clear text. Refused unless .env says so in as many words - a lab, or a
+    # firewall in front - and never silent even then.
     [ "$(env_value CERT_ALERT_TLS_ENABLED)" = "true" ] && return 0
     local bind port
-    bind=$(env_value CERT_ALERT_BIND_ADDRESS); bind=${bind:-0.0.0.0}
+    bind=$(env_value CERT_ALERT_BIND_ADDRESS); bind=${bind:-127.0.0.1}
     port=$(env_value CERT_ALERT_PORT); port=${port:-8080}
     case "$bind" in
-        0.0.0.0|::|'[::]'|'*') ;;
-        *) return 0 ;;
+        127.*|localhost|::1|'[::1]') return 0 ;;
     esac
+    local allowed=false
+    [ "$(env_value CERT_ALERT_ALLOW_PLAIN_HTTP)" = "true" ] && allowed=true
     say "" >&2
-    say "WARNING: TLS is off (CERT_ALERT_TLS_ENABLED is not true) and cert-alert is published on" >&2
-    say "         every interface (CERT_ALERT_BIND_ADDRESS=$bind, port $port). Directory passwords" >&2
-    say "         and session cookies will cross the network in clear text. Either:" >&2
+    if [ "$allowed" = true ]; then
+        say "WARNING: TLS is off (CERT_ALERT_TLS_ENABLED is not true) and cert-alert is published on" >&2
+    else
+        say "Refusing to start: TLS is off (CERT_ALERT_TLS_ENABLED is not true) and cert-alert would be published on" >&2
+    fi
+    say "         $bind (CERT_ALERT_BIND_ADDRESS), port $port. Directory passwords and session" >&2
+    say "         cookies would cross the network in clear text. Either:" >&2
     say "           - put a TLS-terminating reverse proxy in front and set" >&2
     say "             CERT_ALERT_BIND_ADDRESS=127.0.0.1, SERVER_FORWARD_HEADERS_STRATEGY=framework" >&2
     say "             and ENS_COOKIE_SECURE=true; or" >&2
     say "           - turn TLS on in the application (CERT_ALERT_TLS_ENABLED=true, keystores in tls/)." >&2
-    say "" >&2
+    if [ "$allowed" = true ]; then
+        say "         (Allowed only because .env sets CERT_ALERT_ALLOW_PLAIN_HTTP=true.)" >&2
+        say "" >&2
+        return 0
+    fi
+    say "         Or, for a lab or behind a firewall that does it for you, set" >&2
+    say "         CERT_ALERT_ALLOW_PLAIN_HTTP=true in .env to accept the risk." >&2
+    die "plain HTTP on $bind is not allowed without TLS or CERT_ALERT_ALLOW_PLAIN_HTTP=true."
 }
 
 check_license() {
@@ -261,10 +314,18 @@ wait_until_healthy() {
                 local port scheme=http
                 port=$(env_value CERT_ALERT_PORT); port=${port:-8080}
                 [ "$(env_value CERT_ALERT_TLS_ENABLED)" = "true" ] && scheme=https
-                local url
-                url="${scheme}://$(hostname -f 2> /dev/null || hostname):${port}"
+                local url bind host
+                bind=$(env_value CERT_ALERT_BIND_ADDRESS); bind=${bind:-127.0.0.1}
+                case "$bind" in
+                    0.0.0.0|::|'[::]'|'*') host=$(hostname -f 2> /dev/null || hostname) ;;
+                    *) host=$bind ;;
+                esac
+                url="${scheme}://${host}:${port}"
                 say ""
                 say "cert-alert $VERSION is up: ${url}/"
+                case "$bind" in
+                    127.*|localhost|::1|'[::1]') say "(This host only: point your TLS-terminating reverse proxy at it.)" ;;
+                esac
                 say "License screen (installation id, upload): ${url}/admin/license"
                 say "Sign in as one of CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS and press Sync directory."
                 return 0 ;;
@@ -295,8 +356,9 @@ if [ "$MODE" = install ]; then
         exit 0
     fi
     say "Using the existing .env (not overwritten)."
+    keep_previous_listen_address
     check_env
-    warn_if_exposed
+    check_exposure
     check_license
     load_images
     start
@@ -305,8 +367,9 @@ else
     [ -f .env ] || die "no .env here. Pass --from <the previous release's directory>, or copy its .env, license/ and tls/ here. For a first install run ./install.sh."
     make_directories
     newer_settings
+    keep_previous_listen_address
     check_env
-    warn_if_exposed
+    check_exposure
     check_license
     load_images
     backup_database

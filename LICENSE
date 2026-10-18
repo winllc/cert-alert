@@ -8,6 +8,8 @@ Helm chart - requires a license issued by ENS Solutions, and is subject to the t
 license is issued under. To obtain a license, an evaluation license, or the terms, contact
 ENS Solutions.
 
+The end user license agreement for CertAlert is in EULA, in the same directory as this file.
+
 Third-party components included in CertAlert remain under their own licences, which are
 listed in the software bill of materials (SBOM) published with each release.
 

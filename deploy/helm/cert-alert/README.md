@@ -206,8 +206,27 @@ A release without audit logging ignores these variables.
 | `metrics.enabled` | `true` | `MANAGEMENT_SERVER_PORT` | The actuator on its own port (plain HTTP), with health and `/actuator/prometheus` open there; the probes use it and the Service gets a `metrics` port. The ingress and route never route to it |
 | `metrics.port` | `9090` | | |
 | `metrics.serviceMonitor.enabled` | `false` | | Renders a `monitoring.coreos.com/v1` ServiceMonitor; `.interval`, `.scrapeTimeout`, `.labels` |
+| `metrics.prometheusRule.enabled` | `false` | | Renders a `monitoring.coreos.com/v1` PrometheusRule with the alerts below; `.labels` (on the resource), `.alertLabels` (on every alert), `.selector`, `.jobLabel` |
+| `metrics.prometheusRule.jobs` | user sweep, server sweep (26h), expiry refresh (3h) | | `CertAlertJobNotSucceeding`, one per entry: `{job, maxAgeSeconds, severity}`; `.jobFor`, `.jobSeverity` |
+| `metrics.prometheusRule.digestTruncated` / `.revocationUnknown` / `.certificatesExpiring` | on | | `.enabled`, `.severity`; the last two also `.threshold` and `.for` (`6h`, `15m`) |
 | `metrics.allowFrom` | `[]` | | With `networkPolicy.enabled`, the peers admitted to the metrics port |
 | `logFormat` | `json` | `LOGGING_STRUCTURED_FORMAT_CONSOLE` | `json` (ECS) or `text` |
+
+The PrometheusRule's alerts, from the business metrics (the main README's "Metrics, health
+and logs"):
+
+| Alert | Fires when |
+|---|---|
+| `CertAlertJobNotSucceeding` | A job in `prometheusRule.jobs` has not finished without failing for `maxAgeSeconds` - or not at all since a restart that long ago (`ens_certalert_job_last_success_seconds`, `process_start_time_seconds`). Labelled `certalert_job` |
+| `CertAlertDigestTruncated` | An expiry round-up stopped at its scan limit in the last 25 hours (`ens_certalert_digest_truncated_total`) |
+| `CertAlertRevocationUnknown` | More than `threshold` certificates have had no revocation answer from their CA for `for` (`ens_certalert_revocation_unknown`) |
+| `CertAlertCertificatesExpiring` | More than `threshold` certificates are inside `thresholds.warningDays` (`ens_certalert_certificates{status="expiring_soon"}`) |
+
+Series are picked by `namespace` and `service`, as the chart's ServiceMonitor labels them;
+set `selector` for a scrape of your own. The metric's `job` label arrives in Prometheus as
+`exported_job`, because the scrape target has a `job` of its own (`jobLabel`). The job
+gauges start empty at every restart, so a job that has failed since then alerts once the
+process is older than `maxAgeSeconds`.
 
 ### Networking
 
