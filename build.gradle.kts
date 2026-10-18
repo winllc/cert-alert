@@ -18,6 +18,14 @@ repositories {
     mavenCentral()
 }
 
+// Ahead of the versions Spring Boot 4.1.1 manages, for fixes the image scan in CI holds
+// the build to: Tomcat 11.0.24 has CVE-2026-65182, CVE-2026-65905 and CVE-2026-68525
+// (critical), Jackson 2.21.5 and 3.1.5 have CVE-2026-68497, -89407, -89425, -91776 and
+// -91777. Drop each line once the Spring Boot in use manages that version or a later one.
+extra["tomcat.version"] = "11.0.27"
+extra["jackson-bom.version"] = "3.1.7"
+extra["jackson-2-bom.version"] = "2.21.8"
+
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
@@ -80,6 +88,10 @@ tasks.withType<JavaCompile>().configureEach {
 
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
+    // Gradle's default for a test JVM is 512MB. The run keeps up to eight application
+    // contexts (src/test/resources/spring.properties), about 300MB live at the most, and G1
+    // with that little headroom spends its time failing evacuations and collecting in full.
+    maxHeapSize = "1g"
     testLogging {
         events("passed", "skipped", "failed")
     }

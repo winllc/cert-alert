@@ -1,0 +1,14 @@
+# Accepted risks for the image scan in CI (trivy image --severity HIGH,CRITICAL
+# --ignore-unfixed --ignorefile .trivyignore). One entry per vulnerability, each with why
+# it is accepted and an exp: date, after which Trivy stops ignoring it and the build fails
+# until somebody looks again. A vulnerability with a fix in a dependency is fixed, not
+# listed here.
+
+# pcre2 and pcre2-syntax 10.40-6.el9 in the runtime base image
+# (ubi9/openjdk-21-runtime:1.24, built 2026-10-12, the newest there is). Fixed in
+# 10.40-7.el9_8, which arrives when Red Hat rebuilds the base and Dependabot moves the
+# pinned digest. PCRE2 is a library of the operating system's tools in the image; the
+# application never calls it, and nothing from outside reaches it as a regular expression.
+CVE-2026-103111 exp:2026-11-17
+CVE-2026-86145 exp:2026-11-17
+CVE-2026-89161 exp:2026-11-17
