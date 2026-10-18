@@ -998,16 +998,138 @@ cert-alert:
 Set `cert-alert.security.ldap.enabled: false` for a deployment that wants certificates and
 nothing else, and there will be no password path at all.
 
+### Single sign-on
+
+OpenID Connect and SAML 2.0, alongside the certificate and the password. Both are off until
+configured; with neither on, nothing about signing in changes. The sign-in page shows a
+button for each one that is.
+
+**Who it signs in.** The provider names the person by a claim (OIDC) or the NameID or an
+attribute (SAML). That value is matched to a directory entry exactly as a password sign-in
+finds one: as a **uid** (`match: UID`, the default) or as the **DN** of the entry
+(`match: DN`), in the cached directory first and then in the directory itself under
+`cert-alert.security.ldap.user-search-base` (or `user-dn-patterns`). Never as an address and
+never as a name: an `email` claim is not used, and a uid that looks like an address must be
+the entry's actual uid. Somebody the directory does not hold is refused: the provider says
+who somebody is, the directory says whether they are somebody this application serves. Roles
+come from the lists and [groups](#roles-from-groups) as for anybody else; a provider's groups
+count only where `cert-alert.security.groups` names them.
+
+**What is checked.**
+
+- OIDC: the authorization code flow, always with PKCE (S256), whether or not there is a
+  client secret. The ID token's signature against the provider's published keys
+  (`jws-algorithm`, RS256 by default), its issuer (exactly `issuer-uri`), audience (the
+  client id), authorized party, expiry and nonce, with `clock-skew` allowed. The provider's
+  discovery document is read when first needed, so a provider that is down does not stop the
+  application starting. No access or refresh token is kept.
+- SAML: the response or its assertion must be signed by a key in the identity provider's
+  metadata (unsigned is refused); the issuer must be that provider; the audience and
+  destination this service provider; the conditions in date, with `clock-skew` allowed. Every
+  response must answer (`InResponseTo`) a request this application sent and has not seen
+  answered: requests wait in the database (`saml_authn_request`) for ten minutes and are used
+  once, so a replayed or unsolicited (identity-provider-initiated) response is refused.
+
+Sign-ins and refusals are recorded as `auth.login` with method `oidc` or `saml`, and the
+refusal's reason. Signing out ends the session here; it does not sign the person out of the
+provider (no single logout).
+
+**The consent banner.** Starting a single sign-on is held at the banner like anything else.
+The SAML answer is a cross-site `POST` that the session cookie (SameSite=Lax) does not come
+with, so the agreement is carried in the stored request to the session the answer creates.
+
+```yaml
+cert-alert:
+  sso:
+    oidc:
+      enabled: true
+      display-name: Sign in with Entra ID
+      issuer-uri: https://login.microsoftonline.com/<tenant-id>/v2.0
+      client-id: <application (client) id>
+      client-secret: <secret>          # empty for a public client: PKCE alone
+      scopes: [openid, profile]
+      username-claim: preferred_username
+      match: UID                       # or DN
+      groups-claim: groups
+      jws-algorithm: RS256
+      clock-skew: 2m
+    saml:
+      enabled: true
+      display-name: Sign in with ADFS
+      metadata-location: https://adfs.example.gov/FederationMetadata/2007-06/FederationMetadata.xml
+      entity-id: "{baseUrl}/saml2/service-provider-metadata/{registrationId}"
+      signing-key-location: file:/etc/cert-alert/saml/signing.key          # optional
+      signing-certificate-location: file:/etc/cert-alert/saml/signing.crt
+      username-attribute: ""           # empty: the NameID
+      match: UID
+      groups-attribute: http://schemas.microsoft.com/ws/2008/06/identity/claims/groups
+      clock-skew: 2m
+```
+
+Every setting has an environment variable (`CERT_ALERT_SSO_OIDC_ISSUER_URI`, ...) in
+`env.template` and a Helm value under `sso`. The addresses to give the provider:
+
+| | OIDC | SAML |
+|---|---|---|
+| Redirect URI / assertion consumer | `https://<host>/login/oauth2/code/oidc` | `https://<host>/login/saml2/sso/saml` (HTTP-POST) |
+| Service provider metadata | | `https://<host>/saml2/service-provider-metadata/saml` |
+| Entity id | | `https://<host>/saml2/service-provider-metadata/saml` unless `entity-id` says otherwise |
+
+Behind a proxy that terminates TLS, set `SERVER_FORWARD_HEADERS_STRATEGY=framework` so these
+are built with the public `https://` address the provider expects.
+
+#### Microsoft Entra ID (OIDC)
+
+1. App registrations → New registration. Platform **Web**, redirect URI
+   `https://<host>/login/oauth2/code/oidc`. Note the application (client) id and the
+   directory (tenant) id; create a client secret.
+2. Token configuration → add optional claim `preferred_username`; to use groups, add the
+   groups claim (security groups). Entra ID sends group **object ids**, so list those in
+   `cert-alert.security.groups`.
+3. `issuer-uri: https://login.microsoftonline.com/<tenant-id>/v2.0`. `preferred_username`
+   is the user principal name: use it with `match: UID` only where your directory's uids are
+   the UPNs. Otherwise add a claim carrying the on-premises `samAccountName` or DN (directory
+   extension attributes, or claims mapping) and name it in `username-claim`.
+
+#### Okta (OIDC)
+
+1. Applications → Create App Integration → OIDC, **Web Application**. Sign-in redirect URI
+   `https://<host>/login/oauth2/code/oidc`; grant type Authorization Code (PKCE is used
+   automatically).
+2. `issuer-uri` is the authorization server's issuer, e.g. `https://<org>.okta.com/oauth2/default`.
+3. For a uid, add a custom claim to the ID token (Security → API → Authorization Servers →
+   Claims), e.g. `uid` = `user.login` or a profile attribute holding the directory uid, and set
+   `username-claim: uid`. For groups, add a `groups` claim with a filter, and
+   `groups-claim: groups`; Okta sends group names.
+
+#### ADFS (SAML)
+
+1. Add Relying Party Trust → import from
+   `https://<host>/saml2/service-provider-metadata/saml` (or enter it by hand: SAML 2.0
+   WebSSO, the assertion consumer above, the entity id above).
+2. Claim issuance: send the LDAP attribute holding the uid (e.g. `SAM-Account-Name`) as
+   **Name ID** (and leave `username-attribute` empty), or as an attribute you name in
+   `username-attribute`. For a DN, send `distinguishedName` and set `match: DN`. For groups,
+   send *Token-Groups - Qualified by Domain Name* or the group DNs, as the attribute in
+   `groups-attribute`.
+3. ADFS signs the assertion with its token-signing certificate, which is in its metadata
+   (`https://<adfs>/FederationMetadata/2007-06/FederationMetadata.xml`). Where ADFS requires
+   signed requests, give `signing-key-location` (PEM, PKCS#8) and `signing-certificate-location`.
+4. For an ADFS this application cannot reach, save the metadata and use
+   `metadata-location: file:/path/to/metadata.xml` (Helm: `sso.saml.metadataConfigMap`).
+
 ### Roles
 
-| Role         | May                                                        |
-|--------------|------------------------------------------------------------|
-| `ROLE_USER`  | Read the search tables and the cached certificate detail   |
-| `ROLE_ADMIN` | Also trigger the jobs and reach the management endpoints   |
+| Role           | May                                                        |
+|----------------|------------------------------------------------------------|
+| `ROLE_USER`    | Read the search tables and the cached certificate detail   |
+| `ROLE_AUDITOR` | Read everything an administrator reads - the administration page, the audit log and its export, the license screen - and change nothing at all |
+| `ROLE_ADMIN`   | Also trigger the jobs, change settings and reach the management endpoints |
 
 Everyone who authenticates gets `ROLE_USER`. `ROLE_ADMIN` comes from
 `cert-alert.security.admin-identifiers`, matched against two things only: a person's uid,
-and the DN of their entry.
+and the DN of their entry. `ROLE_AUDITOR` comes from `cert-alert.security.auditor-identifiers`,
+matched the same way. Either can also come from a group (below).
 
 ```yaml
 cert-alert:
@@ -1050,6 +1172,47 @@ A password sign-in is resolved to the cached person at the DN it bound as, and t
 else. On a fresh deployment the cache is empty, so roles for someone signing in with a
 password are resolved from the directory entry they just bound against: its DN and its uid,
 never its addresses or the username typed. Otherwise nobody could trigger the first sync.
+
+#### The auditor changes nothing
+
+An auditor is refused - 403, recorded as `access.denied` - on every request that could
+change something: anything but `GET`, `HEAD` and `OPTIONS`, whatever the endpoint, by one
+rule ahead of all the others rather than one per endpoint, so an endpoint added later is
+covered too. That includes what an ordinary user may do, such as editing contacts with
+`contact-editors: AUTHENTICATED` or marking a notification read. The exceptions only read or
+concern the session: the search tables (which `POST` their query), verifying the audit chain,
+signing in and out, and agreeing to the consent banner. The pages hide what an auditor
+cannot use. Somebody who is both an auditor and an administrator is an administrator.
+
+#### Roles from groups
+
+A role can come from a group as well as from the lists above: a directory group, from the
+`memberOf` values of the person's entry (read with the service account when they sign in,
+however they sign in), or a group a [single sign-on](#single-sign-on) provider says they are
+in. Only the groups named here grant anything, so nobody becomes an administrator because a
+provider puts them in a group called "Administrators":
+
+```yaml
+cert-alert:
+  security:
+    auditor-identifiers:
+      - uid=inspector,ou=people,dc=example,dc=gov
+    groups:
+      admin:
+        - cn=CertAlert Admins,ou=groups,dc=example,dc=gov   # a directory group's DN
+        - 5b0f1c2e-1d0e-4c8b-9a77-2f2a6c0d9e11              # an Entra ID group's object id
+      auditor:
+        - cn=CertAlert Auditors,ou=groups,dc=example,dc=gov
+      directory: true             # read memberOf at sign-in
+      member-of-attribute: memberOf
+      cache-for: 5m               # a certificate is checked on every request
+```
+
+Group names and DNs are compared without regard to case or spacing after commas. From the
+environment, list them with indexed variables, e.g. `CERT_ALERT_SECURITY_GROUPS_ADMIN_0`.
+OpenLDAP's `memberOf` overlay and 389 Directory Server's MemberOf plugin both maintain the
+attribute; a directory without it grants nothing by group unless a provider says so. A group
+change counts at the person's next sign-in, or within `cache-for` for a client certificate.
 
 `/actuator/health` stays open so the thing can be monitored. Everything else requires
 authentication; an unauthenticated API call gets a 401 rather than a login page, because a
@@ -2304,6 +2467,8 @@ for.
 | `GET`  | `/api/v1/sync/certificate-cleanup/preview` | What that would delete            |
 | `GET`  | `/api/v1/sync/prune/preview`        | How many the next prune would remove      |
 | `GET`  | `/api/v1/sync/runs`                 | The run log, newest first                |
+| `GET`  | `/api/v1/jobs/{id}`                 | How a job started by hand is going (the job endpoints answer 202 with it) |
+| `GET`  | `/api/v1/jobs`                      | Jobs started by hand, newest first       |
 | `GET`  | `/api/v1/stats/users`               | Certificate roll-up across IC Persons    |
 | `GET`  | `/api/v1/stats/servers`             | Certificate roll-up across servers       |
 | `GET`  | `/api/v1/users/{id}/certificates`   | Cached certificate detail for a person   |
@@ -2403,8 +2568,74 @@ failed sweeps still cannot delete anything. Check `GET /api/v1/sync/prune/previe
 turning it on.
 
 Every job is guarded against overlapping itself — a sweep of a large directory can outlast
-its own interval — and every run is recorded in `sync_run`, readable at
-`GET /api/v1/sync/runs`.
+its own interval — by a lock in the database (`shedlock`), which a run started by hand takes
+too: pressing "Sync directory" while the nightly sweep is running, on this replica or another,
+does not start a second sweep. A replica that dies holding a lock releases it after
+`cert-alert.cluster.lock-at-most-for` (10 minutes; renewed while the job runs, however long).
+Every run is recorded in `sync_run`, readable at `GET /api/v1/sync/runs`.
+
+### Starting a job by hand
+
+`POST /api/v1/sync` and the other job endpoints (`/sync/users`, `/sync/servers`,
+`/sync/refresh`, `/sync/prune`, `/sync/certificate-cleanup`, `/changelog/poll`,
+`/revocation/check`, and `/notifications/digest` without `dryRun`) answer **202 Accepted** at
+once with a run, and the job runs in the background:
+
+```json
+{"id":"7c0e…","job":"directory sync","state":"QUEUED","finished":false,
+ "requestedAt":"…","statusUrl":"/api/v1/jobs/7c0e…"}
+```
+
+`GET /api/v1/jobs/{id}` (also in the `Location` header) says how it is going - `QUEUED`,
+`RUNNING`, `SUCCEEDED` with `result` (what the endpoint used to answer with), `FAILED` with
+`error`, or `SKIPPED` when the same job was already running. `GET /api/v1/jobs` lists recent
+runs. The pages ask until the run has finished. Runs are kept in `job_run` for
+`cert-alert.cluster.run-retention` (7 days), so whichever replica a request reaches can answer;
+a run whose replica stops is marked `FAILED` within `stale-run-after` (5 minutes). Each is
+audited as `job.requested`, with the run id, when it is asked for.
+
+## High availability
+
+More than one replica is supported. What makes it safe:
+
+- **Jobs.** Each scheduled job, and the same job started by hand, takes a lock in the database
+  (`shedlock`), so it runs on one replica at a time. Every replica's schedule fires; the first
+  to take the lock runs the job, the others log that it is already running. The same goes for
+  the changelog connector's polls, the mail outbox's sends, each audit output's deliveries,
+  audit retention and the expired-session sweep.
+- **Sessions.** With `cert-alert.session.store=jdbc` - the default in the postgres profile,
+  which the chart and the release bundle use - sessions live in the database
+  (`spring_session`). Any replica serves any request, and a restart or rolling update signs
+  nobody out. The session controls (idle, absolute, how many per person) are enforced from
+  the database too, and idle sessions are still recorded as `auth.session-expired`.
+- **Jobs started by hand** are recorded in `job_run`, so the page can ask any replica how one
+  is going.
+- **SAML sign-in requests** wait in the database (`saml_authn_request`), so the identity
+  provider's answer can reach any replica. OIDC keeps its state in the session.
+
+What is still each replica's own, and why that is acceptable:
+
+| State | Per replica | Effect with two |
+|---|---|---|
+| Repeated sign-in failures for one name (the `ALERT` after five) | counted per replica | an attacker spread across replicas needs up to five per replica before the alert |
+| Collapsed `access.denied` and certificate sign-in failures | one event a minute per replica | up to one per replica a minute |
+| License mode changes (`license.mode-changed`) | each replica notices its own | recorded once by each replica that notices |
+| `ens_certalert_job_last_success_seconds` | set where the job ran | the PrometheusRule takes the `max` across replicas |
+| Directory groups, CRLs, sign-in revocation answers | caches | each replica fills its own |
+
+**The license volume.** The vendored license library keeps this installation's id and the
+license revisions it has seen in files on the license volume (`/var/lib/ens`). Every replica
+must see the same files, or each would have an installation id of its own, so above one
+replica the chart requires a ReadWriteMany volume and `persistence.license.readWriteMany: true`
+to say so. A shared store for that state is coming in the license library; until then, see
+[the chart's README](deploy/helm/cert-alert/README.md#high-availability).
+
+**Helm.** `replicaCount: 2` (with the license volume as above) gives a `RollingUpdate`
+strategy with `maxUnavailable: 0` and `minReadySeconds`, a PodDisruptionBudget
+(`minAvailable: 1`), a preference for spreading the pods across nodes, and a short `preStop`
+pause so a pod leaves the Service before it stops taking requests. Readiness is the database
+and the audit log; a pod is not sent traffic until it is ready. With one replica nothing
+changes: `Recreate`, no budget.
 
 ## Following the changelog
 
@@ -2816,6 +3047,45 @@ class SlackAlertNotifier implements AlertNotifier {
 
 Read these before upgrading. They apply to the compose bundle, the Helm chart and a plain
 `java -jar` alike.
+
+### Jobs started by hand answer 202, and run one at a time across replicas
+
+`POST /api/v1/sync` and the other job endpoints no longer run the job inside the request: they
+answer **202 Accepted** with a run (`statusUrl`), and `GET /api/v1/jobs/{id}` gives the result
+once it has finished (see [Starting a job by hand](#starting-a-job-by-hand)). The pages do
+this themselves. A script that read the counts from the `POST` response must now poll
+`statusUrl` and read `result`. `POST /api/v1/notifications/digest?dryRun=true` still answers
+at once.
+
+A job started while the same job is running - scheduled or by hand - is now `SKIPPED` instead
+of running alongside it.
+
+### New tables, migrated on start
+
+Flyway adds `shedlock` (V21), `job_run` (V22), `spring_session` and
+`spring_session_attributes` (V23) and `saml_authn_request` (V24) on the first start. Nothing
+to do; the database user already owns the schema.
+
+### Sessions are kept in the database
+
+With the postgres profile (the chart and the release bundle), sessions are now stored in the
+database and survive a restart. The session cookie is now called `SESSION` instead of
+`JSESSIONID`, so everybody signs in once more after the upgrade. Set
+`CERT_ALERT_SESSION_STORE=memory` to keep sessions in the container as before.
+
+### Helm: strategy and replicas
+
+`strategy` now defaults to empty, which chooses `Recreate` for one replica (as before) and
+`RollingUpdate` above one; a values file that sets `strategy.type` keeps it. `replicaCount`
+may now be above 1, with `persistence.license.readWriteMany: true` and a ReadWriteMany license
+volume. The access mode of an existing claim cannot be changed: create a ReadWriteMany claim,
+copy `/var/lib/ens/certalert` into it with the pod stopped, and name it in
+`persistence.license.existingClaim`. See [High availability](#high-availability).
+
+### Single sign-on and the auditor role are new, and off
+
+Nothing changes until `cert-alert.sso.*`, `auditor-identifiers` or `security.groups` are set.
+Certificate and password sign-in work as before.
 
 ### Administrators are matched by uid or DN only
 

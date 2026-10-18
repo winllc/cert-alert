@@ -11,6 +11,10 @@
   (dict "env" "SPRING_MAIL_PASSWORD" "ref" (include "cert-alert.secretRef" (dict "root" . "inline" $v.mail.password "existing" $v.mail.existingSecret "existingKey" $v.mail.existingSecretKey "key" "mail-password")))
   (dict "env" "ENS_AUDIT_SPLUNK_TOKEN" "ref" (include "cert-alert.secretRef" (dict "root" . "inline" $v.audit.splunk.token "existing" $v.audit.splunk.existingSecret "existingKey" $v.audit.splunk.existingSecretKey "key" "splunk-hec-token")))
 -}}
+{{- if $v.sso.oidc.enabled -}}
+{{- $secretEnv = append $secretEnv (dict "env" "CERT_ALERT_SSO_OIDC_CLIENT_SECRET" "ref" (include "cert-alert.secretRef" (dict "root" . "inline" $v.sso.oidc.clientSecret "existing" $v.sso.oidc.existingSecret "existingKey" $v.sso.oidc.existingSecretKey "key" "oidc-client-secret"))) -}}
+{{- end -}}
+{{- $replicated := gt (int $v.replicaCount) 1 -}}
 {{- if $v.tls.enabled -}}
 {{- $secretEnv = append $secretEnv (dict "env" "CERT_ALERT_KEYSTORE_PASSWORD" "ref" (include "cert-alert.secretRef" (dict "root" . "inline" $v.tls.keystore.password "existing" $v.tls.keystore.passwordExistingSecret "existingKey" $v.tls.keystore.passwordExistingSecretKey "key" "keystore-password"))) -}}
 {{- $secretEnv = append $secretEnv (dict "env" "CERT_ALERT_TRUSTSTORE_PASSWORD" "ref" (include "cert-alert.secretRef" (dict "root" . "inline" $v.tls.truststore.password "existing" $v.tls.truststore.passwordExistingSecret "existingKey" $v.tls.truststore.passwordExistingSecretKey "key" "truststore-password"))) -}}
@@ -26,11 +30,13 @@ metadata:
   labels:
     {{- include "cert-alert.labels" . | nindent 4 }}
 spec:
-  # See replicaCount in values.yaml: one replica only.
+  # See replicaCount in values.yaml.
   replicas: {{ $v.replicaCount }}
   revisionHistoryLimit: {{ $v.revisionHistoryLimit }}
+  # A pod counts as available only once it has been ready this long.
+  minReadySeconds: {{ $v.minReadySeconds }}
   strategy:
-    {{- toYaml $v.strategy | nindent 4 }}
+    {{- include "cert-alert.strategy" . | nindent 4 }}
   selector:
     matchLabels:
       {{- include "cert-alert.selectorLabels" . | nindent 6 }}
@@ -173,6 +179,14 @@ spec:
             timeoutSeconds: {{ $v.readinessProbe.timeoutSeconds }}
             failureThreshold: {{ $v.readinessProbe.failureThreshold }}
           {{- end }}
+          {{- if $replicated }}
+          # Out of the Service's endpoints before it stops taking requests: the endpoint
+          # controller and the ingress take a moment to notice a pod is terminating.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 5"]
+          {{- end }}
           resources:
             {{- toYaml $v.resources | nindent 12 }}
           volumeMounts:
@@ -211,6 +225,16 @@ spec:
             {{- if $v.notifications.email.templatesConfigMap }}
             - name: email-templates
               mountPath: /etc/cert-alert/templates/email
+              readOnly: true
+            {{- end }}
+            {{- if and $v.sso.saml.enabled $v.sso.saml.metadataConfigMap }}
+            - name: saml-idp-metadata
+              mountPath: /etc/cert-alert/saml/idp
+              readOnly: true
+            {{- end }}
+            {{- if and $v.sso.saml.enabled $v.sso.saml.signingSecret }}
+            - name: saml-signing
+              mountPath: /etc/cert-alert/saml/signing
               readOnly: true
             {{- end }}
             {{- with $v.extraVolumeMounts }}
@@ -288,6 +312,24 @@ spec:
           configMap:
             name: {{ $v.notifications.email.templatesConfigMap }}
         {{- end }}
+        {{- if and $v.sso.saml.enabled $v.sso.saml.metadataConfigMap }}
+        - name: saml-idp-metadata
+          configMap:
+            name: {{ $v.sso.saml.metadataConfigMap }}
+            items:
+              - key: {{ $v.sso.saml.metadataConfigMapKey }}
+                path: {{ $v.sso.saml.metadataConfigMapKey }}
+        {{- end }}
+        {{- if and $v.sso.saml.enabled $v.sso.saml.signingSecret }}
+        - name: saml-signing
+          secret:
+            secretName: {{ $v.sso.saml.signingSecret }}
+            items:
+              - key: tls.key
+                path: tls.key
+              - key: tls.crt
+                path: tls.crt
+        {{- end }}
         {{- with $v.extraVolumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -295,9 +337,21 @@ spec:
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with $v.affinity }}
+      {{- if $v.affinity }}
       affinity:
-        {{- toYaml . | nindent 8 }}
+        {{- toYaml $v.affinity | nindent 8 }}
+      {{- else if $replicated }}
+      # More than one replica, and no affinity of your own: prefer different nodes, so one
+      # node going down does not take every replica with it.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    {{- include "cert-alert.selectorLabels" . | nindent 20 }}
       {{- end }}
       {{- with $v.tolerations }}
       tolerations:

@@ -46,6 +46,43 @@ data:
   {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SECURITY_LDAP_USER_SEARCH_BASE" "value" $v.security.ldap.userSearchBase) }}
   {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SECURITY_LDAP_USER_SEARCH_FILTER" "value" $v.security.ldap.userSearchFilter) }}
   {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SECURITY_LDAP_USER_DN_PATTERNS" "value" (join "," $v.security.ldap.userDnPatterns)) }}
+  # Roles from identifiers and groups: one variable per entry, because a DN has commas.
+  {{- include "cert-alert.envList" (dict "name" "CERT_ALERT_SECURITY_AUDITOR_IDENTIFIERS" "values" $v.security.auditorIdentifiers) }}
+  {{- include "cert-alert.envList" (dict "name" "CERT_ALERT_SECURITY_GROUPS_ADMIN" "values" $v.security.groups.admin) }}
+  {{- include "cert-alert.envList" (dict "name" "CERT_ALERT_SECURITY_GROUPS_AUDITOR" "values" $v.security.groups.auditor) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SECURITY_GROUPS_DIRECTORY" "value" $v.security.groups.directory) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SECURITY_GROUPS_MEMBER_OF_ATTRIBUTE" "value" $v.security.groups.memberOfAttribute) }}
+  # Single sign-on (the OIDC client secret is in a Secret).
+  {{- with $v.sso.oidc }}
+  {{- if .enabled }}
+  CERT_ALERT_SSO_OIDC_ENABLED: "true"
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SSO_OIDC_DISPLAY_NAME" "value" .displayName) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SSO_OIDC_ISSUER_URI" "value" .issuerUri) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SSO_OIDC_CLIENT_ID" "value" .clientId) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SSO_OIDC_SCOPES" "value" (join "," .scopes)) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SSO_OIDC_USERNAME_CLAIM" "value" .usernameClaim) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SSO_OIDC_MATCH" "value" .match) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SSO_OIDC_GROUPS_CLAIM" "value" .groupsClaim) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SSO_OIDC_JWS_ALGORITHM" "value" .jwsAlgorithm) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SSO_OIDC_CLOCK_SKEW" "value" .clockSkew) }}
+  {{- end }}
+  {{- end }}
+  {{- with $v.sso.saml }}
+  {{- if .enabled }}
+  CERT_ALERT_SSO_SAML_ENABLED: "true"
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SSO_SAML_DISPLAY_NAME" "value" .displayName) }}
+  CERT_ALERT_SSO_SAML_METADATA_LOCATION: {{ ternary (printf "file:/etc/cert-alert/saml/idp/%s" .metadataConfigMapKey) .metadataUrl (ne .metadataConfigMap "") | quote }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SSO_SAML_ENTITY_ID" "value" .entityId) }}
+  {{- if .signingSecret }}
+  CERT_ALERT_SSO_SAML_SIGNING_KEY_LOCATION: "file:/etc/cert-alert/saml/signing/tls.key"
+  CERT_ALERT_SSO_SAML_SIGNING_CERTIFICATE_LOCATION: "file:/etc/cert-alert/saml/signing/tls.crt"
+  {{- end }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SSO_SAML_USERNAME_ATTRIBUTE" "value" .usernameAttribute) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SSO_SAML_MATCH" "value" .match) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SSO_SAML_GROUPS_ATTRIBUTE" "value" .groupsAttribute) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SSO_SAML_CLOCK_SKEW" "value" .clockSkew) }}
+  {{- end }}
+  {{- end }}
   # TLS (passwords are in a Secret).
   CERT_ALERT_TLS_ENABLED: {{ $v.tls.enabled | quote }}
   {{- if $v.tls.enabled }}
@@ -93,6 +130,7 @@ data:
   {{- include "cert-alert.envLine" (dict "name" "ENS_SESSION_ADMIN_IDLE_TIMEOUT" "value" $v.session.adminIdleTimeout) }}
   {{- include "cert-alert.envLine" (dict "name" "ENS_SESSION_ABSOLUTE_TIMEOUT" "value" $v.session.absoluteTimeout) }}
   {{- include "cert-alert.envLine" (dict "name" "ENS_SESSION_MAX_PER_USER" "value" $v.session.maxPerUser) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SESSION_STORE" "value" $v.session.store) }}
   ENS_CONSENT_BANNER_ENABLED: {{ $v.consentBanner.enabled | quote }}
   {{- include "cert-alert.envLine" (dict "name" "ENS_CONSENT_BANNER_TITLE" "value" $v.consentBanner.title) }}
   {{- include "cert-alert.envLine" (dict "name" "ENS_CONSENT_BANNER_TEXT" "value" $v.consentBanner.text) }}

@@ -237,7 +237,25 @@ not set at all. Takes (dict "root" $ "inline" <value> "existing" <secret name>
 {{/* Validation that cannot be expressed in the schema. */}}
 {{- define "cert-alert.validate" -}}
 {{- if gt (int .Values.replicaCount) 1 -}}
-{{- fail "replicaCount above 1 is not supported: cert-alert runs its scheduled jobs and changelog connector in-process, and a second replica would run them twice." -}}
+{{- $license := .Values.persistence.license -}}
+{{- if not $license.enabled -}}
+{{- fail "replicaCount above 1 needs persistence.license.enabled=true: without a shared license volume each replica would have an installation id of its own." -}}
+{{- end -}}
+{{- if not $license.readWriteMany -}}
+{{- fail "replicaCount above 1 needs the license volume shared by every replica: give it a ReadWriteMany access mode (persistence.license.accessModes, or an existingClaim that is ReadWriteMany) and set persistence.license.readWriteMany=true to say so. See the README's \"High availability\"." -}}
+{{- end -}}
+{{- if and (not $license.existingClaim) (not (has "ReadWriteMany" $license.accessModes)) -}}
+{{- fail "persistence.license.readWriteMany=true, but the chart's license volume is not ReadWriteMany: set persistence.license.accessModes to [ReadWriteMany] (a new claim - the access mode of an existing one cannot change; see the README's upgrade notes)." -}}
+{{- end -}}
+{{- if eq (lower (toString .Values.session.store)) "memory" -}}
+{{- fail "replicaCount above 1 needs sessions in the database: leave session.store empty (jdbc)." -}}
+{{- end -}}
+{{- end -}}
+{{- if and .Values.sso.oidc.enabled (not (and .Values.sso.oidc.issuerUri .Values.sso.oidc.clientId)) -}}
+{{- fail "sso.oidc.enabled=true needs sso.oidc.issuerUri and sso.oidc.clientId." -}}
+{{- end -}}
+{{- if and .Values.sso.saml.enabled (not (or .Values.sso.saml.metadataUrl .Values.sso.saml.metadataConfigMap)) -}}
+{{- fail "sso.saml.enabled=true needs sso.saml.metadataUrl or sso.saml.metadataConfigMap: the identity provider's metadata." -}}
 {{- end -}}
 {{- if .Values.tls.enabled -}}
 {{- if not .Values.tls.keystore.existingSecret -}}
@@ -271,6 +289,39 @@ not set at all. Takes (dict "root" $ "inline" <value> "existing" <secret name>
 {{- fail "Set license.existingSecret or license.file, not both." -}}
 {{- end -}}
 {{- end }}
+
+{{/*
+One ConfigMap line per entry of a list, NAME_0, NAME_1, ...: what Spring binds to a list
+whose entries may hold commas, as a DN does. Nothing for an empty list.
+*/}}
+{{- define "cert-alert.envList" -}}
+{{- $name := .name -}}
+{{- range $i, $value := .values }}
+  {{ printf "%s_%d" $name $i }}: {{ toString $value | quote }}
+{{- end }}
+{{- end -}}
+
+{{/* The strategy: as set, or Recreate for one replica and a surge-only RollingUpdate above. */}}
+{{- define "cert-alert.strategy" -}}
+{{- if .Values.strategy -}}
+{{- toYaml .Values.strategy -}}
+{{- else if gt (int .Values.replicaCount) 1 -}}
+type: RollingUpdate
+rollingUpdate:
+  maxUnavailable: 0
+  maxSurge: 1
+{{- else -}}
+type: Recreate
+{{- end -}}
+{{- end -}}
+
+{{/* Whether the PodDisruptionBudget is rendered: as set, or when there is more than one replica. */}}
+{{- define "cert-alert.pdbEnabled" -}}
+{{- $set := .Values.podDisruptionBudget.enabled -}}
+{{- if kindIs "invalid" $set -}}
+{{- if gt (int .Values.replicaCount) 1 }}true{{ end -}}
+{{- else if $set }}true{{ end -}}
+{{- end -}}
 
 {{/* A ConfigMap line, only when the value is set: "" and null leave the application's default. */}}
 {{- define "cert-alert.envLine" -}}

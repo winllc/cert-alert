@@ -30,16 +30,28 @@ imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
-# One replica only. cert-alert runs scheduled jobs (the directory sweeps, revocation checks,
-# the email round-up) and, when enabled, the changelog connector in-process, guarded per
-# process: a second replica would run every job twice. The license volume is single-writer
-# too. Values above 1 are not supported.
+# How many pods. One by default. Two or more are supported: every scheduled job, and the
+# same job started by hand, takes a lock in the database so it runs on one replica at a time;
+# sessions are kept in the database (the postgres profile's default), so any replica serves
+# any request and a rolling update signs nobody out; and SAML sign-in requests are kept in
+# the database too. Above 1 needs the license volume shared - see
+# persistence.license.readWriteMany - and gets a RollingUpdate strategy, a
+# PodDisruptionBudget and a preference for spreading pods across nodes.
 replicaCount: 1
 
-# Recreate, so the old pod releases the ReadWriteOnce license volume before the new one
-# mounts it, and two instances never run the jobs at once during an upgrade.
-strategy:
-  type: Recreate
+# Empty chooses: Recreate for one replica - the old pod releases the ReadWriteOnce license
+# volume before the new one mounts it - and, above one, RollingUpdate with maxUnavailable 0,
+# so a new pod has to be ready before an old one goes. Set it to override either.
+strategy: {}
+
+# Seconds a new pod must stay ready before a rolling update counts it as available.
+minReadySeconds: 10
+
+# Keeps a voluntary disruption (a node drain, a cluster upgrade) from taking every replica at
+# once. null: on when replicaCount is above 1. With one replica a budget would block drains.
+podDisruptionBudget:
+  enabled: null
+  minAvailable: 1
 
 revisionHistoryLimit: 3
 
@@ -172,6 +184,78 @@ security:
     # CERT_ALERT_SECURITY_LDAP_USER_DN_PATTERNS: bind straight to a DN shape instead of
     # searching, for a directory that allows no search, e.g. [uid={0},ou=people].
     userDnPatterns: []
+  # CERT_ALERT_SECURITY_AUDITOR_IDENTIFIERS_<n>. The read-only auditor role, by uid or the DN
+  # of an entry, matched as adminIdentifiers are: an auditor reads everything an
+  # administrator can - the administration page, the audit log, the license - and changes
+  # nothing. Somebody who is both is an administrator.
+  auditorIdentifiers: []
+  # Roles from groups: a directory group's DN (from memberOf on the person's entry) or a
+  # group a single sign-on provider names (its groups claim or attribute - a name, a DN or
+  # an object id). Nothing is granted by a group that is not listed here.
+  groups:
+    # CERT_ALERT_SECURITY_GROUPS_ADMIN_<n>. Members are administrators.
+    admin: []
+    # CERT_ALERT_SECURITY_GROUPS_AUDITOR_<n>. Members are auditors.
+    auditor: []
+    # CERT_ALERT_SECURITY_GROUPS_DIRECTORY: read memberOf from the directory (default true).
+    directory: null
+    # CERT_ALERT_SECURITY_GROUPS_MEMBER_OF_ATTRIBUTE (default memberOf).
+    memberOfAttribute: ""
+
+# ---------------------------------------------------------------------------------------
+# Single sign-on - off unless enabled here
+# ---------------------------------------------------------------------------------------
+# Whoever a provider signs in is matched to a directory entry by uid or DN (match), never
+# by an address or a name, and refused if the directory does not hold them. Roles come from
+# security.* as for anybody else. See the README's "Single sign-on" for Entra ID, Okta and
+# ADFS examples.
+sso:
+  oidc:
+    # CERT_ALERT_SSO_OIDC_ENABLED. OpenID Connect, authorization code flow with PKCE.
+    enabled: false
+    displayName: "Single sign-on"
+    # CERT_ALERT_SSO_OIDC_ISSUER_URI, e.g. https://login.microsoftonline.com/<tenant>/v2.0.
+    # Register {your URL}/login/oauth2/code/oidc as the redirect URI.
+    issuerUri: ""
+    clientId: ""
+    # CERT_ALERT_SSO_OIDC_CLIENT_SECRET. Empty for a public client (PKCE alone). Inline, or
+    # from a Secret of your own.
+    clientSecret: ""
+    existingSecret: ""
+    existingSecretKey: oidc-client-secret
+    # CERT_ALERT_SSO_OIDC_SCOPES (default openid,profile).
+    scopes: []
+    # The claim naming the person, and whether it is their uid or their entry's DN.
+    usernameClaim: ""
+    match: ""
+    # The claim listing their groups (security.groups decides what they grant).
+    groupsClaim: ""
+    # Default RS256.
+    jwsAlgorithm: ""
+    # Default 2m.
+    clockSkew: ""
+  saml:
+    # CERT_ALERT_SSO_SAML_ENABLED. A SAML 2.0 service provider. Its metadata is served at
+    # {your URL}/saml2/service-provider-metadata/saml; the assertion consumer is
+    # {your URL}/login/saml2/sso/saml.
+    enabled: false
+    displayName: "Single sign-on"
+    # The identity provider's metadata: an https:// URL, or metadataConfigMap for a copy.
+    metadataUrl: ""
+    # A ConfigMap of your own holding the metadata XML (key metadataConfigMapKey), for an
+    # identity provider this cluster cannot reach.
+    metadataConfigMap: ""
+    metadataConfigMapKey: idp-metadata.xml
+    # This service provider's entity id. Default {baseUrl}/saml2/service-provider-metadata/saml.
+    entityId: ""
+    # A Secret with a PEM private key (tls.key) and certificate (tls.crt) to sign
+    # authentication requests with, for an identity provider that wants them signed.
+    signingSecret: ""
+    # The attribute naming the person (empty: the NameID), and uid or DN.
+    usernameAttribute: ""
+    match: ""
+    groupsAttribute: ""
+    clockSkew: ""
 
 # ---------------------------------------------------------------------------------------
 # TLS in the pod, and with it X.509 client-certificate sign-in
@@ -390,6 +474,9 @@ session:
   adminIdleTimeout: ""
   absoluteTimeout: ""
   maxPerUser: null
+  # CERT_ALERT_SESSION_STORE: jdbc (the default here) keeps sessions in the database, so they
+  # survive a restart and any replica serves them; memory keeps them in the pod.
+  store: ""
 
 # The DoD notice-and-consent banner, shown and agreed to before any sign-in (DISA STIG):
 # ENS_CONSENT_BANNER_ENABLED / _TITLE / _TEXT. Empty title and text mean the standard USG
@@ -553,6 +640,11 @@ persistence:
     accessModes: [ReadWriteOnce]
     # Use a PVC of your own (for example one kept from a previous release).
     existingClaim: ""
+    # Required for replicaCount above 1: every replica mounts this volume, so it has to be
+    # ReadWriteMany (accessModes above, or the existingClaim's own), and setting this says it
+    # is. A ReadWriteOnce volume cannot be mounted by pods on different nodes, and separate
+    # volumes would give each replica its own installation id.
+    readWriteMany: false
 
 license:
   # Optional. Without one, cert-alert starts and only sign-in and the license screen
