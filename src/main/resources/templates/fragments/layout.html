@@ -14,6 +14,9 @@
     <!-- On a demo, so the scripts know a refusal is the demo refusing rather than a session
          that has run out - the two look identical over HTTP and want opposite responses. -->
     <meta th:if="${demo}" name="cert-alert-demo" content="true">
+    <!-- For an auditor, who may read everything and change nothing: the scripts leave
+         alone what would only be refused. -->
+    <meta th:if="${isAuditor}" name="cert-alert-read-only" content="true">
     <!-- Everything is served from the jar rather than a CDN: this runs on networks with no
          route to one. Tabler bundles the Bootstrap it is built on, so it comes first and
          DataTables' Bootstrap 5 integration layers on top. -->
@@ -124,7 +127,7 @@
                     <div class="d-none d-xl-block ps-2">
                         <div th:text="${currentUser.displayName}">Name</div>
                         <div class="mt-1 small text-secondary">
-                            <span th:text="${isAdmin} ? 'Administrator' : 'Reader'">Reader</span>
+                            <span th:text="${isAdmin} ? 'Administrator' : (${isAuditor} ? 'Auditor' : 'Reader')">Reader</span>
                             &middot;
                             <span th:text="'via ' + ${currentUser.method}">via X509</span>
                         </div>
@@ -184,8 +187,8 @@
                         <span class="nav-link-title">Metrics</span>
                     </a>
                 </li>
-                <!--/* Administrators only: the page reads the whole audit trail. */-->
-                <li class="nav-item" th:classappend="${active == 'admin'} ? 'active'" th:if="${isAdmin}">
+                <!--/* Administrators and auditors: the page reads the whole audit trail. */-->
+                <li class="nav-item" th:classappend="${active == 'admin'} ? 'active'" th:if="${canReadAdmin}">
                     <a class="nav-link" th:href="@{/admin}">
                         <span class="nav-link-icon d-md-none d-lg-inline-block">
                             <svg class="icon"><use href="#icon-shield-check"></use></svg>
@@ -193,8 +196,8 @@
                         <span class="nav-link-title">Admin</span>
                     </a>
                 </li>
-                <!--/* Administrators only, and whatever the license says: the audit trail. */-->
-                <li class="nav-item" th:classappend="${active == 'audit'} ? 'active'" th:if="${isAdmin}">
+                <!--/* Administrators and auditors, whatever the license says: the audit trail. */-->
+                <li class="nav-item" th:classappend="${active == 'audit'} ? 'active'" th:if="${canReadAdmin}">
                     <a class="nav-link" th:href="@{/admin/audit}">
                         <span class="nav-link-icon d-md-none d-lg-inline-block">
                             <svg class="icon"><use href="#icon-lock"></use></svg>

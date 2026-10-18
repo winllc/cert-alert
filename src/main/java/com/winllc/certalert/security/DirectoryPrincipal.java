@@ -42,7 +42,16 @@ public class DirectoryPrincipal implements UserDetails {
         /** A client certificate the directory publishes. */
         X509,
         /** A successful bind to the directory. */
-        LDAP
+        LDAP,
+        /** An OpenID Connect identity provider, matched to a directory entry. */
+        OIDC,
+        /** A SAML 2.0 identity provider, matched to a directory entry. */
+        SAML
+    }
+
+    /** The same person, for a subclass that adds what a single sign-on carries. */
+    protected DirectoryPrincipal(DirectoryPrincipal from) {
+        this(from.username, from.displayName, from.directoryUserId, from.directoryDn, from.method, from.authorities);
     }
 
     @Override

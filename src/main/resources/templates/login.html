@@ -34,11 +34,25 @@
                 <div th:if="${param.error}" class="alert alert-danger" role="alert">
                     That username and password were not accepted by the directory.
                 </div>
+                <div th:if="${param.sso_error}" class="alert alert-danger" role="alert" id="sso-error">
+                    Single sign-on did not sign you in: the identity provider's answer was not
+                    accepted, or the directory does not hold the person it named.
+                </div>
                 <div th:if="${param.logout}" class="alert alert-success" role="alert">
                     You have been signed out.
                 </div>
                 <div th:if="${param.expired}" class="alert alert-warning" role="alert">
                     Your session has ended. Sign in again to carry on.
+                </div>
+
+                <!--/* One button per single sign-on provider configured; none otherwise. */-->
+                <div th:unless="${#lists.isEmpty(ssoOptions)}" id="sso-options" class="mb-3">
+                    <a th:each="option : ${ssoOptions}" th:href="@{${option.url}}"
+                       class="btn btn-outline-primary w-100 mb-2 sso-option">
+                        <svg class="icon me-1"><use href="#icon-key"></use></svg>
+                        <span th:text="${option.label}">Single sign-on</span>
+                    </a>
+                    <div class="hr-text">or with your directory password</div>
                 </div>
 
                 <form method="post" th:action="@{/login}" autocomplete="off">

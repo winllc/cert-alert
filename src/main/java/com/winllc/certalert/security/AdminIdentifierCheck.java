@@ -51,7 +51,7 @@ public class AdminIdentifierCheck {
         long granting = properties.getAdminIdentifiers().stream()
                 .filter(value -> value != null && !value.isBlank())
                 .count() - ignored.size();
-        if (!ignored.isEmpty() && granting == 0) {
+        if (!ignored.isEmpty() && granting == 0 && properties.getGroups().getAdmin().isEmpty()) {
             log.warn("cert-alert.security.admin-identifiers (CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS) names no uid "
                     + "or DN, so nobody signs in as an administrator until it does");
         }

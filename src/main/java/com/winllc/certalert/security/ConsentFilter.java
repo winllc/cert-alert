@@ -34,6 +34,11 @@ public final class ConsentFilter extends OncePerRequestFilter {
 
     private static final RequestMatcher EXEMPT = new OrRequestMatcher(List.of(
             PathPatternRequestMatcher.withDefaults().matcher(PATH),
+            // A SAML identity provider's answer: a cross-site POST, which the session cookie
+            // does not come with. The browser agreed before it was sent to the provider -
+            // starting a sign-in is held here like anything else - and that agreement is
+            // carried to the session the answer creates (see JdbcSaml2AuthenticationRequests).
+            PathPatternRequestMatcher.withDefaults().matcher("/login/saml2/sso/**"),
             PathPatternRequestMatcher.withDefaults().matcher("/css/**"),
             PathPatternRequestMatcher.withDefaults().matcher("/js/**"),
             PathPatternRequestMatcher.withDefaults().matcher("/img/**"),

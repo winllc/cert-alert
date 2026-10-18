@@ -56,4 +56,11 @@ public class SignedInDirectoryUser {
                 && authentication.getAuthorities().stream()
                         .anyMatch(authority -> DirectoryPrincipalResolver.ROLE_ADMIN.equals(authority.getAuthority()));
     }
+
+    public static boolean isAuditor(Authentication authentication) {
+        return authentication != null
+                && authentication.isAuthenticated()
+                && authentication.getAuthorities().stream()
+                        .anyMatch(authority -> DirectoryPrincipalResolver.ROLE_AUDITOR.equals(authority.getAuthority()));
+    }
 }

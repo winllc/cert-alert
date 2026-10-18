@@ -13,6 +13,9 @@
         INFO: 'bg-blue-lt'
     };
 
+    // An auditor changes nothing - marking a notification read included - so is not offered to.
+    var readOnly = document.querySelector('meta[name="cert-alert-read-only"]') !== null;
+
     function post(url) {
         return $.ajax({url: url, type: 'POST'});
     }
@@ -226,6 +229,9 @@
                 $('#notifications-next').prop('disabled', result.last)
                     .off('click').on('click', function () { loadPage(result.page + 1); });
 
+                if (readOnly) {
+                    $body.find('.notification-read').remove();
+                }
                 $body.find('.notification-read').on('click', function () {
                     var id = $(this).closest('tr').data('notification-id');
                     post('/api/v1/notifications/' + id + '/read').done(function () {
@@ -259,6 +265,9 @@
             }
         });
 
+        if (readOnly) {
+            $('#notifications-read-all').addClass('d-none');
+        }
         $('#notifications-read-all').on('click', function () {
             post('/api/v1/notifications/read-all').done(function () {
                 loadPage(0);

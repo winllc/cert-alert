@@ -65,7 +65,7 @@
                             a responder about the certificates no list covers, so on a large directory it is
                             not instant.
                         </p>
-                        <div class="btn-list align-items-center">
+                        <div class="btn-list align-items-center" th:if="${isAdmin}">
                             <button type="button" class="btn btn-primary" id="revocation-run">
                                 <svg class="icon me-1"><use href="#icon-refresh"></use></svg>
                                 Refresh revocation statuses
@@ -101,7 +101,7 @@
                             </tbody>
                         </table>
                     </div>
-                    <div class="card-body border-top">
+                    <div class="card-body border-top" th:if="${isAdmin}">
                         <form id="attribute-form" class="row g-2 align-items-end">
                             <input type="hidden" id="attribute-id">
                             <div class="col-12 col-md-2">
