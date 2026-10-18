@@ -61,8 +61,9 @@ Two details from the spec shape the design:
 ## Licensing
 
 cert-alert is proprietary software of ENS Solutions ([`LICENSE`](LICENSE), SPDX
-`LicenseRef-ENS-Commercial`, as the image's and the chart's license labels say): its source being
-visible does not license it. It needs an **ENS license** to run. Licenses are issued by the ENS licensing portal
+`LicenseRef-ENS-Commercial`, as the image's and the chart's license labels say), used under its
+end user license agreement ([`EULA`](EULA) - a placeholder until ENS Solutions puts its legal
+text there, to be replaced before a release): its source being visible does not license it. It needs an **ENS license** to run. Licenses are issued by the ENS licensing portal
 (an evaluation, or the license issued against an order) in the portal's `ens-license/1`
 format, for the product id **`certalert`**, and are checked offline: the application
 verifies the Ed25519 signature against the ENS public key built into it

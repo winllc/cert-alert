@@ -100,6 +100,7 @@ LABEL org.opencontainers.image.title="cert-alert" \
       org.opencontainers.image.vendor="ENS Solutions" \
       org.opencontainers.image.licenses="LicenseRef-ENS-Commercial" \
       com.enssolutions.license.terms="https://github.com/winllc/cert-alert/blob/main/LICENSE" \
+      com.enssolutions.license.eula="https://github.com/winllc/cert-alert/blob/main/EULA" \
       org.opencontainers.image.base.name="registry.access.redhat.com/ubi9/openjdk-21-runtime" \
       com.enssolutions.license.path="/var/lib/ens/certalert/license.lic"
 
