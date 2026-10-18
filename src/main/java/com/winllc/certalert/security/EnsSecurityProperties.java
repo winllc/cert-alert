@@ -107,10 +107,11 @@ public class EnsSecurityProperties {
     public static class Session {
 
         /**
-         * {@code ENS_SESSION_IDLE_TIMEOUT}: a session nobody has used for this long ends.
+         * {@code ENS_SESSION_IDLE_TIMEOUT}: a session nobody has used for this long ends; 15
+         * minutes by default, as the STIG asks.
          * {@code SERVER_SERVLET_SESSION_TIMEOUT} still works, as the same thing.
          */
-        private Duration idleTimeout = Duration.ofMinutes(30);
+        private Duration idleTimeout = Duration.ofMinutes(15);
 
         /**
          * {@code ENS_SESSION_ADMIN_IDLE_TIMEOUT}: the same for an administrator's session; unset
