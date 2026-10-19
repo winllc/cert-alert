@@ -87,6 +87,30 @@ class LicenseVerifierTest {
                 assertThrows(LicenseException.class, () -> verifier.verify("hello")).reason());
     }
 
+    /**
+     * Blocks are found in one pass, so text built to make a backtracking parser slow (many BEGIN lines and no
+     * END) is refused at once, and text longer than any license is refused before it is read.
+     */
+    @Test
+    void refusesHostileTextQuickly() throws Exception {
+        String begins = "-----BEGIN ENS LICENSE-----\n".repeat(LicenseVerifier.MAX_FILE_CHARS / 28);
+        assertTimeoutPreemptively(java.time.Duration.ofSeconds(1), () -> assertEquals(LicenseException.Reason.MALFORMED,
+                assertThrows(LicenseException.class, () -> verifier.verify(begins)).reason()));
+
+        String tooLong = fixture("dual-signed.lic") + "#".repeat(LicenseVerifier.MAX_FILE_CHARS);
+        LicenseException e = assertThrows(LicenseException.class, () -> verifier.verify(tooLong));
+        assertEquals(LicenseException.Reason.MALFORMED, e.reason());
+        assertTrue(e.getMessage().contains("longer than"), e.getMessage());
+    }
+
+    /** Text before, between and after the blocks is ignored, as it was when a regular expression found them. */
+    @Test
+    void readsBlocksAmongOtherText() throws Exception {
+        String file = "# summary\n" + fixture("dual-signed.lic").replace("-----END ENS LICENSE-----\n",
+                "-----END ENS LICENSE-----\n# between\n") + "trailing -----BEGIN ENS LICENSE----- with no end\n";
+        assertNotNull(verifier.verify(file));
+    }
+
     @Test
     void movesFromValidToGraceToReadOnly() throws Exception {
         EnsLicense l = verifier.verify(fixture("subscription.lic"));

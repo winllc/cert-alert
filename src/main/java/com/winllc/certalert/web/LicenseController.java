@@ -97,6 +97,6 @@ public class LicenseController {
                         l == null ? null : check.usage(used).name(),
                         check.usageMessage(used)),
                 admin ? licensing.installationId() : null,
-                admin ? licensing.manager().licenseFile().toString() : null);
+                admin ? licensing.manager().licenseLocation() : null);
     }
 }

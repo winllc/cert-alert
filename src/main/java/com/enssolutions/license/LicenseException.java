@@ -11,7 +11,12 @@ public final class LicenseException extends Exception {
         /** The signature doesn't match: the file was edited or damaged. */
         BAD_SIGNATURE,
         /** A newer license format than this library understands. */
-        UNSUPPORTED_FORMAT
+        UNSUPPORTED_FORMAT,
+        /**
+         * Signed only with algorithms this Java runtime does not provide: an Ed25519-only file on a
+         * runtime in FIPS mode. A copy with an ECDSA P-256 signature works.
+         */
+        UNSUPPORTED_ALGORITHM
     }
 
     private final Reason reason;
