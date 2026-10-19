@@ -59,7 +59,7 @@ public class LicensingConfiguration implements WebMvcConfigurer {
         Optional<Instant> released = Optional.ofNullable(build.getIfAvailable()).map(BuildProperties::getTime);
         LicenseManager manager = LicenseManager.fromEnvironment(
                 PRODUCT, LicenseVerifier.trusting(EnsKeys.PUBLIC_KEYS), released);
-        log.info("ENS license file {}; release date {}", manager.licenseFile(),
+        log.info("ENS license file {}; release date {}", manager.licenseLocation(),
                 released.map(Instant::toString).orElse("unknown"));
         return manager;
     }
