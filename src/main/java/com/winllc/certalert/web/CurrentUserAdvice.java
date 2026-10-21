@@ -38,14 +38,36 @@ public class CurrentUserAdvice {
     private final DemoProperties demoProperties;
     /** Absent unless this is a demo, which is the only thing that offers accounts. */
     private final ObjectProvider<DemoAccounts> demoAccounts;
+    private final ObjectProvider<com.winllc.certalert.security.EnsSecurityProperties> ens;
 
     public CurrentUserAdvice(
             Licensing licensing,
             DemoProperties demoProperties,
-            ObjectProvider<DemoAccounts> demoAccounts) {
+            ObjectProvider<DemoAccounts> demoAccounts,
+            ObjectProvider<com.winllc.certalert.security.EnsSecurityProperties> ens) {
         this.licensing = licensing;
         this.demoProperties = demoProperties;
         this.demoAccounts = demoAccounts;
+        this.ens = ens;
+    }
+
+    /**
+     * How many seconds without a request end this person's session, so the page can warn
+     * them before it does and let them stay (WCAG 2.2.1, timing adjustable). Null where
+     * nobody is signed in or no idle limit applies.
+     */
+    @ModelAttribute("idleTimeoutSeconds")
+    public Long idleTimeoutSeconds() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        com.winllc.certalert.security.EnsSecurityProperties properties = ens.getIfAvailable();
+        if (properties == null || authentication == null || !authentication.isAuthenticated()
+                || authentication instanceof org.springframework.security.authentication.AnonymousAuthenticationToken) {
+            return null;
+        }
+        java.time.Duration idle = com.winllc.certalert.security.SignedInDirectoryUser.isAdmin(authentication)
+                ? properties.getSession().effectiveAdminIdleTimeout()
+                : properties.getSession().getIdleTimeout();
+        return idle == null || idle.isZero() || idle.isNegative() ? null : idle.toSeconds();
     }
 
     @ModelAttribute("currentUser")

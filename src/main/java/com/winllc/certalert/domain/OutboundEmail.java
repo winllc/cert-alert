@@ -149,6 +149,14 @@ public class OutboundEmail {
         this.nextAttemptAt = createdAt;
     }
 
+    /** The same message, carrying the classification marking (see {@code EmailMarking}). */
+    public OutboundEmail marked(String subject, String textBody, String htmlBody) {
+        this.subject = clip(subject, 1000);
+        this.textBody = clip(textBody, MAX_BODY);
+        this.htmlBody = htmlBody == null || htmlBody.length() > MAX_BODY ? null : htmlBody;
+        return this;
+    }
+
     /** The same message, with a file attached. */
     public OutboundEmail attach(String name, String type, byte[] content) {
         this.attachmentName = name;

@@ -94,8 +94,10 @@
                 var last = page * PAGE_SIZE + result.content.length;
                 $('#audit-page-info').text(first.toLocaleString() + '–' + last.toLocaleString() + ' of '
                     + result.totalElements.toLocaleString());
-                $('#audit-prev').parent().toggleClass('disabled', page === 0);
-                $('#audit-next').parent().toggleClass('disabled', page + 1 >= totalPages);
+                // Said to assistive technology as well as shown: a grey link is still a link.
+                $('#audit-prev').attr('aria-disabled', String(page === 0)).parent().toggleClass('disabled', page === 0);
+                $('#audit-next').attr('aria-disabled', String(page + 1 >= totalPages))
+                    .parent().toggleClass('disabled', page + 1 >= totalPages);
             })
             .fail(function (xhr) {
                 CertAlert.handleUnauthorized(xhr);

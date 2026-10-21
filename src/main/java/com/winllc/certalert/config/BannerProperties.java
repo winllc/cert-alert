@@ -18,11 +18,11 @@ import org.springframework.stereotype.Component;
  * <p>Registered as a {@code @Component} rather than left to the properties scan so that it
  * has a name a template can ask for: every page reads it as {@code @bannerProperties}.
  *
- * <p>The bars are drawn by the head fragment, which is the one thing all twelve pages
- * include - there is no decorator layout here, only a bag of named fragments, and a
- * {@code <head>} cannot hold body content. So they are {@code body::before} and
- * {@code body::after} rather than elements, which puts them on every page from one place
- * and leaves nothing for a page added later to forget.
+ * <p>The bars are real text: an element at each end of every page's body (the layout's
+ * {@code classificationBanner} fragment, which every page template includes - a test holds a
+ * page added later to it), so a screen reader announces the marking. The head fragment only
+ * positions them. The same marking goes on email (subject, top and bottom), on the About sheet
+ * and the print header of an Excel export.
  *
  * <p>The colours and the height are written into a stylesheet, so they are checked against
  * what a colour and a length may look like rather than passed through. An operator typing

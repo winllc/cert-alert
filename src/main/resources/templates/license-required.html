@@ -7,19 +7,20 @@
 */-->
 <head th:replace="~{fragments/layout :: head('License required')}"></head>
 <body>
+<div th:replace="~{fragments/layout :: classificationBanner('top')}"></div>
 <svg th:replace="~{fragments/icons :: sprite}"></svg>
 
 <div class="page">
     <header th:replace="~{fragments/layout :: navbar('')}"></header>
-    <div class="page-wrapper">
+    <main class="page-wrapper" id="main-content" tabindex="-1">
         <div class="page-body">
             <div class="container-xl">
                 <div class="empty">
                     <div class="empty-header">403</div>
-                    <p class="empty-title" th:if="${refusal == 'FEATURE'}"
-                       th:text="${feature} + ' is not included in the license'">Metrics is not included in the license</p>
-                    <p class="empty-title" th:if="${refusal == 'READ_ONLY'}">The application is read-only</p>
-                    <p class="empty-title" th:if="${refusal == 'UNLICENSED'}">This application is not licensed</p>
+                    <h1 class="empty-title" th:if="${refusal == 'FEATURE'}"
+                       th:text="${feature} + ' is not included in the license'">Metrics is not included in the license</h1>
+                    <h1 class="empty-title" th:if="${refusal == 'READ_ONLY'}">The application is read-only</h1>
+                    <h1 class="empty-title" th:if="${refusal == 'UNLICENSED'}">This application is not licensed</h1>
                     <p class="empty-subtitle text-secondary" th:text="${message}">
                         Metrics is not included in this installation's license.</p>
                     <p class="empty-subtitle text-secondary" th:if="${isAdmin}">
@@ -35,8 +36,9 @@
                 </div>
             </div>
         </div>
-    </div>
+    </main>
 </div>
 <div th:replace="~{fragments/layout :: scripts}"></div>
+<div th:replace="~{fragments/layout :: classificationBanner('bottom')}"></div>
 </body>
 </html>

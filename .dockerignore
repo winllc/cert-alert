@@ -3,6 +3,8 @@
 build/
 .gradle/
 out/
+# The accessibility scan (CI only), and its Node packages.
+a11y/
 
 # Runtime artefacts that must never reach an image.
 data/

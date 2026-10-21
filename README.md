@@ -649,23 +649,39 @@ they fall, rather than being fixed to a viewport that does not exist.
 
 **Every page carries them**, the sign-in page before anyone has signed in and the error
 page after something has gone wrong included: those are still pages showing this
-application's data. That is why they are `body::before` and `body::after`, drawn from the
-`head` fragment, rather than elements each page includes. There is no decorator layout
-here — `fragments/layout.html` is a bag of named fragments — and `head` is the one thing
-all twelve pages share, but a `<head>` cannot hold body content. Drawing them in CSS puts
-them on every page from one place, and leaves nothing for a page added tomorrow to forget.
+application's data. They are **real text** - an element at the top and the bottom of each
+page's body, a region labelled "Classification", so a screen reader announces the marking
+like any other text and it can be selected and copied (they used to be CSS-generated content,
+which some screen readers skip). Every page template includes the
+`classificationBanner` fragment at both ends, and a test (`BannerPageTest`) fails the build
+for a page that does not, so a page added tomorrow cannot forget them. The text is escaped
+like any other text; the colours and the height go into a stylesheet, so they are checked
+against what a colour and a CSS length may look like, and anything else falls back to the
+default. Choose a text and background colour with a contrast of at least 4.5:1.
 
-Everything from configuration ends up in that stylesheet, where nothing can be escaped by
-the template engine — Thymeleaf will not even evaluate a bean reference inside a `<style>`
-element, which is the same instinct. So the colours and the height are checked against
-what a colour and a CSS length may look like, and anything else falls back to the default.
-The text cannot be checked that way, because a marking is whatever the deployment says it
-is, so it is escaped instead: the quote and the backslash so it cannot end the string, and
-the angle brackets as CSS code points so a `</style>` in a properties file cannot end the
-element and put what follows into the page as markup.
+**The same marking goes everywhere the data does:** at the start of every email's subject
+and at the top and bottom of its text and HTML (the round-up, alerts and scheduled reports
+alike), on the About sheet and the printed header and footer of an Excel export.
 
-One trade-off worth knowing: generated content is announced by screen readers but is not
-selectable text, so the marking cannot be copied out of the page.
+## Accessibility
+
+CertAlert targets WCAG 2.1 AA (Section 508). Every page is scanned with axe-core on every
+build (the `a11y` job: `./gradlew a11yTest`, after `npm ci --prefix a11y` and
+`npx --prefix a11y playwright install chromium`; reports in `build/reports/a11y`), and the
+build fails on a serious or critical violation. What the pages offer:
+
+- a "Skip to main content" link first in the tab order, landmarks (banner, navigation,
+  main, the classification regions) and one level-one heading per page;
+- text, badges, field edges and focus rings at WCAG contrast; links in text underlined;
+- every control named and operable from the keyboard - the search tables' rows open with
+  a button that says whether it is open;
+- result counts, job status and form messages announced as status messages;
+- a warning two minutes before the idle timeout ends the session, with "Stay signed in".
+
+The self-audit is [docs/accessibility/wcag-2.1-aa-self-audit.md](docs/accessibility/wcag-2.1-aa-self-audit.md),
+and a draft Accessibility Conformance Report in the ITI VPAT 2.5 Rev 508 format, for ENS
+Solutions to review, is [docs/accessibility/vpat-2.5-rev508-draft.md](docs/accessibility/vpat-2.5-rev508-draft.md).
+Screen-reader testing is the main step still to do.
 
 ## FIPS 140-3
 
@@ -3308,6 +3324,20 @@ class SlackAlertNotifier implements AlertNotifier {
 Read these before upgrading. They apply to the compose bundle, the Helm chart and a plain
 `java -jar` alike.
 
+### The classification marking is text, and is on email
+
+With `cert-alert.banner.enabled`, the bars are now elements rather than CSS-generated content
+(they look the same) and the marking is also put on every email: `[<marking>] ` before the
+subject, and a line at the top and bottom of the text and HTML. A mail rule that matched on
+the old subjects needs the prefix allowed for. Nothing changes with the banner off.
+
+### Accessibility changes to the pages
+
+The page title is now the page's `h1` and card titles `h2` (same look); a skip link, `main`
+landmark, darker badge and secondary-text colours and underlined links in text; and an
+idle-timeout warning. Custom CSS that targeted `h2.page-title` or `h3.card-title` needs the
+new element.
+
 ### Certificates page, exports, saved views and scheduled reports are new
 
 A **Certificates** item joins the bar for everybody: the inventory by certificate, with
@@ -3566,6 +3596,8 @@ output validated by kubeconform against Kubernetes 1.29.
 
 ```
 Dockerfile               three-stage image build
+a11y/                    the axe-core accessibility scan (Playwright), run by ./gradlew a11yTest
+docs/accessibility/      the WCAG 2.1 AA self-audit and the draft VPAT/ACR
 docker-compose.yml       the application, a PostgreSQL and a stand-in directory
 docker-compose.ports.yml opt-in overlay that publishes them on the host
 docker/389ds/            389 Directory Server carrying the IC FSD schema and a changelog

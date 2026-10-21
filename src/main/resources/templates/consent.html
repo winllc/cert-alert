@@ -2,11 +2,12 @@
 <html lang="en" xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{fragments/layout :: head('Notice and consent')}"></head>
 <body class="d-flex flex-column bg-surface-secondary">
+<div th:replace="~{fragments/layout :: classificationBanner('top')}"></div>
 
 <!--/* The notice-and-consent banner, shown before any sign-in while
        ENS_CONSENT_BANNER_ENABLED is on. The text is the operator's, or the standard DoD
        text, and is always escaped: it is shown as written, never interpreted as markup. */-->
-<div class="page page-center">
+<main class="page page-center" id="main-content" tabindex="-1">
     <div class="container container-narrow py-4">
         <div class="text-center mb-4">
             <img th:src="@{/img/logo.png}" alt="CertAlert" class="logo logo-lg">
@@ -14,7 +15,7 @@
 
         <div class="card card-md">
             <div class="card-body">
-                <h2 class="h3 mb-3" id="consent-title" th:text="${banner.title}">Notice and consent</h2>
+                <h1 class="h3 mb-3" id="consent-title" th:text="${banner.title}">Notice and consent</h1>
                 <div id="consent-text">
                     <th:block th:each="block : ${banner.blocks}">
                         <p th:unless="${block.list}" th:text="${block.paragraph}">Paragraph</p>
@@ -29,6 +30,7 @@
             </div>
         </div>
     </div>
-</div>
+</main>
+<div th:replace="~{fragments/layout :: classificationBanner('bottom')}"></div>
 </body>
 </html>

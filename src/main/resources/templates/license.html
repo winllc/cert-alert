@@ -8,16 +8,17 @@
 */-->
 <head th:replace="~{fragments/layout :: head('License')}"></head>
 <body>
+<div th:replace="~{fragments/layout :: classificationBanner('top')}"></div>
 <svg th:replace="~{fragments/icons :: sprite}"></svg>
 
 <div class="page">
     <header th:replace="~{fragments/layout :: navbar('admin')}"></header>
 
-    <div class="page-wrapper">
+    <main class="page-wrapper" id="main-content" tabindex="-1">
         <div class="page-header d-print-none">
             <div class="container-xl">
                 <div class="page-pretitle">Administration</div>
-                <h2 class="page-title">License</h2>
+                <h1 class="page-title">License</h1>
                 <div class="text-secondary mt-1">What this installation is licensed for, and installing a license</div>
             </div>
         </div>
@@ -34,7 +35,7 @@
                     <div class="col-12 col-lg-7">
                         <div class="card mb-3" id="license-state">
                             <div class="card-header">
-                                <h3 class="card-title">Installed license</h3>
+                                <h2 class="card-title">Installed license</h2>
                                 <div class="card-actions">
                                     <span class="badge" th:text="${state}"
                                           th:classappend="${mode == 'FULL'} ? (${state == 'GRACE'} ? 'bg-yellow-lt' : 'bg-green-lt')
@@ -80,7 +81,7 @@
 
                         <div class="card mb-3" id="license-features">
                             <div class="card-header">
-                                <h3 class="card-title">Features</h3>
+                                <h2 class="card-title">Features</h2>
                             </div>
                             <table class="table card-table table-vcenter">
                                 <tbody>
@@ -109,7 +110,7 @@
                     <div class="col-12 col-lg-5">
                         <div class="card mb-3" id="license-installation">
                             <div class="card-header">
-                                <h3 class="card-title">Installation id</h3>
+                                <h2 class="card-title">Installation id</h2>
                             </div>
                             <div class="card-body">
                                 <div class="input-group mb-2">
@@ -127,7 +128,7 @@
 
                         <div class="card mb-3" id="license-usage">
                             <div class="card-header">
-                                <h3 class="card-title">Usage</h3>
+                                <h2 class="card-title">Usage</h2>
                             </div>
                             <div class="card-body">
                                 <p class="mb-1" th:text="${usageMessage}">1200 of 2500 directory users.</p>
@@ -141,7 +142,7 @@
 
                         <div class="card mb-3" id="license-upload" th:if="${isAdmin}">
                             <div class="card-header">
-                                <h3 class="card-title">Install a license</h3>
+                                <h2 class="card-title">Install a license</h2>
                             </div>
                             <div class="card-body">
                                 <form method="post" th:action="@{/admin/license}" enctype="multipart/form-data">
@@ -168,10 +169,11 @@
                 </div>
             </div>
         </div>
-    </div>
+    </main>
 </div>
 
 <div th:replace="~{fragments/layout :: scripts}"></div>
 <script th:src="@{/js/license.js}"></script>
+<div th:replace="~{fragments/layout :: classificationBanner('bottom')}"></div>
 </body>
 </html>

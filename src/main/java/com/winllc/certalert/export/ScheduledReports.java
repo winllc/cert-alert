@@ -201,13 +201,11 @@ public class ScheduledReports {
             ByteArrayOutputStream file = new ByteArrayOutputStream();
             rows = export.write(parsed.filter(), CertificateInventory.sort(parsed.sort()), report.getFormat(), limit,
                     "scheduled report \"" + report.getName() + "\"", new BoundedStream(file, MAX_ATTACHMENT_BYTES));
-            String marking = export.marking();
-            String subject = (marking == null ? "" : "[" + marking + "] ") + notifications.getEmail().getSubjectPrefix()
+            // The classification marking, where there is one, is put on by the outbox, as on
+            // every message.
+            String subject = notifications.getEmail().getSubjectPrefix()
                     + report.getName() + " - " + rows + " certificate" + (rows == 1 ? "" : "s");
             StringBuilder body = new StringBuilder();
-            if (marking != null) {
-                body.append(marking).append("\n\n");
-            }
             body.append("The CertAlert report \"").append(report.getName()).append("\" is attached: ")
                     .append(rows).append(" certificate").append(rows == 1 ? "" : "s").append(", as of ").append(now).append(".\n");
             if (matching > rows) {
@@ -217,9 +215,6 @@ public class ScheduledReports {
             body.append("\nFilters: ").append(report.getQuery().isBlank() ? "none" : report.getQuery()).append('\n');
             body.append("\nThis report is scheduled ").append(report.getFrequency().name().toLowerCase(Locale.ROOT))
                     .append(" by an administrator of CertAlert; ask them to change or stop it.\n");
-            if (marking != null) {
-                body.append('\n').append(marking).append('\n');
-            }
             long written = rows;
             OutboundEmail message = new OutboundEmail(OutboundEmail.Kind.REPORT, notifications.getEmail().getFrom(),
                     report.getRecipients(), subject, body.toString(), null, "report:" + report.getId(), null, now)

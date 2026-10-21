@@ -126,7 +126,10 @@ tasks.withType<JavaCompile>().configureEach {
 }
 
 tasks.withType<Test>().configureEach {
-    useJUnitPlatform()
+    useJUnitPlatform {
+        // The accessibility scan needs Node and a browser; it has a task of its own, below.
+        if (name == "a11yTest") includeTags("a11y") else excludeTags("a11y")
+    }
     // Gradle's default for a test JVM is 512MB. The run keeps up to eight application
     // contexts (src/test/resources/spring.properties), about 300MB live at the most, and G1
     // with that little headroom spends its time failing evacuations and collecting in full.
@@ -134,4 +137,16 @@ tasks.withType<Test>().configureEach {
     testLogging {
         events("passed", "skipped", "failed")
     }
+}
+
+// The accessibility gate (AccessibilityScanTest): the pages scanned with axe-core in Chromium,
+// failing on serious or critical WCAG 2.1 A/AA violations. Needs `npm ci --prefix a11y` and a
+// Chromium for Playwright first; CI's a11y job does both. Reports in build/reports/a11y.
+val a11yTest by tasks.registering(Test::class) {
+    description = "Scans every page with axe-core in Chromium"
+    group = "verification"
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    outputs.dir(layout.buildDirectory.dir("reports/a11y"))
+    outputs.upToDateWhen { false }
 }

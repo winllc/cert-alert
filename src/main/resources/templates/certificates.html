@@ -2,16 +2,17 @@
 <html lang="en" xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{fragments/layout :: head('Certificates')}"></head>
 <body>
+<div th:replace="~{fragments/layout :: classificationBanner('top')}"></div>
 <svg th:replace="~{fragments/icons :: sprite}"></svg>
 
 <div class="page">
     <header th:replace="~{fragments/layout :: navbar('certificates')}"></header>
 
-    <div class="page-wrapper">
+    <main class="page-wrapper" id="main-content" tabindex="-1">
         <div th:replace="~{fragments/layout :: pageheader('Certificates',
              'Every certificate the directory publishes, with who holds it - filter, save the view, export it')}"></div>
 
-        <main class="page-body" id="main-content" tabindex="-1">
+        <div class="page-body">
             <div class="container-xl">
                 <div class="card mb-3">
                     <div class="card-body border-bottom">
@@ -198,7 +199,7 @@
                 <!--/* Scheduled reports: administrators send a view by email; auditors can see them. */-->
                 <section class="card mb-3" id="reports-card" th:if="${isAdmin or isAuditor}" aria-labelledby="reports-title">
                     <div class="card-header">
-                        <h3 class="card-title" id="reports-title">Scheduled reports</h3>
+                        <h2 class="card-title" id="reports-title">Scheduled reports</h2>
                     </div>
                     <div class="table-responsive">
                         <table class="table card-table table-vcenter" id="reports">
@@ -257,11 +258,12 @@
                     </div>
                 </section>
             </div>
-        </main>
-    </div>
+        </div>
+    </main>
 </div>
 
 <div th:replace="~{fragments/layout :: scripts}"></div>
 <script th:src="@{/js/certificates.js}"></script>
+<div th:replace="~{fragments/layout :: classificationBanner('bottom')}"></div>
 </body>
 </html>

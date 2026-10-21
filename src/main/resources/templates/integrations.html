@@ -2,22 +2,23 @@
 <html lang="en" xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{fragments/layout :: head('Integrations')}"></head>
 <body>
+<div th:replace="~{fragments/layout :: classificationBanner('top')}"></div>
 <svg th:replace="~{fragments/icons :: sprite}"></svg>
 
 <div class="page">
     <header th:replace="~{fragments/layout :: navbar('integrations')}"></header>
 
-    <div class="page-wrapper">
+    <main class="page-wrapper" id="main-content" tabindex="-1">
         <div th:replace="~{fragments/layout :: pageheader('Integrations',
              'API tokens for other systems to read CertAlert, and webhooks for CertAlert to tell them')}"></div>
 
-        <main class="page-body" id="main-content" tabindex="-1">
+        <div class="page-body">
             <div class="container-xl">
 
                 <!--/* API tokens: scoped, shown once, revocable. */-->
                 <section class="card mb-3" id="api-tokens-card" aria-labelledby="api-tokens-title">
                     <div class="card-header">
-                        <h3 class="card-title" id="api-tokens-title">API tokens</h3>
+                        <h2 class="card-title" id="api-tokens-title">API tokens</h2>
                         <div class="card-actions text-secondary small">
                             <span class="mono">Authorization: Bearer cat_&hellip;</span> &middot;
                             <a th:href="@{/api/v1/openapi.yaml}">OpenAPI document</a>
@@ -81,7 +82,7 @@
                 <!--/* Webhooks: signed, retried, logged. */-->
                 <section class="card mb-3" id="webhooks-card" aria-labelledby="webhooks-title">
                     <div class="card-header">
-                        <h3 class="card-title" id="webhooks-title">Webhooks</h3>
+                        <h2 class="card-title" id="webhooks-title">Webhooks</h2>
                         <div class="card-actions text-secondary small">
                             Signed with HMAC-SHA256 in <span class="mono">X-CertAlert-Signature</span>
                         </div>
@@ -150,7 +151,7 @@
                 <!--/* One endpoint's deliveries, when one is picked. */-->
                 <section class="card mb-3 d-none" id="webhook-deliveries-card" aria-labelledby="webhook-deliveries-title">
                     <div class="card-header">
-                        <h3 class="card-title" id="webhook-deliveries-title">Deliveries</h3>
+                        <h2 class="card-title" id="webhook-deliveries-title">Deliveries</h2>
                     </div>
                     <div class="table-responsive">
                         <table class="table card-table table-vcenter" id="webhook-deliveries">
@@ -169,11 +170,12 @@
                     </div>
                 </section>
             </div>
-        </main>
-    </div>
+        </div>
+    </main>
 </div>
 
 <div th:replace="~{fragments/layout :: scripts}"></div>
 <script th:src="@{/js/integrations.js}"></script>
+<div th:replace="~{fragments/layout :: classificationBanner('bottom')}"></div>
 </body>
 </html>

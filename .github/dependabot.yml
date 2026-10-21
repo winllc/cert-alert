@@ -36,3 +36,13 @@ updates:
     groups:
       actions-minor-and-patch:
         update-types: [minor, patch]
+
+  # The accessibility scan's Node packages (Playwright and axe-core), pinned in
+  # a11y/package-lock.json.
+  - package-ecosystem: npm
+    directory: /a11y
+    schedule:
+      interval: weekly
+    groups:
+      a11y-minor-and-patch:
+        update-types: [minor, patch]

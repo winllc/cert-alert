@@ -2,12 +2,13 @@
 <html lang="en" xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{fragments/layout :: head('People')}"></head>
 <body>
+<div th:replace="~{fragments/layout :: classificationBanner('top')}"></div>
 <svg th:replace="~{fragments/icons :: sprite}"></svg>
 
 <div class="page">
     <header th:replace="~{fragments/layout :: navbar('users')}"></header>
 
-    <div class="page-wrapper">
+    <main class="page-wrapper" id="main-content" tabindex="-1">
         <div th:replace="~{fragments/layout :: pageheader('People', 'IC Persons and the certificates they publish')}"></div>
 
         <div class="page-body">
@@ -94,7 +95,7 @@
                                style="width:100%">
                             <thead>
                             <tr>
-                            <th></th>
+                            <th><span class="visually-hidden">Details</span></th>
                             <th>Name</th>
                             <th>UID</th>
                             <th>Email</th>
@@ -112,20 +113,20 @@
                             </thead>
                             <tfoot>
                             <tr class="column-search">
-                            <th></th>
-                            <th><input type="text" class="form-control form-control-sm" placeholder="Name"></th>
-                            <th><input type="text" class="form-control form-control-sm" placeholder="UID"></th>
-                            <th><input type="text" class="form-control form-control-sm" placeholder="Email"></th>
-                            <th></th>
-                            <th></th>
-                            <th><input type="text" class="form-control form-control-sm" placeholder="Duty organization"></th>
-                            <th></th>
-                            <th></th>
-                            <th></th>
-                            <th></th>
-                            <th></th>
-                            <th></th>
-                            <th></th>
+                            <td></td>
+                            <th><input type="text" class="form-control form-control-sm" placeholder="Name" aria-label="Filter by Name"></th>
+                            <th><input type="text" class="form-control form-control-sm" placeholder="UID" aria-label="Filter by UID"></th>
+                            <th><input type="text" class="form-control form-control-sm" placeholder="Email" aria-label="Filter by Email"></th>
+                            <td></td>
+                            <td></td>
+                            <th><input type="text" class="form-control form-control-sm" placeholder="Duty organization" aria-label="Filter by Duty organization"></th>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
                             </tr>
                             </tfoot>
                         </table>
@@ -146,12 +147,13 @@
                 </div>
             </div>
         </footer>
-    </div>
+    </main>
 </div>
 
 <div th:replace="~{fragments/layout :: scripts}"></div>
 <script th:src="@{/js/audit-trail.js}"></script>
 <script th:src="@{/js/project-filter.js}"></script>
 <script th:src="@{/js/users-table.js}"></script>
+<div th:replace="~{fragments/layout :: classificationBanner('bottom')}"></div>
 </body>
 </html>

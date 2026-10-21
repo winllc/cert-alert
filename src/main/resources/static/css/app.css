@@ -76,7 +76,8 @@ table.datatable tfoot.column-search-hidden {
     display: none;
 }
 
-table.datatable tfoot th {
+table.datatable tfoot th,
+table.datatable tfoot td {
     padding: 0.5rem;
     font-weight: 400;
 }
@@ -458,4 +459,83 @@ tr.notification-unread td:first-child {
 .page.page-center {
     justify-content: flex-start;
     justify-content: safe center;
+}
+
+/* Skip to main content: out of sight until the keyboard reaches it, first in the tab order. */
+.skip-link.visually-hidden-focusable:focus,
+.skip-link.visually-hidden-focusable:focus-within {
+    position: absolute !important;
+    top: .5rem;
+    left: .5rem;
+    z-index: 1050;
+    padding: .5rem 1rem;
+    background: #ffffff;
+    color: #0b3d91;
+    border: 2px solid #0b3d91;
+    border-radius: 4px;
+    font-weight: 600;
+}
+
+/* The main region takes focus from the skip link; it is not a control, so it draws no ring. */
+#main-content:focus {
+    outline: none;
+}
+
+/*
+ * Contrast (WCAG 2.1 AA, 1.4.3). Tabler's light badges set their text in the same hue as
+ * their tint, which comes to 2.7-4.4:1 against it; these darker shades of each hue reach
+ * 5:1 or more. The same for coloured text on white, the secondary grey on tinted
+ * backgrounds, and link-coloured buttons. Checked by the axe-core scan (./gradlew a11yTest).
+ */
+.bg-green-lt { color: #1d7330 !important; }
+.bg-yellow-lt { color: #7a4c00 !important; }
+.bg-orange-lt { color: #8a4300 !important; }
+.bg-red-lt { color: #a51d1d !important; }
+.bg-blue-lt { color: #04529c !important; }
+.bg-azure-lt { color: #0a5a8f !important; }
+.bg-cyan-lt { color: #0b5c6e !important; }
+.bg-teal-lt { color: #0b6650 !important; }
+.bg-lime-lt { color: #3d6400 !important; }
+.bg-purple-lt { color: #7b2793 !important; }
+.bg-indigo-lt { color: #3b3fa0 !important; }
+.bg-pink-lt { color: #9a1f55 !important; }
+.bg-secondary-lt { color: #4a525b !important; }
+.text-green { color: #1d7330 !important; }
+.text-yellow { color: #8a5700 !important; }
+.text-orange { color: #8a4300 !important; }
+.text-red { color: #a51d1d !important; }
+.text-secondary,
+.text-muted { color: #555d66 !important; }
+.btn-link { color: #0b5cad; }
+/* The dark bar's strip: a light badge reads light-on-dark there. */
+[data-bs-theme="dark"] .demo-strip .badge { color: #ffffff !important; background-color: #0a5a8f !important; }
+[data-bs-theme="dark"] .text-secondary { color: #b8c2cc !important; }
+
+/* Links in running text are underlined, not told apart by colour alone (1.4.1). */
+main a:not(.btn):not(.page-link):not(.list-group-item):not(.nav-link):not(.dropdown-item):not(.card-link-plain),
+.demo-strip a,
+.card-actions a {
+    text-decoration: underline;
+}
+/* A link or a quiet button inside a tinted badge takes the badge's (dark enough) colour. */
+.badge a { color: inherit; }
+.contact-badge .btn-ghost-secondary { color: #3f464e; }
+
+/*
+ * Non-text contrast (1.4.11): the edge of a field or a check box is what says it is one, so
+ * it is drawn at 3:1 or more against the page rather than Tabler's faint default.
+ */
+.form-control,
+.form-select,
+.form-check-input {
+    border-color: #7c8591;
+}
+
+/* The idle-timeout warning: above everything, clear of the banners. */
+.session-timeout {
+    position: fixed;
+    right: 1rem;
+    bottom: 2.5rem;
+    z-index: 1060;
+    max-width: 22rem;
 }

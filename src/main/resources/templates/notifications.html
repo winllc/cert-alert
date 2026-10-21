@@ -2,18 +2,19 @@
 <html lang="en" xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{fragments/layout :: head('Notifications')}"></head>
 <body>
+<div th:replace="~{fragments/layout :: classificationBanner('top')}"></div>
 <svg th:replace="~{fragments/icons :: sprite}"></svg>
 
 <div class="page">
     <header th:replace="~{fragments/layout :: navbar('notifications')}"></header>
 
-    <div class="page-wrapper">
+    <main class="page-wrapper" id="main-content" tabindex="-1">
         <div class="page-header d-print-none">
             <div class="container-xl">
                 <div class="row g-2 align-items-center">
                     <div class="col">
                         <div class="page-pretitle">IC Full Service Directory</div>
-                        <h2 class="page-title">Notifications</h2>
+                        <h1 class="page-title">Notifications</h1>
                         <div class="text-secondary mt-1">
                             Certificates you are the point of contact for, and what has happened to them
                         </div>
@@ -84,7 +85,7 @@
                 <!--/* Filled in by a dry run, and empty until one is asked for. */-->
                 <div class="card mb-3 d-none" id="dry-run-card">
                     <div class="card-header">
-                        <h3 class="card-title">What the round-up would send</h3>
+                        <h2 class="card-title">What the round-up would send</h2>
                         <div class="card-actions text-secondary small" id="dry-run-summary"></div>
                     </div>
                     <div class="card-body" id="dry-run-messages"></div>
@@ -101,7 +102,7 @@
                                 <th>What</th>
                                 <th>About</th>
                                 <th>Email</th>
-                                <th></th>
+                                <th><span class="visually-hidden">Actions</span></th>
                             </tr>
                             </thead>
                             <tbody id="notifications-body">
@@ -123,9 +124,10 @@
                 </p>
             </div>
         </div>
-    </div>
+    </main>
 </div>
 
 <div th:replace="~{fragments/layout :: scripts}"></div>
+<div th:replace="~{fragments/layout :: classificationBanner('bottom')}"></div>
 </body>
 </html>

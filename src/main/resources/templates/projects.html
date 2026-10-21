@@ -2,18 +2,19 @@
 <html lang="en" xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{fragments/layout :: head('Projects')}"></head>
 <body>
+<div th:replace="~{fragments/layout :: classificationBanner('top')}"></div>
 <svg th:replace="~{fragments/icons :: sprite}"></svg>
 
 <div class="page">
     <header th:replace="~{fragments/layout :: navbar('projects')}"></header>
 
-    <div class="page-wrapper">
+    <main class="page-wrapper" id="main-content" tabindex="-1">
         <div class="page-header d-print-none">
             <div class="container-xl">
                 <div class="row g-2 align-items-center">
                     <div class="col">
                         <div class="page-pretitle">IC Full Service Directory</div>
-                        <h2 class="page-title">Projects</h2>
+                        <h1 class="page-title">Projects</h1>
                         <div class="text-secondary mt-1">
                             What the people and servers are for, which the directory has no way to say
                         </div>
@@ -56,7 +57,7 @@
                                 <th>People</th>
                                 <th>Servers</th>
                                 <th>Created</th>
-                                <th></th>
+                                <th><span class="visually-hidden">Actions</span></th>
                             </tr>
                             </thead>
                             <tbody id="projects-body">
@@ -67,10 +68,11 @@
                 </div>
             </div>
         </div>
-    </div>
+    </main>
 </div>
 
 <div th:replace="~{fragments/layout :: scripts}"></div>
 <script th:src="@{/js/projects.js}"></script>
+<div th:replace="~{fragments/layout :: classificationBanner('bottom')}"></div>
 </body>
 </html>

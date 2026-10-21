@@ -2,12 +2,13 @@
 <html lang="en" xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{fragments/layout :: head(${user.displayName != null} ? ${user.displayName} : ${user.uid})}"></head>
 <body>
+<div th:replace="~{fragments/layout :: classificationBanner('top')}"></div>
 <svg th:replace="~{fragments/icons :: sprite}"></svg>
 
 <div class="page">
     <header th:replace="~{fragments/layout :: navbar('users')}"></header>
 
-    <div class="page-wrapper">
+    <main class="page-wrapper" id="main-content" tabindex="-1">
         <div class="page-header d-print-none">
             <div class="container-xl">
                 <div class="row g-2 align-items-center">
@@ -15,8 +16,8 @@
                         <div class="page-pretitle">
                             <a th:href="@{/users}" class="text-secondary">People</a>
                         </div>
-                        <h2 class="page-title"
-                            th:text="${user.displayName != null} ? ${user.displayName} : (${user.commonName != null} ? ${user.commonName} : ${user.uid})">Name</h2>
+                        <h1 class="page-title"
+                            th:text="${user.displayName != null} ? ${user.displayName} : (${user.commonName != null} ? ${user.commonName} : ${user.uid})">Name</h1>
                         <div class="text-secondary mt-1 mono" th:text="${user.dn}">dn</div>
                     </div>
                     <div class="col-auto ms-auto">
@@ -41,7 +42,7 @@
                 <div class="row row-cards">
                     <div class="col-12 col-lg-6">
                         <div class="card">
-                            <div class="card-header"><h3 class="card-title">IC Person</h3></div>
+                            <div class="card-header"><h2 class="card-title">IC Person</h2></div>
                             <div class="card-body cert-detail p-3">
                                 <table>
                                     <tr th:replace="~{fragments/detail :: attribute('uid', ${user.uid})}"></tr>
@@ -61,7 +62,7 @@
 
                     <div class="col-12 col-lg-6">
                         <div class="card">
-                            <div class="card-header"><h3 class="card-title">Addresses</h3></div>
+                            <div class="card-header"><h2 class="card-title">Addresses</h2></div>
                             <div class="card-body cert-detail p-3">
                                 <table>
                                     <tr th:replace="~{fragments/detail :: attribute('Primary', ${user.email})}"></tr>
@@ -75,7 +76,7 @@
                         </div>
 
                         <div class="card mt-3">
-                            <div class="card-header"><h3 class="card-title">Organization</h3></div>
+                            <div class="card-header"><h2 class="card-title">Organization</h2></div>
                             <div class="card-body cert-detail p-3">
                                 <table>
                                     <tr th:replace="~{fragments/detail :: attribute('Duty organization', ${user.dutyOrganization})}"></tr>
@@ -106,7 +107,7 @@
                        an address it never published. */-->
                 <div class="card mt-3">
                     <div class="card-header">
-                        <h3 class="card-title">Addresses this person answers to</h3>
+                        <h2 class="card-title">Addresses this person answers to</h2>
                         <span class="card-subtitle text-secondary ms-2">a serverPOC holding any of these binds that server to them</span>
                     </div>
                     <div class="card-body">
@@ -121,7 +122,7 @@
                        so a person is indexed under every value that could be either. */-->
                 <div class="card mt-3">
                     <div class="card-header">
-                        <h3 class="card-title">Known to servers as</h3>
+                        <h2 class="card-title">Known to servers as</h2>
                         <span class="card-subtitle text-secondary ms-2">any of these in a serverPOC names this person</span>
                     </div>
                     <div class="card-body">
@@ -135,7 +136,7 @@
                 <!--/* What this entry is for, which the directory has no way to say. The
                        ones they run are marked: that is a role, not a membership. */-->
                 <div class="card mt-3" th:if="${!#lists.isEmpty(projects) and @licensing.shows('projects')}">
-                    <div class="card-header"><h3 class="card-title">Projects</h3></div>
+                    <div class="card-header"><h2 class="card-title">Projects</h2></div>
                     <div class="card-body">
                         <a class="badge me-1" th:each="project : ${projects}"
                            th:classappend="${administers.contains(project)} ? 'bg-green-lt' : 'bg-blue-lt'"
@@ -152,11 +153,12 @@
                 <div th:replace="~{fragments/detail :: audit('USER', ${user.id})}"></div>
             </div>
         </div>
-    </div>
+    </main>
 </div>
 
 <div th:replace="~{fragments/layout :: scripts}"></div>
 <script th:src="@{/js/user-addresses.js}"></script>
 <script th:src="@{/js/audit-table.js}"></script>
+<div th:replace="~{fragments/layout :: classificationBanner('bottom')}"></div>
 </body>
 </html>
