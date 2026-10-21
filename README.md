@@ -3152,6 +3152,12 @@ installation started straight with several replicas needs it once (Helm:
 ReadWriteMany and `persistence.license.readWriteMany: true` says so. See
 [High availability](#high-availability).
 
+### Helm: the license volume is kept on uninstall
+
+The chart's license PVC now carries `helm.sh/resource-policy: keep` and
+`argocd.argoproj.io/sync-options: Prune=false`, so `helm uninstall` and an Argo CD prune leave
+it behind. Delete it yourself once it is no longer needed.
+
 ### Single sign-on and the auditor role are new, and off
 
 Nothing changes until `cert-alert.sso.*`, `auditor-identifiers` or `security.groups` are set.

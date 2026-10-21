@@ -37,6 +37,8 @@ extra["tomcat.version"] = "11.0.27"
 extra["jackson-bom.version"] = "3.1.7"
 extra["jackson-2-bom.version"] = "2.21.8"
 
+val bouncyCastle = "1.86"
+
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
@@ -57,6 +59,19 @@ dependencies {
     implementation("org.springframework.security:spring-security-oauth2-client")
     implementation("org.springframework.security:spring-security-oauth2-jose")
     implementation("org.springframework.security:spring-security-saml2-service-provider")
+    // OpenSAML 5.2.3 and the Shibboleth libraries under it reference Bouncy Castle and bring
+    // 1.84, which has CVE-2026-8763 (critical) and CVE-2026-13506 (high). Pinned here, and named
+    // outright so all three are in the boot jar whatever the transitive metadata says.
+    runtimeOnly("org.bouncycastle:bcprov-jdk18on:$bouncyCastle")
+    runtimeOnly("org.bouncycastle:bcpkix-jdk18on:$bouncyCastle")
+    runtimeOnly("org.bouncycastle:bcutil-jdk18on:$bouncyCastle")
+    constraints {
+        listOf("bcprov", "bcpkix", "bcutil").forEach { module ->
+            implementation("org.bouncycastle:$module-jdk18on:$bouncyCastle") {
+                because("1.84, which OpenSAML brings, has CVE-2026-8763 and CVE-2026-13506")
+            }
+        }
+    }
 
     // More than one replica: sessions in the database (cert-alert.session.store=jdbc), and a
     // lock in the database around every job so only one replica runs it at a time.
@@ -95,7 +110,7 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
     testImplementation("org.springframework.security:spring-security-test")
     // Test-only: mints certificates with exact expiry offsets for the sync tests.
-    testImplementation("org.bouncycastle:bcpkix-jdk18on:1.86")
+    testImplementation("org.bouncycastle:bcpkix-jdk18on:$bouncyCastle")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

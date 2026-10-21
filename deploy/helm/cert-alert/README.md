@@ -52,9 +52,10 @@ holds the license, this installation's id and the license revisions seen. The in
 is what a bound license is tied to, so **keep this PVC**:
 
 - `helm upgrade` keeps it.
-- `helm uninstall` deletes it with the release, and a reinstall gets a new installation id (a
-  bound license must then be re-bound on the portal). To keep it across uninstalls, create the
-  PVC yourself and pass `persistence.license.existingClaim`.
+- `helm uninstall` and an Argo CD prune keep it too (`helm.sh/resource-policy: keep`,
+  `argocd.argoproj.io/sync-options: Prune=false`); delete it yourself when it is no longer
+  needed. The license state itself is kept in the database: the volume matters until an
+  upgraded installation has imported its id from it.
 
 The license screen shows the installation id; after the first sign-in it is also in
 `/var/lib/ens/certalert/installation-id` in the pod.
@@ -533,8 +534,10 @@ Before upgrading, read the [upgrade notes](../../../README.md#upgrade-notes). In
 helm uninstall cert-alert
 ```
 
-This deletes the license PVC the chart created (and with it the installation id), but not an
-`existingClaim`, and not the embedded database's PVC. Back up what you need first.
+This keeps the license PVC the chart created (`helm.sh/resource-policy: keep`; an Argo CD
+prune leaves it too), as well as an `existingClaim` and the embedded database's PVC. Delete the
+license PVC yourself once you are sure the installation id is in the database or no longer
+wanted.
 
 ## Tests
 

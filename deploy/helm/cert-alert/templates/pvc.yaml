@@ -1,7 +1,8 @@
 {{- if and .Values.persistence.license.enabled (not .Values.persistence.license.existingClaim) }}
 # The ENS license, this installation's id and the license revisions seen. Keep it: losing it
 # gives the installation a new id, and a license bound to the old one must be re-bound on the
-# ENS portal. `helm upgrade` keeps it; `helm uninstall` deletes it (see the chart README).
+# ENS portal. `helm upgrade` keeps it, and so do `helm uninstall` and an Argo CD prune: delete
+# it yourself once you are sure (see the chart README).
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -9,6 +10,11 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "cert-alert.labels" . | nindent 4 }}
+  annotations:
+    # Never deleted by helm uninstall or an Argo CD prune: it may hold the installation id an
+    # upgraded installation has yet to import into the database.
+    helm.sh/resource-policy: keep
+    argocd.argoproj.io/sync-options: Prune=false
 spec:
   accessModes:
     {{- toYaml .Values.persistence.license.accessModes | nindent 4 }}

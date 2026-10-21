@@ -122,6 +122,14 @@ jobs:
             echo "::endgroup::"
           done
 
+      - name: The license volume survives uninstall and prune
+        run: |
+          # It may hold the installation id an upgraded installation has yet to import.
+          pvc=$(helm template cert-alert "$CHART" -f "$CHART/ci/default-values.yaml" \
+            | awk '/^kind: PersistentVolumeClaim$/{p=1} p&&/^---/{p=0} p')
+          echo "$pvc" | grep -q 'helm.sh/resource-policy: keep'
+          echo "$pvc" | grep -q 'argocd.argoproj.io/sync-options: Prune=false'
+
       - name: Render and validate
         run: |
           for values in "$CHART"/ci/*.yaml; do

@@ -643,10 +643,11 @@ audit:
 persistence:
   license:
     # The license, this installation's id (licenses are bound to it) and the license
-    # revisions seen, as releases before the database store kept them, mounted at /var/lib/ens (the application keeps them in
-    # /var/lib/ens/certalert). Keep this PVC: helm upgrade does; helm uninstall deletes it
-    # unless it is an existingClaim of your own. Losing it gives the installation a new id,
-    # and a bound license must be re-bound on the ENS portal.
+    # revisions seen, as releases before the database store kept them, mounted at
+    # /var/lib/ens (the application keeps them in /var/lib/ens/certalert). Keep this PVC until
+    # the id is in the database: helm upgrade keeps it, and so do helm uninstall and an Argo CD
+    # prune (helm.sh/resource-policy: keep). Losing it before the import gives the
+    # installation a new id, and a bound license must be re-bound on the ENS portal.
     enabled: true
     size: 100Mi
     storageClass: ""
