@@ -51,8 +51,9 @@ public class WebhookAdminController {
             Instant createdAt,
             Instant updatedAt) {
 
-        static EndpointRow of(WebhookEndpoint endpoint) {
-            return new EndpointRow(endpoint.getId(), endpoint.getName(), endpoint.getUrl(), endpoint.getFormat().name(),
+        /** @param url the whole URL for an administrator; its scheme and host only for anybody else */
+        static EndpointRow of(WebhookEndpoint endpoint, String url) {
+            return new EndpointRow(endpoint.getId(), endpoint.getName(), url, endpoint.getFormat().name(),
                     endpoint.eventIds(), endpoint.isEnabled(), endpoint.getSecretPrefix(), endpoint.getCreatedBy(),
                     endpoint.getCreatedAt(), endpoint.getUpdatedAt());
         }
@@ -87,7 +88,10 @@ public class WebhookAdminController {
     @GetMapping(PATH)
     public List<EndpointRow> list(Authentication authentication) {
         requireReader(authentication);
-        return webhooks.list().stream().map(EndpointRow::of).toList();
+        boolean admin = SignedInDirectoryUser.isAdmin(authentication);
+        return webhooks.list().stream()
+                .map(endpoint -> EndpointRow.of(endpoint, admin ? webhooks.url(endpoint) : WebhookSecrets.redact(webhooks.url(endpoint))))
+                .toList();
     }
 
     @GetMapping(PATH + "/events")
@@ -105,14 +109,15 @@ public class WebhookAdminController {
                 events(request.events()), AuditContext.actorOf(authentication).id());
         return ResponseEntity.status(HttpStatus.CREATED)
                 .cacheControl(CacheControl.noStore())
-                .body(new WithSecret(EndpointRow.of(created.endpoint()), created.secret()));
+                .body(new WithSecret(EndpointRow.of(created.endpoint(), webhooks.url(created.endpoint())), created.secret()));
     }
 
     @PutMapping(PATH + "/{id}")
     public EndpointRow update(@PathVariable Long id, @RequestBody EndpointRequest request, Authentication authentication) {
         requireAdministrator(authentication);
-        return EndpointRow.of(webhooks.update(id, request.name(), request.url(), format(request.format()),
-                events(request.events()), request.enabled() == null || request.enabled()));
+        WebhookEndpoint updated = webhooks.update(id, request.name(), request.url(), format(request.format()),
+                events(request.events()), request.enabled() == null || request.enabled());
+        return EndpointRow.of(updated, webhooks.url(updated));
     }
 
     @PostMapping(PATH + "/{id}/secret")
@@ -121,7 +126,7 @@ public class WebhookAdminController {
         Webhooks.WithSecret rotated = webhooks.rotateSecret(id);
         return ResponseEntity.ok()
                 .cacheControl(CacheControl.noStore())
-                .body(new WithSecret(EndpointRow.of(rotated.endpoint()), rotated.secret()));
+                .body(new WithSecret(EndpointRow.of(rotated.endpoint(), webhooks.url(rotated.endpoint())), rotated.secret()));
     }
 
     @PostMapping(PATH + "/{id}/test")

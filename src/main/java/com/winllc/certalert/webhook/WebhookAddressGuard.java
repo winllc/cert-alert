@@ -53,6 +53,18 @@ public class WebhookAddressGuard {
             AddressRange.parse("fc00::/7"),
             AddressRange.parse("fec0::/10"));
 
+    /**
+     * Never posted to, whatever they carry: Teredo (2001::/32) tunnels to an address that
+     * cannot be read off it reliably, the local-use NAT64 prefix (64:ff9b:1::/48) translates
+     * however the network decides, and an IPv4-mapped address (::ffff:0:0/96) that reached
+     * here as IPv6 is one the JDK did not read as the IPv4 address it is.
+     */
+    private static final List<AddressRange> TRANSLATED = List.of(
+            AddressRange.parse("2001::/32"),
+            AddressRange.parse("64:ff9b:1::/48"));
+
+    private static final AddressRange NAT64 = AddressRange.parse("64:ff9b::/96");
+
     private static final AddressRange IPV4_COMPATIBLE = AddressRange.parse("::/96");
     private static final AddressRange SIX_TO_FOUR = AddressRange.parse("2002::/16");
     private static final AddressRange BROADCAST = AddressRange.parse("255.255.255.255/32");
@@ -141,6 +153,10 @@ public class WebhookAddressGuard {
         if (address.isLoopbackAddress()) {
             return "a loopback address, which webhooks are never sent to";
         }
+        if (address instanceof Inet6Address && (TRANSLATED.stream().anyMatch(range -> range.matches(address))
+                || isMappedIpv4(address))) {
+            return "a Teredo, local-use NAT64 or IPv4-mapped address, which webhooks are never sent to";
+        }
         if (FetchPolicy.isNeverFetched(address) || BROADCAST.matches(address)) {
             return "a link-local, metadata, unspecified or multicast address, which webhooks are never sent to";
         }
@@ -157,18 +173,35 @@ public class WebhookAddressGuard {
         return null;
     }
 
+    /** ::ffff:a.b.c.d held as an IPv6 address (the JDK normally turns it into IPv4). */
+    private static boolean isMappedIpv4(InetAddress address) {
+        byte[] bytes = address.getAddress();
+        if (bytes.length != 16) {
+            return false;
+        }
+        for (int i = 0; i < 10; i++) {
+            if (bytes[i] != 0) {
+                return false;
+            }
+        }
+        return bytes[10] == (byte) 0xff && bytes[11] == (byte) 0xff;
+    }
+
     private boolean isRestricted() {
         return !names.isEmpty() || !suffixes.isEmpty() || !ranges.isEmpty();
     }
 
-    /** The IPv4 address an IPv4-compatible (::a.b.c.d) or 6to4 (2002:aabb:ccdd::) address carries. */
+    /**
+     * The IPv4 address a NAT64 (64:ff9b::a.b.c.d), IPv4-compatible (::a.b.c.d) or 6to4
+     * (2002:aabb:ccdd::) address carries - held to the same rules, private networks included.
+     */
     private static InetAddress embeddedIpv4(InetAddress address) {
         if (!(address instanceof Inet6Address)) {
             return null;
         }
         byte[] bytes = address.getAddress();
         try {
-            if (IPV4_COMPATIBLE.matches(address)) {
+            if (NAT64.matches(address) || IPV4_COMPATIBLE.matches(address)) {
                 return Inet4Address.getByAddress(Arrays.copyOfRange(bytes, 12, 16));
             }
             if (SIX_TO_FOUR.matches(address)) {

@@ -84,6 +84,37 @@ class WebhookAddressGuardTest {
     }
 
     @Test
+    void translatedAndTunnelledIpv6IsRefusedAndNat64IsReadForWhatItCarries() throws Exception {
+        WebhookAddressGuard guard = guard(Map.of(
+                "teredo", List.of("2001:0:4136:e378:8000:63bf:3fff:fdd2"),
+                "localnat64", List.of("64:ff9b:1::a00:1"),
+                "nat64metadata", List.of("64:ff9b::a9fe:a9fe"),
+                "nat64private", List.of("64:ff9b::a01:203"),
+                "nat64public", List.of("64:ff9b::5db8:d822"),
+                "azure", List.of("168.63.129.16")));
+        for (String host : List.of("teredo", "localnat64", "nat64metadata", "azure")) {
+            assertThatThrownBy(() -> guard.checkUrl("https://" + host + "/x")).as(host)
+                    .isInstanceOf(WebhookAddressGuard.RefusedDestinationException.class);
+        }
+        assertThat(guard.checkUrl("https://nat64public/x")).isNotNull();
+        assertThat(guard.checkUrl("https://nat64private/x")).isNotNull();
+        WebhookProperties blocking = new WebhookProperties();
+        blocking.setBlockPrivateNetworks(true);
+        assertThatThrownBy(() -> guard(blocking, Map.of("nat64private", List.of("64:ff9b::a01:203")))
+                .checkUrl("https://nat64private/x")).hasMessageContaining("private");
+        // An IPv4-mapped address that arrives as IPv6 rather than as the IPv4 address it is.
+        byte[] mapped = new byte[16];
+        mapped[10] = (byte) 0xff;
+        mapped[11] = (byte) 0xff;
+        mapped[12] = 93;
+        mapped[13] = (byte) 184;
+        mapped[14] = (byte) 216;
+        mapped[15] = 34;
+        InetAddress v6 = java.net.Inet6Address.getByAddress(null, mapped, -1);
+        assertThat(new WebhookAddressGuard(new WebhookProperties()).refusalFor(v6)).isNotNull();
+    }
+
+    @Test
     void everyAddressANameResolvesToHasToPass() {
         WebhookAddressGuard guard = guard(Map.of("split", List.of("93.184.216.34", "169.254.169.254")));
         assertThatThrownBy(() -> guard.checkUrl("https://split/x"))

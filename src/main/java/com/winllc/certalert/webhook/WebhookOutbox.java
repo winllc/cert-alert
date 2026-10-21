@@ -207,7 +207,7 @@ public class WebhookOutbox {
         Integer status = null;
         String error;
         try {
-            URI uri = WebhookAddressGuard.parse(endpoint.getUrl());
+            URI uri = WebhookAddressGuard.parse(secrets.revealUrl(endpoint));
             InetAddress address = guard.resolve(uri);
             byte[] body = delivery.getPayload().getBytes(StandardCharsets.UTF_8);
             long timestamp = Instant.now(clock).getEpochSecond();

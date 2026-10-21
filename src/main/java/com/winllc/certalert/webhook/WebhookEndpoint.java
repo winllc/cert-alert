@@ -38,8 +38,12 @@ public class WebhookEndpoint {
     @Column(nullable = false, length = 120)
     private String name;
 
-    @Column(nullable = false, length = 2000)
+    /** The URL, encrypted where a key is configured: a chat webhook's URL is its credential. */
+    @Column(nullable = false, length = 4000)
     private String url;
+
+    @Column(name = "url_encrypted", nullable = false)
+    private boolean urlEncrypted;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 16)
@@ -74,9 +78,10 @@ public class WebhookEndpoint {
         // for JPA
     }
 
-    WebhookEndpoint(String name, String url, Format format, Set<WebhookEvent> events, String createdBy, Instant now) {
+    WebhookEndpoint(String name, WebhookSecrets.Stored url, Format format, Set<WebhookEvent> events, String createdBy, Instant now) {
         this.name = name;
-        this.url = url;
+        this.url = url.value();
+        this.urlEncrypted = url.encrypted();
         this.format = format;
         this.events = WebhookEvent.format(events);
         this.enabled = true;
@@ -93,8 +98,12 @@ public class WebhookEndpoint {
         return name;
     }
 
-    public String getUrl() {
+    String getStoredUrl() {
         return url;
+    }
+
+    boolean isUrlEncrypted() {
+        return urlEncrypted;
     }
 
     public Format getFormat() {
@@ -144,9 +153,10 @@ public class WebhookEndpoint {
         this.updatedAt = now;
     }
 
-    void update(String name, String url, Format format, Set<WebhookEvent> events, boolean enabled, Instant now) {
+    void update(String name, WebhookSecrets.Stored url, Format format, Set<WebhookEvent> events, boolean enabled, Instant now) {
         this.name = name;
-        this.url = url;
+        this.url = url.value();
+        this.urlEncrypted = url.encrypted();
         this.format = format;
         this.events = WebhookEvent.format(events);
         this.enabled = enabled;

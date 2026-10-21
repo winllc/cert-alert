@@ -17,6 +17,9 @@ import org.springframework.stereotype.Component;
 /**
  * A webhook's signing secret: made, kept and used.
  *
+ * <p>The endpoint's URL is kept the same way, encrypted with the same key where it is set:
+ * a chat webhook's URL is a credential too.
+ *
  * <p><b>Made</b> as {@code whsec_} and 32 random bytes, base64url, and shown to the
  * administrator once. <b>Kept</b> in the database - it has to be, to sign with - encrypted
  * with AES-GCM under {@code cert-alert.webhooks.secret-key} where that is set.
@@ -74,12 +77,20 @@ public class WebhookSecrets {
     }
 
     String reveal(WebhookEndpoint endpoint) {
-        String stored = endpoint.getStoredSecret();
-        if (!endpoint.isSecretEncrypted()) {
+        return open(endpoint.getStoredSecret(), endpoint.isSecretEncrypted(), "signing secret", endpoint.getId());
+    }
+
+    /** The endpoint's URL as it was given. */
+    String revealUrl(WebhookEndpoint endpoint) {
+        return open(endpoint.getStoredUrl(), endpoint.isUrlEncrypted(), "URL", endpoint.getId());
+    }
+
+    private String open(String stored, boolean encrypted, String what, Long id) {
+        if (!encrypted) {
             return stored;
         }
         if (key == null || !stored.startsWith(ENCRYPTED)) {
-            throw new IllegalStateException("The signing secret of webhook " + endpoint.getId()
+            throw new IllegalStateException("The " + what + " of webhook " + id
                     + " is encrypted, and cert-alert.webhooks.secret-key is not the key it was encrypted with");
         }
         try {
@@ -88,8 +99,28 @@ public class WebhookSecrets {
             cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(128, in, 0, 12));
             return new String(cipher.doFinal(in, 12, in.length - 12), StandardCharsets.UTF_8);
         } catch (GeneralSecurityException | IllegalArgumentException e) {
-            throw new IllegalStateException("The signing secret of webhook " + endpoint.getId()
-                    + " cannot be decrypted with cert-alert.webhooks.secret-key; rotate it", e);
+            throw new IllegalStateException("The " + what + " of webhook " + id
+                    + " cannot be decrypted with cert-alert.webhooks.secret-key; set it again", e);
+        }
+    }
+
+    /**
+     * A URL as anybody but an administrator sees it, and as the audit trail records it: the
+     * scheme, host and port, never the path or query - which for a Slack or Teams webhook is
+     * the credential.
+     */
+    public static String redact(String url) {
+        try {
+            java.net.URI uri = new java.net.URI(url);
+            if (uri.getHost() == null) {
+                return "[redacted]";
+            }
+            boolean more = (uri.getRawPath() != null && !uri.getRawPath().isEmpty() && !uri.getRawPath().equals("/"))
+                    || uri.getRawQuery() != null;
+            return uri.getScheme() + "://" + uri.getHost() + (uri.getPort() == -1 ? "" : ":" + uri.getPort())
+                    + (more ? "/[redacted]" : "/");
+        } catch (java.net.URISyntaxException | RuntimeException e) {
+            return "[redacted]";
         }
     }
 

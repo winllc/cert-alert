@@ -77,9 +77,14 @@ class WebhookAdminTest {
         String listed = mockMvc.perform(get(WebhookAdminController.PATH).with(auditor()))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
-        assertThat(listed).contains("93.184.216.34").doesNotContain(secret).doesNotContain("\"secret\"");
+        assertThat(listed).contains("93.184.216.34").doesNotContain(secret).doesNotContain("\"secret\"")
+                // An auditor sees where it goes, not the path: for a chat webhook that is the credential.
+                .doesNotContain("/certalert").contains("https://93.184.216.34/[redacted]");
+        assertThat(mockMvc.perform(get(WebhookAdminController.PATH).with(admin())).andReturn().getResponse().getContentAsString())
+                .contains("https://93.184.216.34/certalert");
         assertThat(audit.after(head, 100)).extracting(StoredEvent::action).contains("webhook.created");
-        assertThat(audit.after(head, 100)).extracting(StoredEvent::line).noneMatch(line -> line.contains(secret));
+        assertThat(audit.after(head, 100)).extracting(StoredEvent::line)
+                .noneMatch(line -> line.contains(secret) || line.contains("/certalert"));
 
         // A new secret replaces the old, shown once again; then it goes.
         String rotated = mockMvc.perform(post(WebhookAdminController.PATH + "/" + id + "/secret").with(admin()).with(csrf()))

@@ -57,14 +57,14 @@ public class Webhooks {
         Set<WebhookEvent> subscribed = checkEvents(events);
         Instant now = Instant.now(clock);
         WebhookEndpoint endpoint = new WebhookEndpoint(
-                label, checked.toString(), format == null ? WebhookEndpoint.Format.JSON : format, subscribed, by, now);
+                label, secrets.store(checked.toString()), format == null ? WebhookEndpoint.Format.JSON : format, subscribed, by, now);
         String secret = secrets.generate();
         endpoint.secret(secrets.store(secret), secret.substring(0, 12), now);
         endpoint = endpoints.save(endpoint);
         audit.record(AuditRecord.of(AuditRecord.Category.CONFIGURATION, "webhook.created")
                 .severity(AuditRecord.Severity.NOTICE)
                 .target("webhook", String.valueOf(endpoint.getId()), label)
-                .detail("url", endpoint.getUrl())
+                .detail("url", WebhookSecrets.redact(checked.toString()))
                 .detail("format", endpoint.getFormat().name())
                 .detail("events", WebhookEvent.format(subscribed)));
         notifications.endpointsChanged();
@@ -81,10 +81,10 @@ public class Webhooks {
         AuditRecord record = AuditRecord.of(AuditRecord.Category.CONFIGURATION, "webhook.changed")
                 .severity(AuditRecord.Severity.NOTICE)
                 .target("webhook", String.valueOf(id), label)
-                .change("url", endpoint.getUrl(), checked.toString())
+                .change("url", WebhookSecrets.redact(secrets.revealUrl(endpoint)), WebhookSecrets.redact(checked.toString()))
                 .change("events", WebhookEvent.format(endpoint.getEvents()), WebhookEvent.format(subscribed))
                 .change("enabled", endpoint.isEnabled(), enabled);
-        endpoint.update(label, checked.toString(), format == null ? endpoint.getFormat() : format, subscribed, enabled,
+        endpoint.update(label, secrets.store(checked.toString()), format == null ? endpoint.getFormat() : format, subscribed, enabled,
                 Instant.now(clock));
         audit.record(record);
         notifications.endpointsChanged();
@@ -110,13 +110,18 @@ public class Webhooks {
         audit.record(AuditRecord.of(AuditRecord.Category.CONFIGURATION, "webhook.deleted")
                 .severity(AuditRecord.Severity.NOTICE)
                 .target("webhook", String.valueOf(id), endpoint.getName())
-                .detail("url", endpoint.getUrl()));
+                .detail("url", WebhookSecrets.redact(secrets.revealUrl(endpoint))));
         notifications.endpointsChanged();
     }
 
     @Transactional(readOnly = true)
     public List<WebhookEndpoint> list() {
         return endpoints.findAllByOrderByCreatedAtDesc();
+    }
+
+    /** The endpoint's URL as it was given: for an administrator, and for sending. */
+    public String url(WebhookEndpoint endpoint) {
+        return secrets.revealUrl(endpoint);
     }
 
     @Transactional(readOnly = true)

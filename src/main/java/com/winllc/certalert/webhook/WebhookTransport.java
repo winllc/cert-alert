@@ -11,6 +11,11 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.net.ssl.SNIHostName;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSocket;
@@ -56,40 +61,79 @@ public class WebhookTransport {
         }
     }
 
+    /** Closes a delivery's socket when its time is up; one daemon thread for every delivery. */
+    private static final ScheduledExecutorService WATCHDOG = Executors.newSingleThreadScheduledExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "webhook-watchdog");
+        thread.setDaemon(true);
+        return thread;
+    });
+
+    /** A delivery that ran out of time. */
+    public static final class DeliveryTimeoutException extends IOException {
+        DeliveryTimeoutException(java.time.Duration limit) {
+            super("The receiver took longer than " + limit.toSeconds() + " s (cert-alert.webhooks.delivery-timeout)");
+        }
+    }
+
     public Response post(URI uri, InetAddress address, Map<String, String> headers, byte[] body) throws IOException {
+        Socket raw = new Socket();
+        AtomicBoolean timedOut = new AtomicBoolean();
+        java.time.Duration limit = properties.getDeliveryTimeout();
+        // The socket timeouts bound each wait; this bounds the whole - a handshake or a write
+        // that never finishes, a receiver answering a byte at a time - by closing the socket.
+        ScheduledFuture<?> watchdog = WATCHDOG.schedule(() -> {
+            timedOut.set(true);
+            try {
+                raw.close();
+            } catch (IOException ignored) {
+                // closed is closed
+            }
+        }, limit.toMillis(), TimeUnit.MILLISECONDS);
+        try {
+            return post(raw, uri, address, headers, body, System.nanoTime() + limit.toNanos());
+        } catch (IOException e) {
+            if (timedOut.get()) {
+                throw new DeliveryTimeoutException(limit);
+            }
+            throw e;
+        } finally {
+            watchdog.cancel(false);
+            raw.close();
+        }
+    }
+
+    private Response post(Socket raw, URI uri, InetAddress address, Map<String, String> headers, byte[] body, long deadline)
+            throws IOException {
         String host = WebhookAddressGuard.hostOf(uri);
         int port = uri.getPort() == -1 ? 443 : uri.getPort();
-        long deadline = System.nanoTime() + properties.getConnectTimeout().plus(properties.getReadTimeout()).toNanos();
-        try (Socket raw = new Socket()) {
-            raw.connect(new InetSocketAddress(address, port), (int) properties.getConnectTimeout().toMillis());
-            raw.setSoTimeout((int) properties.getReadTimeout().toMillis());
-            try (SSLSocket tls = (SSLSocket) sockets.createSocket(raw, host, port, true)) {
-                SSLParameters parameters = tls.getSSLParameters();
-                parameters.setEndpointIdentificationAlgorithm("HTTPS");
-                if (!isAddressLiteral(host)) {
-                    parameters.setServerNames(List.of(new SNIHostName(host)));
-                }
-                tls.setSSLParameters(parameters);
-                tls.startHandshake();
-
-                OutputStream out = tls.getOutputStream();
-                StringBuilder request = new StringBuilder();
-                String path = uri.getRawPath() == null || uri.getRawPath().isEmpty() ? "/" : uri.getRawPath();
-                if (uri.getRawQuery() != null) {
-                    path += "?" + uri.getRawQuery();
-                }
-                request.append("POST ").append(path).append(" HTTP/1.1\r\n");
-                request.append("Host: ").append(uri.getHost()).append(port == 443 ? "" : ":" + port).append("\r\n");
-                for (Map.Entry<String, String> header : headers.entrySet()) {
-                    request.append(clean(header.getKey())).append(": ").append(clean(header.getValue())).append("\r\n");
-                }
-                request.append("Content-Length: ").append(body.length).append("\r\n");
-                request.append("Connection: close\r\n\r\n");
-                out.write(request.toString().getBytes(StandardCharsets.US_ASCII));
-                out.write(body);
-                out.flush();
-                return read(tls.getInputStream(), deadline);
+        raw.connect(new InetSocketAddress(address, port), (int) properties.getConnectTimeout().toMillis());
+        raw.setSoTimeout((int) properties.getReadTimeout().toMillis());
+        try (SSLSocket tls = (SSLSocket) sockets.createSocket(raw, host, port, true)) {
+            SSLParameters parameters = tls.getSSLParameters();
+            parameters.setEndpointIdentificationAlgorithm("HTTPS");
+            if (!isAddressLiteral(host)) {
+                parameters.setServerNames(List.of(new SNIHostName(host)));
             }
+            tls.setSSLParameters(parameters);
+            tls.startHandshake();
+
+            OutputStream out = tls.getOutputStream();
+            StringBuilder request = new StringBuilder();
+            String path = uri.getRawPath() == null || uri.getRawPath().isEmpty() ? "/" : uri.getRawPath();
+            if (uri.getRawQuery() != null) {
+                path += "?" + uri.getRawQuery();
+            }
+            request.append("POST ").append(path).append(" HTTP/1.1\r\n");
+            request.append("Host: ").append(uri.getHost()).append(port == 443 ? "" : ":" + port).append("\r\n");
+            for (Map.Entry<String, String> header : headers.entrySet()) {
+                request.append(clean(header.getKey())).append(": ").append(clean(header.getValue())).append("\r\n");
+            }
+            request.append("Content-Length: ").append(body.length).append("\r\n");
+            request.append("Connection: close\r\n\r\n");
+            out.write(request.toString().getBytes(StandardCharsets.US_ASCII));
+            out.write(body);
+            out.flush();
+            return read(tls.getInputStream(), deadline);
         }
     }
 

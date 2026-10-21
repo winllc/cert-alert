@@ -165,8 +165,8 @@ class WebhookDeliveryTest {
     private record Endpoint(WebhookEndpoint endpoint, String secret) {}
 
     private Endpoint endpoint(WebhookEndpoint.Format format, WebhookEvent... events) {
-        WebhookEndpoint endpoint = new WebhookEndpoint("test receiver", "https://" + HOST + ":" + receiver.getAddress().getPort()
-                + "/hook?source=certalert", format, EnumSet.of(events[0], events), "test", Instant.now());
+        WebhookEndpoint endpoint = new WebhookEndpoint("test receiver", secrets.store("https://" + HOST + ":"
+                + receiver.getAddress().getPort() + "/hook?source=certalert"), format, EnumSet.of(events[0], events), "test", Instant.now());
         String secret = secrets.generate();
         endpoint.secret(secrets.store(secret), secret.substring(0, 12), Instant.now());
         endpoint = endpoints.save(endpoint);
@@ -303,9 +303,18 @@ class WebhookDeliveryTest {
         assertThat(stored.encrypted()).isTrue();
         assertThat(stored.value()).doesNotContain(secret).startsWith("v1:");
 
-        WebhookEndpoint endpoint = new WebhookEndpoint("x", "https://h/x", WebhookEndpoint.Format.JSON,
+        String url = "https://hooks.slack.com/services/T000/B000/XXXXXXXXXXXXXXXXXXXXXXXX";
+        WebhookSecrets.Stored storedUrl = sealed.store(url);
+        assertThat(storedUrl.encrypted()).isTrue();
+        assertThat(storedUrl.value()).doesNotContain("XXXXXXXX").doesNotContain("services");
+        WebhookEndpoint endpoint = new WebhookEndpoint("x", storedUrl, WebhookEndpoint.Format.SLACK,
                 EnumSet.of(WebhookEvent.JOB_FAILED), "t", Instant.now());
         endpoint.secret(stored, secret.substring(0, 12), Instant.now());
         assertThat(sealed.reveal(endpoint)).isEqualTo(secret);
+        assertThat(sealed.revealUrl(endpoint)).isEqualTo(url);
+        // What anybody but an administrator sees, and what the audit trail keeps.
+        assertThat(WebhookSecrets.redact(url)).isEqualTo("https://hooks.slack.com/[redacted]");
+        assertThat(WebhookSecrets.redact("https://hooks.example.org:8443/x?token=abc")).isEqualTo("https://hooks.example.org:8443/[redacted]");
+        assertThat(WebhookSecrets.redact("https://hooks.example.org")).isEqualTo("https://hooks.example.org/");
     }
 }

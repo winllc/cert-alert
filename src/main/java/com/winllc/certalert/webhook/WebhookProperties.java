@@ -40,6 +40,13 @@ public class WebhookProperties {
 
     private Duration readTimeout = Duration.ofSeconds(10);
 
+    /**
+     * The most one delivery may take, all of it - connecting, the TLS handshake, sending the
+     * body and reading the answer. At this the connection is closed, whatever it is waiting
+     * on, so one slow receiver cannot hold the sender (and its lock) for longer.
+     */
+    private Duration deliveryTimeout = Duration.ofSeconds(30);
+
     /** How often waiting deliveries are looked at. */
     private Duration pollInterval = Duration.ofSeconds(30);
 
@@ -104,6 +111,14 @@ public class WebhookProperties {
 
     public void setReadTimeout(Duration readTimeout) {
         this.readTimeout = readTimeout;
+    }
+
+    public Duration getDeliveryTimeout() {
+        return deliveryTimeout;
+    }
+
+    public void setDeliveryTimeout(Duration deliveryTimeout) {
+        this.deliveryTimeout = deliveryTimeout;
     }
 
     public Duration getPollInterval() {
