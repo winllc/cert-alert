@@ -50,6 +50,19 @@ public class WebhookProperties {
     /** How often waiting deliveries are looked at. */
     private Duration pollInterval = Duration.ofSeconds(30);
 
+    /**
+     * The most one pass of the sender runs for: no new delivery is tried after it, and what
+     * was not tried waits, unclaimed, for the next pass. A delivery under way runs on to its
+     * own {@code delivery-timeout}.
+     */
+    private Duration runBudget = Duration.ofSeconds(40);
+
+    /** The most deliveries one pass tries to any one endpoint. */
+    private int endpointTriesPerRun = 10;
+
+    /** The most time one pass spends on any one endpoint; no new try to it starts after. */
+    private Duration endpointBudget = Duration.ofSeconds(20);
+
     /** Whether deliveries are sent in the background. Tests switch it off and send explicitly. */
     private boolean background = true;
 
@@ -123,6 +136,30 @@ public class WebhookProperties {
 
     public Duration getPollInterval() {
         return pollInterval;
+    }
+
+    public Duration getRunBudget() {
+        return runBudget;
+    }
+
+    public void setRunBudget(Duration runBudget) {
+        this.runBudget = runBudget;
+    }
+
+    public int getEndpointTriesPerRun() {
+        return endpointTriesPerRun;
+    }
+
+    public void setEndpointTriesPerRun(int endpointTriesPerRun) {
+        this.endpointTriesPerRun = endpointTriesPerRun;
+    }
+
+    public Duration getEndpointBudget() {
+        return endpointBudget;
+    }
+
+    public void setEndpointBudget(Duration endpointBudget) {
+        this.endpointBudget = endpointBudget;
     }
 
     public void setPollInterval(Duration pollInterval) {

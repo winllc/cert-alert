@@ -40,6 +40,13 @@ import org.springframework.transaction.support.TransactionTemplate;
  * A 2xx is delivered; anything else - a refusal, a redirect, a 5xx, a timeout - is tried
  * again.
  *
+ * <p>A pass is bounded, so one dead receiver cannot hold the lock, and everybody else's
+ * deliveries, for hours: no try starts after {@code run-budget}; an endpoint gets at most
+ * {@code endpoint-tries-per-run} tries and {@code endpoint-budget} of the pass; and a try the
+ * endpoint does not answer at all (no connection, no TLS, no answer in time) puts its other
+ * waiting deliveries back to the same retry time, and the endpoint is left alone for the rest
+ * of the pass. What is not tried stays waiting, unclaimed, for the next pass.
+ *
  * <p>A replica started without {@code cert-alert.webhooks.secret-key} leaves the deliveries
  * of endpoints whose URL or secret is encrypted alone - not claimed, no attempt counted - for
  * a replica that has the key, and says so once a pass.
@@ -114,13 +121,27 @@ public class WebhookOutbox {
                                 + "their deliveries are left for a replica that has it", encrypted);
                     }
                 }
+                Pass pass = new Pass(properties);
                 int sent = 0;
+                pages:
                 while (true) {
-                    List<Long> due = deliveries.findDue(
-                            WebhookDelivery.State.PENDING, Instant.now(clock), keyed, PageRequest.of(0, BATCH));
+                    List<Object[]> due = deliveries.findDue(WebhookDelivery.State.PENDING, Instant.now(clock), keyed,
+                            pass.excluded(), PageRequest.of(0, BATCH));
                     int tried = 0;
-                    for (Long id : due) {
+                    for (Object[] row : due) {
+                        Long id = (Long) row[0];
+                        Long endpointId = (Long) row[1];
+                        if (pass.overBudget()) {
+                            log.info("Webhook pass stopped at its run-budget ({}); what is left waits for the next pass",
+                                    properties.getRunBudget());
+                            break pages;
+                        }
+                        if (pass.excludes(endpointId)) {
+                            continue;
+                        }
+                        long started = System.nanoTime();
                         Outcome outcome = attempt(id, keyed);
+                        pass.spent(endpointId, outcome, System.nanoTime() - started);
                         if (outcome != Outcome.SKIPPED) {
                             tried++;
                         }
@@ -204,7 +225,47 @@ public class WebhookOutbox {
         }
     }
 
-    private enum Outcome { SENT, NOT_SENT, SKIPPED }
+    /** SENT; ANSWERED, but not with a 2xx (or failed before a post); UNANSWERED; SKIPPED, never claimed. */
+    private enum Outcome { SENT, NOT_SENT, UNANSWERED, SKIPPED }
+
+    /** What one pass has spent, in all and on each endpoint. */
+    private static final class Pass {
+
+        private final long startedAt = System.nanoTime();
+        private final long budget;
+        private final long endpointBudget;
+        private final int endpointTries;
+        private final Map<Long, long[]> spent = new java.util.HashMap<>();
+        private final java.util.Set<Long> excluded = new java.util.HashSet<>(List.of(-1L));
+
+        Pass(WebhookProperties properties) {
+            this.budget = properties.getRunBudget().toNanos();
+            this.endpointBudget = properties.getEndpointBudget().toNanos();
+            this.endpointTries = properties.getEndpointTriesPerRun();
+        }
+
+        boolean overBudget() {
+            return System.nanoTime() - startedAt >= budget;
+        }
+
+        boolean excludes(Long endpointId) {
+            return excluded.contains(endpointId);
+        }
+
+        java.util.Collection<Long> excluded() {
+            return List.copyOf(excluded);
+        }
+
+        void spent(Long endpointId, Outcome outcome, long nanos) {
+            long[] used = spent.computeIfAbsent(endpointId, id -> new long[2]);
+            used[0]++;
+            used[1] += nanos;
+            if (outcome == Outcome.UNANSWERED || outcome == Outcome.SKIPPED
+                    || used[0] >= endpointTries || used[1] >= endpointBudget) {
+                excluded.add(endpointId);
+            }
+        }
+    }
 
     /**
      * One delivery, if it is still waiting: posted, and what became of it recorded. Without
@@ -217,25 +278,25 @@ public class WebhookOutbox {
                 .orElse(false)))) {
             return Outcome.SKIPPED;
         }
-        return attempt(id) ? Outcome.SENT : Outcome.NOT_SENT;
+        return attempt(id);
     }
 
     /** One delivery, if it is still waiting: posted, and what became of it recorded. */
-    private boolean attempt(Long id) {
+    private Outcome attempt(Long id) {
         Instant now = Instant.now(clock);
         Integer claimed = independent.execute(status -> deliveries.claim(
                 id, WebhookDelivery.State.PENDING, WebhookDelivery.State.SENDING, now.plus(CLAIM_LEASE)));
         if (claimed == null || claimed == 0) {
-            return false;
+            return Outcome.NOT_SENT;
         }
         WebhookDelivery delivery = deliveries.findById(id).orElse(null);
         WebhookEndpoint endpoint = delivery == null ? null : endpoints.findById(delivery.getEndpointId()).orElse(null);
         if (delivery == null) {
-            return false;
+            return Outcome.NOT_SENT;
         }
         if (endpoint == null) {
             record(id, now, null, "The webhook was deleted", true);
-            return false;
+            return Outcome.NOT_SENT;
         }
         Integer status = null;
         String error;
@@ -256,31 +317,52 @@ public class WebhookOutbox {
             status = response.status();
             if (response.successful()) {
                 independent.executeWithoutResult(tx -> deliveries.findById(id).ifPresent(row -> row.delivered(response.status(), now)));
-                return true;
+                return Outcome.SENT;
             }
             error = "The receiver answered " + response.status();
         } catch (WebhookAddressGuard.RefusedDestinationException e) {
-            error = "Refused: " + e.getMessage();
-        } catch (IOException | RuntimeException e) {
+            return unanswered(id, delivery.getEndpointId(), now, "Refused: " + e.getMessage());
+        } catch (IOException e) {
+            // No connection, no TLS, no answer in time, or the watchdog closed it.
+            return unanswered(id, delivery.getEndpointId(), now, describe(e));
+        } catch (RuntimeException e) {
             error = describe(e);
         }
         record(id, now, status, error, false);
-        return false;
+        return Outcome.NOT_SENT;
     }
 
-    private void record(Long id, Instant now, Integer status, String error, boolean giveUp) {
-        independent.executeWithoutResult(tx -> deliveries.findById(id).ifPresent(row -> {
+    /**
+     * A try the endpoint did not answer: recorded, and the endpoint's other waiting deliveries
+     * put back to the same time, in one update, so a dead receiver costs one try a backoff step.
+     */
+    private Outcome unanswered(Long id, Long endpointId, Instant now, String error) {
+        Instant retried = record(id, now, null, error, false);
+        Instant retryAt = retried != null ? retried : now.plus(properties.getRetryInitial());
+        Integer postponed = independent.execute(tx ->
+                deliveries.postponeEndpoint(endpointId, WebhookDelivery.State.PENDING, retryAt));
+        if (postponed != null && postponed > 0) {
+            log.warn("Webhook endpoint {} did not answer; its {} other waiting deliveries wait until {} too",
+                    endpointId, postponed, retryAt);
+        }
+        return Outcome.UNANSWERED;
+    }
+
+    /** When the delivery will be tried again, or null where it was given up on. */
+    private Instant record(Long id, Instant now, Integer status, String error, boolean giveUp) {
+        return independent.execute(tx -> deliveries.findById(id).map(row -> {
             if (giveUp || !now.isBefore(row.getCreatedAt().plus(properties.getGiveUpAfter()))) {
                 row.gaveUp(status, error);
                 log.error("Gave up on webhook delivery {} ({}) to endpoint {} after {} attempt(s): {}",
                         row.getId(), row.getEventType(), row.getEndpointId(), row.getAttempts(), oneLine(error));
-                return;
+                return (Instant) null;
             }
             Instant retryAt = now.plus(backoff(row.getAttempts() + 1, properties.getRetryInitial(), properties.getRetryMax()));
             row.failed(status, error, retryAt);
             log.warn("Webhook delivery {} ({}) to endpoint {} failed (attempt {}); trying again at {}: {}",
                     row.getId(), row.getEventType(), row.getEndpointId(), row.getAttempts(), retryAt, oneLine(error));
-        }));
+            return retryAt;
+        }).orElse(null));
     }
 
     /** {@code initial} after the first failure, doubling, never more than {@code max}. */

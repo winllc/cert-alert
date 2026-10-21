@@ -644,6 +644,11 @@ cert-alert:
     # All of one delivery, handshake and slow receivers included; the connection is closed at it.
     delivery-timeout: 30s
     poll-interval: 30s
+    # One pass starts no try after run-budget, and gives any one endpoint at most
+    # endpoint-tries-per-run tries and endpoint-budget of its time; the rest waits, unclaimed.
+    run-budget: 40s
+    endpoint-tries-per-run: 10
+    endpoint-budget: 20s
     retry-initial: 1m
     retry-max: 1h
     give-up-after: 1d

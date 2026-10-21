@@ -2754,6 +2754,15 @@ doubling to `retry-max` (1 hour), until it is `give-up-after` (a day) old. The I
 page shows each endpoint's delivery log; delivered and failed rows are kept for `keep` (14
 days).
 
+**A dead receiver holds up nobody else.** Each pass of the sender is bounded: no try starts
+after `cert-alert.webhooks.run-budget` (40 seconds); one endpoint gets at most
+`endpoint-tries-per-run` (10) tries and `endpoint-budget` (20 seconds) of a pass; and a try an
+endpoint does not answer at all (no connection, no TLS handshake, no answer before the timeout or
+the watchdog) puts that endpoint's other waiting deliveries back to the same retry time, in one
+update, and the endpoint is left alone for the rest of the pass - so a blackholed receiver costs
+one try per backoff step, however long its backlog. What a pass does not reach stays waiting,
+unclaimed, for the next one (`poll-interval`, 30 seconds).
+
 **Where it may go.** https only; no credentials in the URL. Before saving, and again at every
 send, the host is resolved and every address it resolves to is checked: never loopback,
 link-local (169.254.0.0/16 and fe80::/10, so never a cloud metadata service), the other

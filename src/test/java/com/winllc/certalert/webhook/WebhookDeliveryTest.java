@@ -383,6 +383,79 @@ class WebhookDeliveryTest {
         assertThat(sent.getAttempts()).isOne();
     }
 
+    /**
+     * A receiver that never answers, with a backlog older than everybody else's, costs one try
+     * a pass: its other deliveries are put back with it, and the live endpoint's newer ones
+     * are all delivered within the run budget.
+     */
+    @Test
+    void aDeadReceiverCostsOneTryAndDoesNotHoldUpTheRest() throws Exception {
+        WebhookProperties bounded = new WebhookProperties();
+        bounded.setConnectTimeout(java.time.Duration.ofSeconds(1));
+        bounded.setReadTimeout(java.time.Duration.ofSeconds(1));
+        bounded.setDeliveryTimeout(java.time.Duration.ofSeconds(1));
+        bounded.setRunBudget(java.time.Duration.ofSeconds(15));
+        try (java.net.ServerSocket blackhole = new java.net.ServerSocket(0, 50, InetAddress.getLoopbackAddress())) {
+            WebhookEndpoint dead = new WebhookEndpoint("blackhole", secrets.store("https://" + HOST + ":"
+                    + blackhole.getLocalPort() + "/hook"), WebhookEndpoint.Format.JSON,
+                    EnumSet.of(WebhookEvent.JOB_FAILED), "test", Instant.now());
+            String deadSecret = secrets.generate();
+            dead.secret(secrets.store(deadSecret), deadSecret.substring(0, 12), Instant.now());
+            dead = endpoints.save(dead);
+            created.add(dead.getId());
+            Endpoint live = endpoint(WebhookEndpoint.Format.JSON, WebhookEvent.JOB_COMPLETED);
+
+            Instant anHourAgo = Instant.now().minusSeconds(3600);
+            List<WebhookDelivery> backlog = new ArrayList<>();
+            for (int i = 0; i < 200; i++) {
+                backlog.add(new WebhookDelivery(dead.getId(), "dead-" + i + "-" + System.nanoTime(),
+                        WebhookEvent.JOB_FAILED, "{\"n\":" + i + "}", anHourAgo.plusMillis(i)));
+            }
+            for (int i = 0; i < 5; i++) {
+                backlog.add(new WebhookDelivery(live.endpoint().getId(), "live-" + i + "-" + System.nanoTime(),
+                        WebhookEvent.JOB_COMPLETED, "{\"n\":" + i + "}", Instant.now()));
+            }
+            deliveries.saveAll(backlog);
+
+            AtomicInteger deadTries = new AtomicInteger();
+            int deadPort = blackhole.getLocalPort();
+            WebhookTransport counting = new WebhookTransport(bounded, clientTls.getSocketFactory()) {
+                @Override
+                public Response post(URI uri, InetAddress address, Map<String, String> headers, byte[] body) throws IOException {
+                    if (uri.getPort() == deadPort) {
+                        deadTries.incrementAndGet();
+                    }
+                    return super.post(uri, address, headers, body);
+                }
+            };
+            WebhookOutbox outbox = new WebhookOutbox(deliveries, endpoints, resolvingTo("127.0.0.1"), counting, secrets,
+                    bounded, locks, clock, transactions);
+            long started = System.nanoTime();
+            outbox.deliverDue();
+            java.time.Duration took = java.time.Duration.ofNanos(System.nanoTime() - started);
+
+            assertThat(took).isLessThan(bounded.getRunBudget());
+            assertThat(deadTries).hasValue(1);
+            assertThat(received).hasSize(5);
+            assertThat(deliveries.findByEndpointIdOrderByCreatedAtDesc(live.endpoint().getId(),
+                    org.springframework.data.domain.PageRequest.of(0, 50)))
+                    .hasSize(5).allSatisfy(d -> assertThat(d.getState()).isEqualTo(WebhookDelivery.State.DELIVERED));
+
+            List<WebhookDelivery> deadRows = deliveries.findByEndpointIdOrderByCreatedAtDesc(dead.getId(),
+                    org.springframework.data.domain.PageRequest.of(0, 500));
+            assertThat(deadRows).hasSize(200).allSatisfy(d -> assertThat(d.getState()).isEqualTo(WebhookDelivery.State.PENDING));
+            WebhookDelivery tried = deadRows.stream().filter(d -> d.getAttempts() == 1).findFirst().orElseThrow();
+            assertThat(tried.getNextAttemptAt()).isAfter(Instant.now());
+            // The other 199: not tried, not claimed, and waiting until the same time.
+            assertThat(deadRows).filteredOn(d -> d.getAttempts() == 0).hasSize(199)
+                    .allSatisfy(d -> assertThat(d.getNextAttemptAt()).isEqualTo(tried.getNextAttemptAt()));
+
+            // The next pass, before that time: nothing more is tried.
+            outbox.deliverDue();
+            assertThat(deadTries).hasValue(1);
+        }
+    }
+
     @Test
     void secretsAreEncryptedWhereAKeyIsConfigured() {
         WebhookProperties keyed = new WebhookProperties();

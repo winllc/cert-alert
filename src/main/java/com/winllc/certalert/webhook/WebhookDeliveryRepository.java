@@ -11,23 +11,40 @@ import org.springframework.data.repository.query.Param;
 public interface WebhookDeliveryRepository extends JpaRepository<WebhookDelivery, Long> {
 
     /**
-     * What is waiting and due, the longest-waiting first. A replica without the key
-     * ({@code keyed} false) is not given deliveries to endpoints whose URL or secret is
-     * encrypted: it could not send them, and one that has the key will.
+     * What is waiting and due, the longest-waiting first: each delivery's id and endpoint's id,
+     * leaving out the endpoints in {@code excluded} (never empty: pass {@code -1} for none). A
+     * replica without the key ({@code keyed} false) is not given deliveries to endpoints whose
+     * URL or secret is encrypted: it could not send them, and one that has the key will.
      */
     @Query("""
-            select d.id from WebhookDelivery d
+            select d.id, d.endpointId from WebhookDelivery d
             where d.state = :pending and d.nextAttemptAt <= :now
+              and d.endpointId not in :excluded
               and (:keyed = true or not exists (
                 select e.id from WebhookEndpoint e
                 where e.id = d.endpointId and (e.urlEncrypted = true or e.secretEncrypted = true)))
             order by d.nextAttemptAt, d.id
             """)
-    List<Long> findDue(
+    List<Object[]> findDue(
             @Param("pending") WebhookDelivery.State pending,
             @Param("now") Instant now,
             @Param("keyed") boolean keyed,
+            @Param("excluded") java.util.Collection<Long> excluded,
             Pageable pageable);
+
+    /**
+     * Puts an endpoint's other waiting deliveries back to {@code retryAt}, where they were due
+     * sooner: what follows a try that the endpoint did not answer at all.
+     */
+    @Modifying
+    @Query("""
+            update WebhookDelivery d set d.nextAttemptAt = :retryAt
+            where d.endpointId = :endpointId and d.state = :pending and d.nextAttemptAt < :retryAt
+            """)
+    int postponeEndpoint(
+            @Param("endpointId") Long endpointId,
+            @Param("pending") WebhookDelivery.State pending,
+            @Param("retryAt") Instant retryAt);
 
     /** Endpoints whose URL or secret is encrypted and that have deliveries waiting and due. */
     @Query("""
