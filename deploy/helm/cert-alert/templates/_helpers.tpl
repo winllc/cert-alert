@@ -245,6 +245,12 @@ not set at all. Takes (dict "root" $ "inline" <value> "existing" <secret name>
 {{- fail "replicaCount above 1 needs sessions in the database: leave session.store empty (jdbc)." -}}
 {{- end -}}
 {{- end -}}
+{{- if and (or .Values.sso.oidc.enabled .Values.sso.saml.enabled) (not (regexMatch "^https?://[^/{}?#]+(/[^{}?#]*)?$" (toString .Values.sso.publicUrl))) -}}
+{{- fail "Single sign-on needs sso.publicUrl: the absolute address people reach CertAlert at, e.g. https://certalert.example.gov. The providers' addresses are built from it, never from the request's headers." -}}
+{{- end -}}
+{{- if and .Values.sso.saml.enabled (contains "{" (toString .Values.sso.saml.entityId)) -}}
+{{- fail "sso.saml.entityId must be an absolute URI, not a template: leave it empty for <publicUrl>/saml2/service-provider-metadata/saml." -}}
+{{- end -}}
 {{- if and .Values.sso.oidc.enabled (not (and .Values.sso.oidc.issuerUri .Values.sso.oidc.clientId)) -}}
 {{- fail "sso.oidc.enabled=true needs sso.oidc.issuerUri and sso.oidc.clientId." -}}
 {{- end -}}

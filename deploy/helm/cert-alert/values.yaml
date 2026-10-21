@@ -189,9 +189,9 @@ security:
   # administrator can - the administration page, the audit log, the license - and changes
   # nothing. Somebody who is both is an administrator.
   auditorIdentifiers: []
-  # Roles from groups: a directory group's DN (from memberOf on the person's entry) or a
-  # group a single sign-on provider names (its groups claim or attribute - a name, a DN or
-  # an object id). Nothing is granted by a group that is not listed here.
+  # Roles from directory groups: a group's DN, from memberOf on the person's entry. Only the
+  # directory's groups are matched here; a single sign-on provider's groups have lists of
+  # their own (sso.oidc.adminGroups, ...). Nothing is granted by a group not listed.
   groups:
     # CERT_ALERT_SECURITY_GROUPS_ADMIN_<n>. Members are administrators.
     admin: []
@@ -210,12 +210,17 @@ security:
 # security.* as for anybody else. See the README's "Single sign-on" for Entra ID, Okta and
 # ADFS examples.
 sso:
+  # CERT_ALERT_SSO_PUBLIC_URL. Required when either provider is enabled: the address people
+  # reach CertAlert at, e.g. https://certalert.example.gov. The OIDC redirect URI, the SAML
+  # entity id and assertion consumer are built from it - never from the request's Host or
+  # Forwarded headers, which a client can set.
+  publicUrl: ""
   oidc:
     # CERT_ALERT_SSO_OIDC_ENABLED. OpenID Connect, authorization code flow with PKCE.
     enabled: false
     displayName: "Single sign-on"
     # CERT_ALERT_SSO_OIDC_ISSUER_URI, e.g. https://login.microsoftonline.com/<tenant>/v2.0.
-    # Register {your URL}/login/oauth2/code/oidc as the redirect URI.
+    # Register <publicUrl>/login/oauth2/code/oidc as the redirect URI.
     issuerUri: ""
     clientId: ""
     # CERT_ALERT_SSO_OIDC_CLIENT_SECRET. Empty for a public client (PKCE alone). Inline, or
@@ -228,16 +233,21 @@ sso:
     # The claim naming the person, and whether it is their uid or their entry's DN.
     usernameClaim: ""
     match: ""
-    # The claim listing their groups (security.groups decides what they grant).
+    # The claim listing their groups, and the groups in it that make an administrator or an
+    # auditor (CERT_ALERT_SSO_OIDC_ADMIN_GROUPS_<n> / _AUDITOR_GROUPS_<n>). Only this
+    # provider's groups are matched against these lists.
     groupsClaim: ""
+    adminGroups: []
+    auditorGroups: []
     # Default RS256.
     jwsAlgorithm: ""
     # Default 2m.
     clockSkew: ""
   saml:
     # CERT_ALERT_SSO_SAML_ENABLED. A SAML 2.0 service provider. Its metadata is served at
-    # {your URL}/saml2/service-provider-metadata/saml; the assertion consumer is
-    # {your URL}/login/saml2/sso/saml.
+    # <publicUrl>/saml2/service-provider-metadata/saml; the assertion consumer is
+    # <publicUrl>/login/saml2/sso/saml. Needs HTTPS: the sign-in is bound to the browser by a
+    # Secure, SameSite=None cookie.
     enabled: false
     displayName: "Single sign-on"
     # The identity provider's metadata: an https:// URL, or metadataConfigMap for a copy.
@@ -246,7 +256,8 @@ sso:
     # identity provider this cluster cannot reach.
     metadataConfigMap: ""
     metadataConfigMapKey: idp-metadata.xml
-    # This service provider's entity id. Default {baseUrl}/saml2/service-provider-metadata/saml.
+    # This service provider's entity id: an absolute URI. Default
+    # <publicUrl>/saml2/service-provider-metadata/saml. A template ({baseUrl}) is refused.
     entityId: ""
     # A Secret with a PEM private key (tls.key) and certificate (tls.crt) to sign
     # authentication requests with, for an identity provider that wants them signed.
@@ -255,6 +266,8 @@ sso:
     usernameAttribute: ""
     match: ""
     groupsAttribute: ""
+    adminGroups: []
+    auditorGroups: []
     clockSkew: ""
 
 # ---------------------------------------------------------------------------------------

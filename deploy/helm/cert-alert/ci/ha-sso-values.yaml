@@ -18,9 +18,10 @@ security:
   adminIdentifiers: [pki-admin]
   auditorIdentifiers: ["uid=inspector,ou=people,dc=example,dc=gov"]
   groups:
-    admin: ["cn=CertAlert Admins,ou=groups,dc=example,dc=gov", "5b0f1c2e-0000-4000-8000-00000000a11d"]
+    admin: ["cn=CertAlert Admins,ou=groups,dc=example,dc=gov"]
     auditor: ["cn=CertAlert Auditors,ou=groups,dc=example,dc=gov"]
 sso:
+  publicUrl: https://certalert.example.gov
   oidc:
     enabled: true
     displayName: Sign in with Entra ID
@@ -30,6 +31,7 @@ sso:
     usernameClaim: preferred_username
     match: UID
     groupsClaim: groups
+    adminGroups: ["5b0f1c2e-0000-4000-8000-00000000a11d"]
   saml:
     enabled: true
     displayName: Sign in with ADFS
@@ -38,3 +40,4 @@ sso:
     usernameAttribute: http://schemas.xmlsoap.org/claims/CommonName
     match: UID
     groupsAttribute: http://schemas.microsoft.com/ws/2008/06/identity/claims/groups
+    auditorGroups: ["CONTOSO\\CertAlert Auditors"]

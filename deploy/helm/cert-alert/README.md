@@ -108,18 +108,22 @@ The license screen shows the installation id; after the first sign-in it is also
 | `security.ldap.userSearchFilter` | `""` | `CERT_ALERT_SECURITY_LDAP_USER_SEARCH_FILTER` | e.g. `(uid={0})` |
 | `security.ldap.userDnPatterns` | `[]` | `CERT_ALERT_SECURITY_LDAP_USER_DN_PATTERNS` | e.g. `[uid={0},ou=people]` |
 | `security.auditorIdentifiers` | `[]` | `CERT_ALERT_SECURITY_AUDITOR_IDENTIFIERS_<n>` | uids or entry DNs of read-only auditors |
-| `security.groups.admin` / `.auditor` | `[]` | `CERT_ALERT_SECURITY_GROUPS_ADMIN_<n>` / `_AUDITOR_<n>` | Directory group DNs (`memberOf`) or single sign-on groups granting the role; nothing else grants it |
+| `security.groups.admin` / `.auditor` | `[]` | `CERT_ALERT_SECURITY_GROUPS_ADMIN_<n>` / `_AUDITOR_<n>` | Directory group DNs (`memberOf`) granting the role |
+| `sso.publicUrl` | `""` | `CERT_ALERT_SSO_PUBLIC_URL` | Required with single sign-on: the address people reach CertAlert at; the providers' addresses are built from it, never from request headers |
 | `security.groups.directory` / `.memberOfAttribute` | `null` / `""` | `CERT_ALERT_SECURITY_GROUPS_DIRECTORY` / `_MEMBER_OF_ATTRIBUTE` | Read `memberOf` at sign-in (default true, `memberOf`) |
 | `sso.oidc.enabled` | `false` | `CERT_ALERT_SSO_OIDC_ENABLED` | OpenID Connect sign-in (authorization code with PKCE) |
 | `sso.oidc.issuerUri` / `.clientId` | `""` | `CERT_ALERT_SSO_OIDC_ISSUER_URI` / `_CLIENT_ID` | Required when enabled. Redirect URI: `https://<host>/login/oauth2/code/oidc` |
 | `sso.oidc.clientSecret` | `""` | `CERT_ALERT_SSO_OIDC_CLIENT_SECRET` | Or `sso.oidc.existingSecret` + `.existingSecretKey` (`oidc-client-secret`); empty for a public client |
 | `sso.oidc.usernameClaim` / `.match` / `.groupsClaim` | `""` | `CERT_ALERT_SSO_OIDC_USERNAME_CLAIM` / `_MATCH` / `_GROUPS_CLAIM` | Default `preferred_username`, `UID` (or `DN`), none |
+| `sso.oidc.adminGroups` / `.auditorGroups` | `[]` | `CERT_ALERT_SSO_OIDC_ADMIN_GROUPS_<n>` / `_AUDITOR_GROUPS_<n>` | This provider's groups granting the role; only its groups are matched |
 | `sso.oidc.displayName`, `.scopes`, `.jwsAlgorithm`, `.clockSkew` | | `CERT_ALERT_SSO_OIDC_*` | |
 | `sso.saml.enabled` | `false` | `CERT_ALERT_SSO_SAML_ENABLED` | SAML 2.0 sign-in. SP metadata: `https://<host>/saml2/service-provider-metadata/saml` |
 | `sso.saml.metadataUrl` or `.metadataConfigMap` (+ `.metadataConfigMapKey`) | `""` | `CERT_ALERT_SSO_SAML_METADATA_LOCATION` | The identity provider's metadata, from a URL or a ConfigMap of your own |
 | `sso.saml.signingSecret` | `""` | `CERT_ALERT_SSO_SAML_SIGNING_*_LOCATION` | A Secret with `tls.key` (PKCS#8 PEM) and `tls.crt` to sign requests with |
 | `sso.saml.usernameAttribute` / `.match` / `.groupsAttribute` | `""` | `CERT_ALERT_SSO_SAML_*` | Default the NameID, `UID`, none |
-| `sso.saml.displayName`, `.entityId`, `.clockSkew` | | `CERT_ALERT_SSO_SAML_*` | |
+| `sso.saml.adminGroups` / `.auditorGroups` | `[]` | `CERT_ALERT_SSO_SAML_ADMIN_GROUPS_<n>` / `_AUDITOR_GROUPS_<n>` | As for OIDC |
+| `sso.saml.entityId` | `""` | `CERT_ALERT_SSO_SAML_ENTITY_ID` | An absolute URI; empty: `<publicUrl>/saml2/service-provider-metadata/saml` |
+| `sso.saml.displayName`, `.clockSkew` | | `CERT_ALERT_SSO_SAML_*` | |
 | `session.store` | `""` | `CERT_ALERT_SESSION_STORE` | `jdbc` (the default here): sessions in the database; `memory`: in the pod |
 
 `null` and `""` mean "not passed": the application default applies.

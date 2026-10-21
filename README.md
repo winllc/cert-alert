@@ -1012,8 +1012,27 @@ finds one: as a **uid** (`match: UID`, the default) or as the **DN** of the entr
 never as a name: an `email` claim is not used, and a uid that looks like an address must be
 the entry's actual uid. Somebody the directory does not hold is refused: the provider says
 who somebody is, the directory says whether they are somebody this application serves. Roles
-come from the lists and [groups](#roles-from-groups) as for anybody else; a provider's groups
-count only where `cert-alert.security.groups` names them.
+come from the lists and [directory groups](#roles-from-groups) as for anybody else. A
+provider's groups grant a role only through that provider's own `admin-groups` and
+`auditor-groups`; they are never matched against the directory's group list, so a group
+somebody can create at the provider, named like a directory group's DN, grants nothing.
+
+**Which claim to match on.** Prefer one the person cannot change: an immutable identifier the
+provider issues from the directory (an on-premises `samAccountName`, `uid` or DN synchronised
+into the provider, an `employeeID`). `preferred_username` and similar are often editable by
+the person or a tenant administrator, and are only as trustworthy as the provider's rules
+for changing them.
+
+**The public address.** `cert-alert.sso.public-url` (`CERT_ALERT_SSO_PUBLIC_URL`) is required
+when either provider is enabled. The OIDC redirect URI, the SAML entity id (unless set, as an
+absolute URI) and the assertion consumer are built from it, never from the request: a `Host`,
+`Forwarded` or `X-Forwarded-Host` header a client sets cannot change what address a response
+must be addressed to, and the application refuses to start with a missing or templated one.
+With `SERVER_FORWARD_HEADERS_STRATEGY=framework` (which the chart sets behind an ingress) the
+application believes only `X-Forwarded-Proto`, `-Port` and `-For`; `Forwarded`,
+`X-Forwarded-Host` and `X-Forwarded-Prefix` are ignored. Have the proxy overwrite
+`X-Forwarded-For` and `X-Forwarded-Proto` with its own values rather than append to a
+client's.
 
 **What is checked.**
 
@@ -1028,7 +1047,11 @@ count only where `cert-alert.security.groups` names them.
   destination this service provider; the conditions in date, with `clock-skew` allowed. Every
   response must answer (`InResponseTo`) a request this application sent and has not seen
   answered: requests wait in the database (`saml_authn_request`) for ten minutes and are used
-  once, so a replayed or unsolicited (identity-provider-initiated) response is refused.
+  once, so a replayed or unsolicited (identity-provider-initiated) response is refused. The
+  request is bound to the browser that started it by a cookie (`CERTALERT_SAML_BINDING`:
+  HttpOnly, Secure, SameSite=None, sent only to the assertion consumer), so a response
+  obtained for one account cannot be posted from somebody else's browser to sign it in.
+  SAML therefore needs HTTPS.
 
 Sign-ins and refusals are recorded as `auth.login` with method `oidc` or `saml`, and the
 refusal's reason. Signing out ends the session here; it does not sign the person out of the
@@ -1041,6 +1064,7 @@ with, so the agreement is carried in the stored request to the session the answe
 ```yaml
 cert-alert:
   sso:
+    public-url: https://certalert.example.gov
     oidc:
       enabled: true
       display-name: Sign in with Entra ID
@@ -1051,18 +1075,22 @@ cert-alert:
       username-claim: preferred_username
       match: UID                       # or DN
       groups-claim: groups
+      admin-groups: [5b0f1c2e-1d0e-4c8b-9a77-2f2a6c0d9e11]   # this provider's groups only
+      auditor-groups: []
       jws-algorithm: RS256
       clock-skew: 2m
     saml:
       enabled: true
       display-name: Sign in with ADFS
       metadata-location: https://adfs.example.gov/FederationMetadata/2007-06/FederationMetadata.xml
-      entity-id: "{baseUrl}/saml2/service-provider-metadata/{registrationId}"
+      entity-id: ""                    # empty: <public-url>/saml2/service-provider-metadata/saml
       signing-key-location: file:/etc/cert-alert/saml/signing.key          # optional
       signing-certificate-location: file:/etc/cert-alert/saml/signing.crt
       username-attribute: ""           # empty: the NameID
       match: UID
       groups-attribute: http://schemas.microsoft.com/ws/2008/06/identity/claims/groups
+      admin-groups: []
+      auditor-groups: [CONTOSO\CertAlert Auditors]
       clock-skew: 2m
 ```
 
@@ -1071,12 +1099,9 @@ Every setting has an environment variable (`CERT_ALERT_SSO_OIDC_ISSUER_URI`, ...
 
 | | OIDC | SAML |
 |---|---|---|
-| Redirect URI / assertion consumer | `https://<host>/login/oauth2/code/oidc` | `https://<host>/login/saml2/sso/saml` (HTTP-POST) |
-| Service provider metadata | | `https://<host>/saml2/service-provider-metadata/saml` |
-| Entity id | | `https://<host>/saml2/service-provider-metadata/saml` unless `entity-id` says otherwise |
-
-Behind a proxy that terminates TLS, set `SERVER_FORWARD_HEADERS_STRATEGY=framework` so these
-are built with the public `https://` address the provider expects.
+| Redirect URI / assertion consumer | `<public-url>/login/oauth2/code/oidc` | `<public-url>/login/saml2/sso/saml` (HTTP-POST) |
+| Service provider metadata | | `<public-url>/saml2/service-provider-metadata/saml` |
+| Entity id | | `<public-url>/saml2/service-provider-metadata/saml` unless `entity-id` says otherwise |
 
 #### Microsoft Entra ID (OIDC)
 
@@ -1085,7 +1110,7 @@ are built with the public `https://` address the provider expects.
    directory (tenant) id; create a client secret.
 2. Token configuration → add optional claim `preferred_username`; to use groups, add the
    groups claim (security groups). Entra ID sends group **object ids**, so list those in
-   `cert-alert.security.groups`.
+   `cert-alert.sso.oidc.admin-groups` / `auditor-groups`.
 3. `issuer-uri: https://login.microsoftonline.com/<tenant-id>/v2.0`. `preferred_username`
    is the user principal name: use it with `match: UID` only where your directory's uids are
    the UPNs. Otherwise add a claim carrying the on-premises `samAccountName` or DN (directory
@@ -1100,7 +1125,7 @@ are built with the public `https://` address the provider expects.
 3. For a uid, add a custom claim to the ID token (Security → API → Authorization Servers →
    Claims), e.g. `uid` = `user.login` or a profile attribute holding the directory uid, and set
    `username-claim: uid`. For groups, add a `groups` claim with a filter, and
-   `groups-claim: groups`; Okta sends group names.
+   `groups-claim: groups`; Okta sends group names, which go in `admin-groups` / `auditor-groups`.
 
 #### ADFS (SAML)
 
@@ -1111,7 +1136,8 @@ are built with the public `https://` address the provider expects.
    **Name ID** (and leave `username-attribute` empty), or as an attribute you name in
    `username-attribute`. For a DN, send `distinguishedName` and set `match: DN`. For groups,
    send *Token-Groups - Qualified by Domain Name* or the group DNs, as the attribute in
-   `groups-attribute`.
+   `groups-attribute`, and list the ones that grant a role in `cert-alert.sso.saml.admin-groups`
+   / `auditor-groups`.
 3. ADFS signs the assertion with its token-signing certificate, which is in its metadata
    (`https://<adfs>/FederationMetadata/2007-06/FederationMetadata.xml`). Where ADFS requires
    signed requests, give `signing-key-location` (PEM, PKCS#8) and `signing-certificate-location`.
@@ -1186,11 +1212,11 @@ cannot use. Somebody who is both an auditor and an administrator is an administr
 
 #### Roles from groups
 
-A role can come from a group as well as from the lists above: a directory group, from the
-`memberOf` values of the person's entry (read with the service account when they sign in,
-however they sign in), or a group a [single sign-on](#single-sign-on) provider says they are
-in. Only the groups named here grant anything, so nobody becomes an administrator because a
-provider puts them in a group called "Administrators":
+A role can come from a directory group as well as from the lists above: the `memberOf`
+values of the person's entry, read with the service account when they sign in, however they
+sign in. Only the groups named here grant anything. (A [single sign-on](#single-sign-on)
+provider's groups have lists of their own, `cert-alert.sso.<provider>.admin-groups` and
+`auditor-groups`, and are never matched against these.)
 
 ```yaml
 cert-alert:
@@ -1200,7 +1226,6 @@ cert-alert:
     groups:
       admin:
         - cn=CertAlert Admins,ou=groups,dc=example,dc=gov   # a directory group's DN
-        - 5b0f1c2e-1d0e-4c8b-9a77-2f2a6c0d9e11              # an Entra ID group's object id
       auditor:
         - cn=CertAlert Auditors,ou=groups,dc=example,dc=gov
       directory: true             # read memberOf at sign-in
@@ -2586,7 +2611,8 @@ once with a run, and the job runs in the background:
  "requestedAt":"…","statusUrl":"/api/v1/jobs/7c0e…"}
 ```
 
-`GET /api/v1/jobs/{id}` (also in the `Location` header) says how it is going - `QUEUED`,
+`GET /api/v1/jobs/{id}` (also in the `Location` header; administrators and auditors only,
+because a result can name the people a round-up wrote to) says how it is going - `QUEUED`,
 `RUNNING`, `SUCCEEDED` with `result` (what the endpoint used to answer with), `FAILED` with
 `error`, or `SKIPPED` when the same job was already running. `GET /api/v1/jobs` lists recent
 runs. The pages ask until the run has finished. Runs are kept in `job_run` for
@@ -2600,7 +2626,14 @@ More than one replica is supported. What makes it safe:
 
 - **Jobs.** Each scheduled job, and the same job started by hand, takes a lock in the database
   (`shedlock`), so it runs on one replica at a time. Every replica's schedule fires; the first
-  to take the lock runs the job, the others log that it is already running. The same goes for
+  to take the lock runs the job, the others log that it is already running. A scheduled run
+  keeps its lock for `cert-alert.cluster.scheduled-lock-at-least-for` (10 minutes, below the
+  shortest schedule) after it finishes, so a replica whose schedule fires late does not run
+  the same firing - the round-up, say - again; starting that job by hand in those minutes is
+  `SKIPPED`.
+- **Mail.** Each message is claimed in the database (`SENDING`, with a 10-minute lease) before
+  it is sent, so two replicas never send it twice; one that dies mid-send leaves it to be
+  retried when the lease runs out. The same goes for
   the changelog connector's polls, the mail outbox's sends, each audit output's deliveries,
   audit retention and the expired-session sweep.
 - **Sessions.** With `cert-alert.session.store=jdbc` - the default in the postgres profile,
@@ -3099,7 +3132,15 @@ ReadWriteMany and `persistence.license.readWriteMany: true` says so. See
 ### Single sign-on and the auditor role are new, and off
 
 Nothing changes until `cert-alert.sso.*`, `auditor-identifiers` or `security.groups` are set.
-Certificate and password sign-in work as before.
+Certificate and password sign-in work as before. Turning single sign-on on needs
+`CERT_ALERT_SSO_PUBLIC_URL` (Helm: `sso.publicUrl`); SAML needs HTTPS.
+
+### Forwarded host headers are ignored
+
+With `SERVER_FORWARD_HEADERS_STRATEGY=framework` (the chart's setting behind an ingress or
+an edge route), `Forwarded`, `X-Forwarded-Host` and `X-Forwarded-Prefix` are no longer
+believed; `X-Forwarded-Proto`, `-Port` and `-For` still are. A proxy that publishes CertAlert
+under a path prefix through `X-Forwarded-Prefix` must rewrite paths itself instead.
 
 ### Administrators are matched by uid or DN only
 

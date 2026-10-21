@@ -334,6 +334,10 @@
     "sso": {
       "type": "object",
       "properties": {
+        "publicUrl": {
+          "type": "string",
+          "description": "Absolute address people reach CertAlert at; required with single sign-on."
+        },
         "oidc": {
           "type": "object",
           "properties": {
@@ -385,6 +389,18 @@
             },
             "clockSkew": {
               "type": "string"
+            },
+            "adminGroups": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "auditorGroups": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           }
         },
@@ -430,6 +446,18 @@
             },
             "clockSkew": {
               "type": "string"
+            },
+            "adminGroups": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "auditorGroups": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           }
         }
