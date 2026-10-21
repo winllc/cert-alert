@@ -339,7 +339,7 @@ class WebhookDeliveryTest {
      * claimed, no attempt counted, one warning a pass - and a replica with the key sends it.
      */
     @Test
-    void aReplicaWithoutTheKeyLeavesEncryptedEndpointsToOneThatHasIt(CapturedOutput output) {
+    void aReplicaWithoutTheKeyLeavesEncryptedEndpointsToOneThatHasIt(CapturedOutput output) throws Exception {
         WebhookProperties keyed = new WebhookProperties();
         keyed.setSecretKey(java.util.Base64.getEncoder().encodeToString(new byte[32]));
         WebhookSecrets sealing = new WebhookSecrets(keyed);
@@ -351,7 +351,11 @@ class WebhookDeliveryTest {
         sealed = endpoints.save(sealed);
         created.add(sealed.getId());
         notifications.endpointsChanged();
+        // Three deliveries waiting: one warning a pass, not one a delivery.
         publisher.publish(WebhookEvent.JOB_FAILED, Map.of("job", "revocation"), "failed");
+        publisher.publish(WebhookEvent.JOB_FAILED, Map.of("job", "renewal"), "failed");
+        publisher.publish(WebhookEvent.JOB_FAILED, Map.of("job", "discovery"), "failed");
+        assertThat(log(sealed)).hasSize(3);
         WebhookDelivery waiting = log(sealed).getFirst();
         assertThat(secrets.encrypts()).isFalse();
 
@@ -361,26 +365,39 @@ class WebhookDeliveryTest {
         keyless.deliverDue();
 
         assertThat(received).isEmpty();
-        WebhookDelivery untouched = log(sealed).getFirst();
-        assertThat(untouched.getState()).isEqualTo(WebhookDelivery.State.PENDING);
-        assertThat(untouched.getAttempts()).isZero();
-        assertThat(untouched.getNextAttemptAt()).isEqualTo(waiting.getNextAttemptAt());
-        assertThat(untouched.getLastError()).isNull();
+        assertThat(log(sealed)).allSatisfy(untouched -> {
+            assertThat(untouched.getState()).isEqualTo(WebhookDelivery.State.PENDING);
+            assertThat(untouched.getAttempts()).isZero();
+            assertThat(untouched.getLastError()).isNull();
+        });
+        assertThat(log(sealed).getFirst().getNextAttemptAt()).isEqualTo(waiting.getNextAttemptAt());
         String warning = "are encrypted but this node has no cert-alert.webhooks.secret-key";
         String logged = output.getOut().substring(before);
-        // One warning a pass, naming the endpoint: two passes, two warnings.
-        assertThat(logged.split(java.util.regex.Pattern.quote(warning), -1)).hasSize(3);
+        // Named, and at most once a pass (a pass that finds the job lock held by another context
+        // on this database does nothing, so this is not always two): never once a delivery.
+        int warnings = logged.split(java.util.regex.Pattern.quote(warning), -1).length - 1;
+        assertThat(warnings).isBetween(1, 2);
         assertThat(logged).contains(String.valueOf(sealed.getId()));
 
         WebhookOutbox withKey = new WebhookOutbox(deliveries, endpoints, resolvingTo("127.0.0.1"),
                 new WebhookTransport(properties, clientTls.getSocketFactory()), sealing, keyed, locks, clock, transactions);
-        assertThat(withKey.deliverDue()).isGreaterThanOrEqualTo(1);
-        assertThat(received).singleElement().satisfies(post -> assertThat(WebhookSecrets.verify(secret,
+        // The job lock is shared with every context on this database: a pass that finds it held
+        // does nothing and the next one sends, as the poll would.
+        int sentByKeyed = 0;
+        for (int pass = 0; pass < 20 && sentByKeyed < 3; pass++) {
+            sentByKeyed += withKey.deliverDue();
+            if (sentByKeyed < 3) {
+                Thread.sleep(100);
+            }
+        }
+        assertThat(sentByKeyed).isEqualTo(3);
+        assertThat(received).hasSize(3).allSatisfy(post -> assertThat(WebhookSecrets.verify(secret,
                 post.headers().get("X-certalert-signature").getFirst(), post.body(), Instant.now().getEpochSecond(), 300))
                 .isTrue());
-        WebhookDelivery sent = log(sealed).getFirst();
-        assertThat(sent.getState()).isEqualTo(WebhookDelivery.State.DELIVERED);
-        assertThat(sent.getAttempts()).isOne();
+        assertThat(log(sealed)).allSatisfy(sent -> {
+            assertThat(sent.getState()).isEqualTo(WebhookDelivery.State.DELIVERED);
+            assertThat(sent.getAttempts()).isOne();
+        });
     }
 
     /**
