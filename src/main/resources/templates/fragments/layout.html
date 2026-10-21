@@ -196,6 +196,15 @@
                         <span class="nav-link-title">Admin</span>
                     </a>
                 </li>
+                <!--/* API tokens and webhooks: administrators manage them, auditors read them. */-->
+                <li class="nav-item" th:classappend="${active == 'integrations'} ? 'active'" th:if="${canReadAdmin}">
+                    <a class="nav-link" th:href="@{/admin/integrations}">
+                        <span class="nav-link-icon d-md-none d-lg-inline-block">
+                            <svg class="icon"><use href="#icon-key"></use></svg>
+                        </span>
+                        <span class="nav-link-title">Integrations</span>
+                    </a>
+                </li>
                 <!--/* Administrators and auditors, whatever the license says: the audit trail. */-->
                 <li class="nav-item" th:classappend="${active == 'audit'} ? 'active'" th:if="${canReadAdmin}">
                     <a class="nav-link" th:href="@{/admin/audit}">

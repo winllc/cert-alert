@@ -29,6 +29,12 @@ public final class AuditRecord {
 
     public static final String REDACTED = "[redacted]";
 
+    /** What this application's tokens and signing secrets start with: the audit API's, the public API's, a webhook's. */
+    private static final List<String> TOKEN_PREFIXES = List.of(
+            AuditTokens.PREFIX,
+            com.winllc.certalert.api.ApiTokens.PREFIX,
+            com.winllc.certalert.webhook.WebhookSecrets.PREFIX);
+
     /** The longest a detail string, a reason or a name may be. */
     public static final int MAX_STRING = 1000;
 
@@ -335,9 +341,12 @@ public final class AuditRecord {
 
     /** A value that is itself a token, wherever it turns up. */
     private static String redactValue(String value) {
-        return value.contains(AuditTokens.PREFIX)
-                ? value.replaceAll(Pattern.quote(AuditTokens.PREFIX) + "[A-Za-z0-9_-]{20,}", REDACTED)
-                : value;
+        for (String prefix : TOKEN_PREFIXES) {
+            if (value.contains(prefix)) {
+                value = value.replaceAll(Pattern.quote(prefix) + "[A-Za-z0-9_-]{20,}", REDACTED);
+            }
+        }
+        return value;
     }
 
     private static String clip(String value) {

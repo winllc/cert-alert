@@ -41,3 +41,9 @@ sso:
     match: UID
     groupsAttribute: http://schemas.microsoft.com/ws/2008/06/identity/claims/groups
     auditorGroups: ["CONTOSO\\CertAlert Auditors"]
+api:
+  requestsPerMinute: 120
+  maxLifetime: 365d
+webhooks:
+  allowedHosts: ["hooks.slack.com", "*.webhook.office.com", "10.20.0.0/16"]
+  blockPrivateNetworks: false

@@ -11,7 +11,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-public interface CachedCertificateRepository extends JpaRepository<CachedCertificate, Long> {
+public interface CachedCertificateRepository
+        extends JpaRepository<CachedCertificate, Long>, org.springframework.data.jpa.repository.JpaSpecificationExecutor<CachedCertificate> {
 
     /**
      * Certificates whose cached status may have gone stale simply because time passed:

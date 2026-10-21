@@ -91,7 +91,7 @@ public class LicensingConfiguration implements WebMvcConfigurer {
                         "/login", "/logout", "/consent", "/error", "/error/**",
                         LICENSE_SCREEN, LICENSE_SCREEN + "/**", UNLICENSED_PAGE, "/api/v1/license",
                         "/css/**", "/js/**", "/img/**", "/webjars/**", "/favicon.ico",
-                        "/actuator/**")
+                        "/actuator/**", com.winllc.certalert.api.OpenApiController.PATH)
                 .excludePathPatterns(AUDIT_PATHS);
     }
 }

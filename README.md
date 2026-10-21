@@ -2557,6 +2557,167 @@ is `never` and a stack trace tells an attacker more than it tells the reader.
 from the security filter chain - which reaches no exception handler at all - comes
 out as the same page rather than the Whitelabel one.
 
+## Public API, tokens and webhooks
+
+Other systems read CertAlert through a versioned REST API, and CertAlert tells them what
+happened through signed webhooks. Both are managed on **Admin > Integrations**
+(`/admin/integrations`): administrators create and revoke, auditors can look.
+
+### The API
+
+Everything under `/api/v1/` is the API the pages themselves use, and the same endpoints
+answer an API token. The OpenAPI 3.1 document is served by every installation at
+**`/api/v1/openapi.yaml`** (no sign-in needed; it describes the product, not your data) and
+lives in the source at `src/main/resources/openapi/cert-alert-v1.yaml`. A test
+(`OpenApiDocumentTest`) holds it to the code: every documented operation exists, and every
+endpoint a token may call is documented with the scope the server enforces.
+
+The read paths an integration usually wants:
+
+| Method | Path | Scope | What |
+|--------|------|-------|------|
+| `GET` | `/api/v1/certificates` | `certificates:read` | Every certificate with its owner, filtered and paged (`?status=EXPIRING_SOON&expiresWithinDays=30&issuer=DigiCert&keyAlgorithm=RSA&keySizeMax=2047&hashAlgorithm=SHA-1&ownerType=SERVER&q=web&page=0&size=100&sort=notAfter,asc`) |
+| `GET` | `/api/v1/certificates/{id}` | `certificates:read` | One certificate |
+| `GET` | `/api/v1/certificates/export?format=csv\|xlsx` | `certificates:read` | The same, as a file (see [Exports](#exports-saved-views-and-scheduled-reports)) |
+| `GET` | `/api/v1/summary/expiry` | `certificates:read` | Counts by state, expiring within 7/30/60/90 days, revoked, by owner type; takes the same filters |
+| `GET` | `/api/v1/servers`, `/api/v1/servers/{id}` | `certificates:read` | Servers, `?q=&certificateStatus=` |
+| `GET` | `/api/v1/people`, `/api/v1/people/{id}` | `people:read` | People, `?q=&certificateStatus=` |
+| `GET` | `/api/v1/jobs`, `/api/v1/jobs/{id}` | `jobs:read` | Job runs |
+| `POST` | `/api/v1/sync`, `/api/v1/revocation/check`, `/api/v1/notifications/digest` ... | `jobs:run` | Start a job: 202 and a run to poll |
+
+Lists answer `{"content":[...],"page":0,"size":100,"totalElements":…,"totalPages":…}`;
+`size` is capped at `cert-alert.api.max-page-size` (500).
+
+### API tokens
+
+```bash
+curl -H "Authorization: Bearer cat_…" \
+  "https://certalert.example.gov/api/v1/certificates?status=EXPIRING_SOON&size=500"
+```
+
+- **Created by an administrator**, with a name, one or more scopes and, optionally, an expiry
+  date. The token (`cat_` and 43 characters) is shown once, in the response to that request;
+  CertAlert keeps only its SHA-256. It is never written to a log, the audit trail (a value
+  that looks like one is redacted) or the session.
+- **Scopes**: `certificates:read`, `people:read`, `jobs:read`, `jobs:run` (implies
+  `jobs:read`), `inventory:write` (points of contact, projects, server attribute values) and
+  `admin` (everything the API offers, pruning and the audit trail included). An endpoint not
+  covered by a token's scopes answers 403 (`WWW-Authenticate: Bearer error="insufficient_scope"`).
+  No token, whatever its scopes, can create or revoke tokens, configure webhooks, read a
+  person's notifications or use the tables' DataTables endpoints: those stay with people.
+- **Never more than its creator.** A scope needs a role (reads need a signed-in user;
+  `jobs:read` an auditor or administrator; the rest an administrator), checked when the token
+  is created and again every time it is used: for a creator who signs in with a certificate
+  or a directory password, their roles are worked out again from the directory and
+  `admin-identifiers`/`groups` (cached for `cert-alert.api.creator-roles-cache-for`, a
+  minute); for any creator, their next sign-in narrows the token to the roles they then
+  hold - never widens it. A token whose creator no longer holds any role its scopes need
+  answers 401.
+- **Refused** (401, `error="invalid_token"`) when unknown, revoked, past its expiry, or off
+  (`cert-alert.api.tokens-enabled: false`). Set `cert-alert.api.max-lifetime` (e.g. `365d`)
+  to require every new token to expire within it.
+- **Rate-limited** per token, per replica: `cert-alert.api.requests-per-minute` (300); beyond
+  it, 429 with `Retry-After`.
+- **No session, no CSRF.** A request with `Authorization: Bearer` on `/api/v1/**` goes through
+  a filter chain of its own that keeps no session and reads none (a token with a session
+  cookie is still only the token), and has no CSRF check - nothing a browser sends on its own
+  carries that header. The same endpoints called with a session cookie still need the CSRF
+  token.
+- **Audited**: `api.token-created`, `api.token-revoked`, `api.token-refused` (a real token
+  that is revoked, expired or out-ranked; at most once a minute per token), `api.request` for
+  every request that changes something, and `api.token-used` once per token per
+  `cert-alert.api.use-audit-interval` (an hour) for its reads. The actor is
+  `api-token:<id>`, named "*<token name>* (API token of *<creator>*)".
+
+The SIEM pull API's `ensat_` tokens (see [Getting it into Splunk](#getting-it-into-splunk))
+are separate and unchanged.
+
+### Webhooks
+
+An administrator adds an https URL, picks the events and a format, and is shown the
+endpoint's signing secret (`whsec_…`) once.
+
+| Event | When |
+|-------|------|
+| `certificate.expiring` | A certificate moved into its warning window (the same alert the email channel sends) |
+| `certificate.expired` | A certificate expired |
+| `job.completed`, `job.failed` | Any run of a job - scheduled or by hand - ended |
+| `webhook.test` | "Send a test" on the Integrations page |
+
+Formats: **CertAlert JSON** (`{"id","type","createdAt","summary","data":{…}}`, for an
+integration), **Slack** (an incoming-webhook `text` message) and **Microsoft Teams** (an
+Adaptive Card message for a Teams workflow's "When a webhook request is received").
+
+**Delivery.** An event is written to `webhook_delivery` in the same transaction as whatever
+raised it and posted after the commit, by one replica (claimed in the database, under a
+lock), with a 5-second connect and 10-second read timeout. A 2xx is delivered; anything else -
+a timeout, a 5xx, a redirect (never followed) - is retried after `retry-initial` (1 minute),
+doubling to `retry-max` (1 hour), until it is `give-up-after` (a day) old. The Integrations
+page shows each endpoint's delivery log; delivered and failed rows are kept for `keep` (14
+days).
+
+**Where it may go.** https only; no credentials in the URL. Before saving, and again at every
+send, the host is resolved and every address it resolves to is checked: never loopback,
+link-local (169.254.0.0/16 and fe80::/10, so never a cloud metadata service), the other
+metadata addresses (fd00:ec2::254, 100.100.100.200), unspecified, multicast or broadcast, nor
+an IPv6 address carrying one of those (IPv4-mapped, IPv4-compatible, 6to4, NAT64). The post
+then goes to the address that was checked - the connection is not made by a second lookup -
+with TLS SNI and certificate hostname verification against the URL's host and the JVM's trust
+store. So a name that pointed somewhere harmless when it was saved and at the metadata
+service now (DNS rebinding) is refused at the send. Narrow it further with
+`cert-alert.webhooks.allowed-hosts` (names, `*.suffix`, CIDR ranges) and
+`cert-alert.webhooks.block-private-networks: true`. Webhooks connect directly: an outbound
+HTTP proxy is not used.
+
+**Secrets at rest.** The signing secret has to be kept to sign with. Set
+`cert-alert.webhooks.secret-key` (Helm: `webhooks.secretKey`/`webhooks.existingSecret`;
+bundle: `CERT_ALERT_WEBHOOKS_SECRET_KEY`) to a base64 AES key (`openssl rand -base64 32`) and
+it is stored AES-GCM encrypted; without one it is stored as is and a warning is logged at
+startup. Changing the key makes the stored secrets unreadable: press "New secret" on each
+webhook afterwards.
+
+#### Verifying a delivery
+
+Each post carries:
+
+```
+X-CertAlert-Event: certificate.expiring
+X-CertAlert-Delivery: 3f0b9c1e-…        # the event id; the same on every retry - de-duplicate on it
+X-CertAlert-Timestamp: 1792569600
+X-CertAlert-Signature: t=1792569600,v1=5f2c…   # hex HMAC-SHA256 of "<t>.<raw body>" under the secret
+```
+
+Check the HMAC over the raw bytes of the body, compare in constant time, and refuse a
+timestamp more than five minutes from now:
+
+```python
+import hashlib, hmac, time
+
+def verify(secret: str, header: str, body: bytes, tolerance: int = 300) -> bool:
+    parts = dict(p.split("=", 1) for p in header.split(","))
+    t, given = int(parts["t"]), parts["v1"]
+    if abs(time.time() - t) > tolerance:
+        return False
+    expected = hmac.new(secret.encode(), f"{t}.".encode() + body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, given)
+```
+
+```java
+// The same in Java: WebhookSecrets.verify(secret, header, body, Instant.now().getEpochSecond(), 300)
+Mac mac = Mac.getInstance("HmacSHA256");
+mac.init(new SecretKeySpec(secret.getBytes(UTF_8), "HmacSHA256"));
+String expected = HexFormat.of().formatHex(mac.doFinal((t + "." + body).getBytes(UTF_8)));
+boolean ok = MessageDigest.isEqual(expected.getBytes(US_ASCII), given.getBytes(US_ASCII))
+        && Math.abs(Instant.now().getEpochSecond() - t) <= 300;
+```
+
+Answer 2xx quickly and do the work afterwards; a receiver that takes longer than the read
+timeout is retried.
+
+Not built yet: a ServiceNow or Jira connector that opens one ticket per certificate and
+de-duplicates them (a webhook to a ticketing system's inbound REST endpoint, de-duplicating
+on the certificate's fingerprint, covers most of it today).
+
 ## The scheduled jobs
 
 Four on the directory, one that asks the issuing authorities, and one that trims the audit
@@ -3096,6 +3257,23 @@ class SlackAlertNotifier implements AlertNotifier {
 Read these before upgrading. They apply to the compose bundle, the Helm chart and a plain
 `java -jar` alike.
 
+### API tokens, the OpenAPI document and webhooks are new
+
+Nothing changes for an existing installation until an administrator creates an API token or
+a webhook on **Admin > Integrations** (a new item in the bar for administrators and auditors).
+What to know before anybody does:
+
+- `/api/v1/**` now also accepts `Authorization: Bearer cat_…`. Such a request goes through a
+  filter chain of its own (no session, no CSRF); everything else on `/api/v1/**` - the pages -
+  is exactly as before, CSRF included. A proxy or WAF in front that strips `Authorization` has
+  to let it through for the API to be used.
+- `/api/v1/openapi.yaml` is served without signing in.
+- Webhooks post from the application's pods to the receivers' https endpoints: with the
+  chart's NetworkPolicy on, `networkPolicy.egress.web` must reach them, and an outbound HTTP
+  proxy is not used. Set `cert-alert.webhooks.secret-key` (Helm `webhooks.secretKey`, bundle
+  `CERT_ALERT_WEBHOOKS_SECRET_KEY`) before creating any, so their secrets are encrypted at rest.
+- Two new audit categories of event: `api.*` and `webhook.*`.
+
 ### Jobs started by hand answer 202, and run one at a time across replicas
 
 `POST /api/v1/sync` and the other job endpoints no longer run the job inside the request: they
@@ -3111,9 +3289,9 @@ of running alongside it.
 ### New tables, migrated on start
 
 Flyway adds `shedlock` (V21), `job_run` (V22), `spring_session` and
-`spring_session_attributes` (V23), `saml_authn_request` (V24) and the license state,
-`ens_license_*` (V25), on the first start. Nothing to do; the database user already owns the
-schema.
+`spring_session_attributes` (V23), `saml_authn_request` (V24), the license state,
+`ens_license_*` (V25), and `api_token`, `webhook_endpoint` and `webhook_delivery` (V26), on
+the first start. Nothing to do; the database user already owns the schema.
 
 ### The license is kept in the database
 
@@ -3337,17 +3515,21 @@ scripts/                 the dummy directory generator, and release-bundle.sh
 src/main/java/com/enssolutions/license/   the ENS portal's license verifier, copied unchanged
 src/main/java/com/winllc/certalert/
 ├── alert/       notifier SPI, dispatcher, log and email channels
+├── api/         API tokens, their filter chain and scopes, the OpenAPI document
 ├── config/      expiry thresholds, clock, DataTables repository factory
 ├── domain/      DirectoryUser, DirectoryServer, CachedCertificate, ServerContact, AuditEvent
+├── inventory/   the certificate inventory: filters, the API's lists and summary
 ├── ldap/        attribute mapping, paged streaming directory client
 ├── license/     ENS license wiring: keys, feature catalog, request gate, the Licensing facade
 ├── repository/  DataTables repositories and the filter specifications
 ├── security/    X.509 and directory-password authentication, roles
 ├── scheduling/  the four cron jobs
 ├── service/     certificate parsing, status evaluation, sync
-└── web/         DataTables endpoints, REST API, page controllers
+├── web/         DataTables endpoints, REST API, page controllers
+└── webhook/     signed outbound webhooks: endpoints, the address guard, the outbox
 src/main/resources/
 ├── db/migration/          Flyway migrations
+├── openapi/               the API's OpenAPI 3.1 document, served at /api/v1/openapi.yaml
 ├── static/{css,js}/       a thin layer over Tabler, and the table wiring
 ├── templates/             Thymeleaf pages, Tabler layout and the icon sprite
 │                          two search pages, two details pages, login
@@ -3364,4 +3546,5 @@ src/main/resources/
 - OCSP on the scheduled job as well as on a single check, once there is a deployment whose
   responder would rather be asked a hundred thousand times than publish a list
 - Certificate chain validation, not just the leaf
-- More alert channels (Slack, PagerDuty, webhooks)
+- More alert channels: PagerDuty, and ServiceNow and Jira connectors that open and de-duplicate tickets
+  (signed webhooks, Slack and Teams are done - see [Public API, tokens and webhooks](#public-api-tokens-and-webhooks))

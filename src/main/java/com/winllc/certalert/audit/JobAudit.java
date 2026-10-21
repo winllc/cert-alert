@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 
 /**
@@ -22,11 +23,32 @@ public class JobAudit {
     private final AuditLog audit;
     private final ObjectProvider<EnsMetrics> metrics;
     private final Clock clock;
+    private final ApplicationEventPublisher events;
 
-    public JobAudit(AuditLog audit, ObjectProvider<EnsMetrics> metrics, Clock clock) {
+    public JobAudit(AuditLog audit, ObjectProvider<EnsMetrics> metrics, Clock clock, ApplicationEventPublisher events) {
         this.audit = audit;
         this.metrics = metrics;
         this.clock = clock;
+        this.events = events;
+    }
+
+    /**
+     * Published as a run of a job ends, for whatever else wants to know - the webhooks.
+     *
+     * @param counts what the result said, as details; empty for a failure
+     * @param reason why it failed; null for a success
+     */
+    public record JobFinished(
+            String job, boolean succeeded, String trigger, long durationMs, Map<String, Object> counts, String reason) {}
+
+    private void publish(JobFinished finished) {
+        try {
+            events.publishEvent(finished);
+        } catch (RuntimeException e) {
+            // The run is over and audited whatever a listener makes of it.
+            org.slf4j.LoggerFactory.getLogger(JobAudit.class).warn("A listener to the end of the {} run failed: {}",
+                    finished.job(), e.toString());
+        }
     }
 
     /**
@@ -91,14 +113,18 @@ public class JobAudit {
         if (!manual) {
             event.actor(AuditRecord.Actor.system("scheduler"));
         }
+        Map<String, Object> published = new LinkedHashMap<>();
         if (counts != null) {
             counts.forEach((key, value) -> {
                 if (!event.details().containsKey(key)) {
                     event.detail(key, value);
                 }
+                published.put(key, value);
             });
         }
         audit.recordQuietly(event);
+        publish(new JobFinished(job, true, manual ? "manual" : "schedule",
+                Duration.between(started, Instant.now(clock)).toMillis(), published, null));
     }
 
     public void failed(String job, Instant started, boolean manual, Throwable error) {
@@ -114,5 +140,7 @@ public class JobAudit {
             event.actor(AuditRecord.Actor.system("scheduler"));
         }
         audit.recordQuietly(event);
+        publish(new JobFinished(job, false, manual ? "manual" : "schedule",
+                Duration.between(started, Instant.now(clock)).toMillis(), Map.of(), reason));
     }
 }

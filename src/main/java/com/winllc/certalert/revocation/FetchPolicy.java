@@ -199,7 +199,7 @@ public final class FetchPolicy {
     }
 
     /** Link-local, metadata, unspecified and multicast: refused whatever is configured. */
-    static boolean isNeverFetched(InetAddress address) {
+    public static boolean isNeverFetched(InetAddress address) {
         if (address.isLinkLocalAddress() || address.isAnyLocalAddress() || address.isMulticastAddress()) {
             return true;
         }

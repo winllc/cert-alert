@@ -184,6 +184,12 @@ public class ViewController {
         return "admin";
     }
 
+    /** API tokens and webhooks: administrators manage them, auditors read them (SecurityConfig). */
+    @GetMapping("/admin/integrations")
+    public String integrations() {
+        return "integrations";
+    }
+
     @GetMapping("/notifications")
     public String notifications() {
         return "notifications";

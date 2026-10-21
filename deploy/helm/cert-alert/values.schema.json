@@ -1074,6 +1074,50 @@
     "javaOpts": {
       "type": "string"
     },
+    "api": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tokensEnabled": {
+          "type": "boolean"
+        },
+        "requestsPerMinute": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxLifetime": {
+          "type": "string",
+          "pattern": "^$|^[0-9]+(ms|s|m|h|d)$|^P"
+        }
+      }
+    },
+    "webhooks": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "allowedHosts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "blockPrivateNetworks": {
+          "type": "boolean"
+        },
+        "secretKey": {
+          "type": "string"
+        },
+        "existingSecret": {
+          "type": "string"
+        },
+        "existingSecretKey": {
+          "type": "string"
+        }
+      }
+    },
     "audit": {
       "type": "object",
       "properties": {

@@ -35,6 +35,10 @@ cert-alert:
     outbox:
       background: false
 
+  # The same for webhooks: tests post what is queued themselves (WebhookOutbox.deliverDue).
+  webhooks:
+    background: false
+
   ldap:
     # Deliberately tiny, so even a handful of fixture entries cross page and batch
     # boundaries and the streaming path is what the tests actually exercise.

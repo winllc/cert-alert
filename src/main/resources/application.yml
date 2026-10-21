@@ -596,6 +596,37 @@ cert-alert:
       to: []
       subject-prefix: "[cert-alert] "
 
+  # The public API (/api/v1/**, documented at /api/v1/openapi.yaml) for a client holding an
+  # API token. Administrators create tokens on Admin > Integrations; each has scopes, an
+  # optional expiry, and never more than its creator's roles. See the README's "Public API".
+  api:
+    tokens-enabled: true
+    # Per token, per replica; 429 with Retry-After beyond it. 0 turns the limit off.
+    requests-per-minute: 300
+    # Set (e.g. 365d) to require every new token to expire within it.
+    # max-lifetime: 365d
+    # A token's reads are audited as one api.token-used event per this interval.
+    use-audit-interval: 1h
+    max-page-size: 500
+
+  # Outbound webhooks for expiry alerts and job results, configured on Admin > Integrations.
+  # Signed with HMAC-SHA256; https only; never to loopback, link-local or metadata addresses.
+  webhooks:
+    enabled: true
+    # Hosts a webhook may go to: names, *.suffix or CIDR ranges. Empty: any host the address
+    # rules allow.
+    allowed-hosts: []
+    block-private-networks: false
+    # A base64 AES key the signing secrets are encrypted with in the database.
+    # secret-key: ${CERT_ALERT_WEBHOOKS_SECRET_KEY:}
+    connect-timeout: 5s
+    read-timeout: 10s
+    poll-interval: 30s
+    retry-initial: 1m
+    retry-max: 1h
+    give-up-after: 1d
+    keep: 14d
+
 # The ENS platform baseline: the same ENS_* settings, with the same defaults, in every ENS
 # product. See the README's "Security headers" section.
 ens:

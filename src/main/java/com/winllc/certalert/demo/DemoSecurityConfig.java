@@ -72,7 +72,9 @@ public class DemoSecurityConfig {
 
     /** Served before anybody signs in - the sign-in page itself, and what it is made of. */
     private static final String[] PUBLIC_PATHS = {
-        "/login", ConsentFilter.PATH, "/css/**", "/js/**", "/img/**", "/webjars/**", "/favicon.ico", "/error"
+        "/login", ConsentFilter.PATH, "/css/**", "/js/**", "/img/**", "/webjars/**", "/favicon.ico", "/error",
+        // The API's OpenAPI document: it describes the product, not anybody's data.
+        com.winllc.certalert.api.OpenApiController.PATH
     };
 
     /**

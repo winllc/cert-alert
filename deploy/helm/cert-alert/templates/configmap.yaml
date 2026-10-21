@@ -148,6 +148,13 @@ data:
   {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_BANNER_HEIGHT" "value" $v.banner.height) }}
   {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_WARNING_THRESHOLD_DAYS" "value" $v.thresholds.warningDays) }}
   {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_CRITICAL_THRESHOLD_DAYS" "value" $v.thresholds.criticalDays) }}
+  # The public API and webhooks; the webhooks' secret key is in a Secret.
+  CERT_ALERT_API_TOKENS_ENABLED: {{ $v.api.tokensEnabled | quote }}
+  CERT_ALERT_API_REQUESTS_PER_MINUTE: {{ $v.api.requestsPerMinute | toString | quote }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_API_MAX_LIFETIME" "value" $v.api.maxLifetime) }}
+  CERT_ALERT_WEBHOOKS_ENABLED: {{ $v.webhooks.enabled | quote }}
+  CERT_ALERT_WEBHOOKS_ALLOWED_HOSTS: {{ join "," $v.webhooks.allowedHosts | quote }}
+  CERT_ALERT_WEBHOOKS_BLOCK_PRIVATE_NETWORKS: {{ $v.webhooks.blockPrivateNetworks | quote }}
   # Audit logging (ens-audit/1); the Splunk token is in a Secret.
   ENS_AUDIT_STDOUT: {{ $v.audit.stdout | quote }}
   ENS_AUDIT_FILE: {{ ternary "/var/log/ens/certalert/audit.jsonl" "" $v.audit.file.enabled | quote }}
