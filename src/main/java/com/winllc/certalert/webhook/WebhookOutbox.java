@@ -240,13 +240,13 @@ public class WebhookOutbox {
             if (giveUp || !now.isBefore(row.getCreatedAt().plus(properties.getGiveUpAfter()))) {
                 row.gaveUp(status, error);
                 log.error("Gave up on webhook delivery {} ({}) to endpoint {} after {} attempt(s): {}",
-                        row.getId(), row.getEventType(), row.getEndpointId(), row.getAttempts(), error);
+                        row.getId(), row.getEventType(), row.getEndpointId(), row.getAttempts(), oneLine(error));
                 return;
             }
             Instant retryAt = now.plus(backoff(row.getAttempts() + 1, properties.getRetryInitial(), properties.getRetryMax()));
             row.failed(status, error, retryAt);
             log.warn("Webhook delivery {} ({}) to endpoint {} failed (attempt {}); trying again at {}: {}",
-                    row.getId(), row.getEventType(), row.getEndpointId(), row.getAttempts(), retryAt, error);
+                    row.getId(), row.getEventType(), row.getEndpointId(), row.getAttempts(), retryAt, oneLine(error));
         }));
     }
 
@@ -257,6 +257,11 @@ public class WebhookOutbox {
             wait = wait.multipliedBy(2);
         }
         return wait.compareTo(max) > 0 ? max : wait;
+    }
+
+    /** A receiver's or a resolver's words, on one line: nothing from outside starts a log line of its own. */
+    private static String oneLine(String value) {
+        return value == null ? null : value.replaceAll("[\\r\\n\\t]", " ");
     }
 
     private static String describe(Exception e) {
