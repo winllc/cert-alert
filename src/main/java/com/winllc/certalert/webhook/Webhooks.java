@@ -57,9 +57,9 @@ public class Webhooks {
         Set<WebhookEvent> subscribed = checkEvents(events);
         Instant now = Instant.now(clock);
         WebhookEndpoint endpoint = new WebhookEndpoint(
-                label, secrets.store(checked.toString()), format == null ? WebhookEndpoint.Format.JSON : format, subscribed, by, now);
+                label, secrets.storeUrl(checked.toString()), format == null ? WebhookEndpoint.Format.JSON : format, subscribed, by, now);
         String secret = secrets.generate();
-        endpoint.secret(secrets.store(secret), secret.substring(0, 12), now);
+        endpoint.secret(secrets.storeSecret(secret), secret.substring(0, 12), now);
         endpoint = endpoints.save(endpoint);
         audit.record(AuditRecord.of(AuditRecord.Category.CONFIGURATION, "webhook.created")
                 .severity(AuditRecord.Severity.NOTICE)
@@ -84,7 +84,7 @@ public class Webhooks {
                 .change("url", WebhookSecrets.redact(secrets.revealUrl(endpoint)), WebhookSecrets.redact(checked.toString()))
                 .change("events", WebhookEvent.format(endpoint.getEvents()), WebhookEvent.format(subscribed))
                 .change("enabled", endpoint.isEnabled(), enabled);
-        endpoint.update(label, secrets.store(checked.toString()), format == null ? endpoint.getFormat() : format, subscribed, enabled,
+        endpoint.update(label, secrets.storeUrl(checked.toString()), format == null ? endpoint.getFormat() : format, subscribed, enabled,
                 Instant.now(clock));
         audit.record(record);
         notifications.endpointsChanged();
@@ -95,7 +95,7 @@ public class Webhooks {
     public WithSecret rotateSecret(Long id) {
         WebhookEndpoint endpoint = find(id);
         String secret = secrets.generate();
-        endpoint.secret(secrets.store(secret), secret.substring(0, 12), Instant.now(clock));
+        endpoint.secret(secrets.storeSecret(secret), secret.substring(0, 12), Instant.now(clock));
         audit.record(AuditRecord.of(AuditRecord.Category.CONFIGURATION, "webhook.secret-rotated")
                 .severity(AuditRecord.Severity.NOTICE)
                 .target("webhook", String.valueOf(id), endpoint.getName())

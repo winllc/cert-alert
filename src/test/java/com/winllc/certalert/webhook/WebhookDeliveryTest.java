@@ -169,10 +169,10 @@ class WebhookDeliveryTest {
     private record Endpoint(WebhookEndpoint endpoint, String secret) {}
 
     private Endpoint endpoint(WebhookEndpoint.Format format, WebhookEvent... events) {
-        WebhookEndpoint endpoint = new WebhookEndpoint("test receiver", secrets.store("https://" + HOST + ":"
+        WebhookEndpoint endpoint = new WebhookEndpoint("test receiver", secrets.storeUrl("https://" + HOST + ":"
                 + receiver.getAddress().getPort() + "/hook?source=certalert"), format, EnumSet.of(events[0], events), "test", Instant.now());
         String secret = secrets.generate();
-        endpoint.secret(secrets.store(secret), secret.substring(0, 12), Instant.now());
+        endpoint.secret(secrets.storeSecret(secret), secret.substring(0, 12), Instant.now());
         endpoint = endpoints.save(endpoint);
         created.add(endpoint.getId());
         notifications.endpointsChanged();
@@ -343,11 +343,11 @@ class WebhookDeliveryTest {
         WebhookProperties keyed = new WebhookProperties();
         keyed.setSecretKey(java.util.Base64.getEncoder().encodeToString(new byte[32]));
         WebhookSecrets sealing = new WebhookSecrets(keyed);
-        WebhookEndpoint sealed = new WebhookEndpoint("sealed receiver", sealing.store("https://" + HOST + ":"
+        WebhookEndpoint sealed = new WebhookEndpoint("sealed receiver", sealing.storeUrl("https://" + HOST + ":"
                 + receiver.getAddress().getPort() + "/hook"), WebhookEndpoint.Format.JSON,
                 EnumSet.of(WebhookEvent.JOB_FAILED), "test", Instant.now());
         String secret = sealing.generate();
-        sealed.secret(sealing.store(secret), secret.substring(0, 12), Instant.now());
+        sealed.secret(sealing.storeSecret(secret), secret.substring(0, 12), Instant.now());
         sealed = endpoints.save(sealed);
         created.add(sealed.getId());
         notifications.endpointsChanged();
@@ -413,11 +413,11 @@ class WebhookDeliveryTest {
         bounded.setDeliveryTimeout(java.time.Duration.ofSeconds(1));
         bounded.setRunBudget(java.time.Duration.ofSeconds(15));
         try (java.net.ServerSocket blackhole = new java.net.ServerSocket(0, 50, InetAddress.getLoopbackAddress())) {
-            WebhookEndpoint dead = new WebhookEndpoint("blackhole", secrets.store("https://" + HOST + ":"
+            WebhookEndpoint dead = new WebhookEndpoint("blackhole", secrets.storeUrl("https://" + HOST + ":"
                     + blackhole.getLocalPort() + "/hook"), WebhookEndpoint.Format.JSON,
                     EnumSet.of(WebhookEvent.JOB_FAILED), "test", Instant.now());
             String deadSecret = secrets.generate();
-            dead.secret(secrets.store(deadSecret), deadSecret.substring(0, 12), Instant.now());
+            dead.secret(secrets.storeSecret(deadSecret), deadSecret.substring(0, 12), Instant.now());
             dead = endpoints.save(dead);
             created.add(dead.getId());
             Endpoint live = endpoint(WebhookEndpoint.Format.JSON, WebhookEvent.JOB_COMPLETED);
@@ -479,12 +479,12 @@ class WebhookDeliveryTest {
         keyed.setSecretKey(java.util.Base64.getEncoder().encodeToString(new byte[32]));
         WebhookSecrets sealed = new WebhookSecrets(keyed);
         String secret = sealed.generate();
-        WebhookSecrets.Stored stored = sealed.store(secret);
+        WebhookSecrets.Stored stored = sealed.storeSecret(secret);
         assertThat(stored.encrypted()).isTrue();
         assertThat(stored.value()).doesNotContain(secret).startsWith("v1:");
 
         String url = "https://hooks.slack.com/services/T000/B000/XXXXXXXXXXXXXXXXXXXXXXXX";
-        WebhookSecrets.Stored storedUrl = sealed.store(url);
+        WebhookSecrets.Stored storedUrl = sealed.storeUrl(url);
         assertThat(storedUrl.encrypted()).isTrue();
         assertThat(storedUrl.value()).doesNotContain("XXXXXXXX").doesNotContain("services");
         WebhookEndpoint endpoint = new WebhookEndpoint("x", storedUrl, WebhookEndpoint.Format.SLACK,

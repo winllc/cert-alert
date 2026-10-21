@@ -64,18 +64,25 @@ public class WebhookSecretEncryption {
         int[] encrypted = {0};
         locks.runExclusively(LOCK, () -> {
             for (WebhookEndpoint endpoint : endpoints.findUnencrypted()) {
-                Integer done = transaction.execute(status -> {
-                    int count = 0;
-                    if (!endpoint.isUrlEncrypted()) {
-                        count += endpoints.encryptUrl(endpoint.getId(), endpoint.getStoredUrl(),
-                                secrets.store(endpoint.getStoredUrl()).value());
-                    }
-                    if (!endpoint.isSecretEncrypted()) {
-                        count += endpoints.encryptSecret(endpoint.getId(), endpoint.getStoredSecret(),
-                                secrets.store(endpoint.getStoredSecret()).value());
-                    }
-                    return count;
-                });
+                Integer done;
+                try {
+                    done = transaction.execute(status -> {
+                        int count = 0;
+                        if (!endpoint.isUrlEncrypted()) {
+                            count += endpoints.encryptUrl(endpoint.getId(), endpoint.getStoredUrl(),
+                                    secrets.storeUrl(endpoint.getStoredUrl()).value());
+                        }
+                        if (!endpoint.isSecretEncrypted()) {
+                            count += endpoints.encryptSecret(endpoint.getId(), endpoint.getStoredSecret(),
+                                    secrets.storeSecret(endpoint.getStoredSecret()).value());
+                        }
+                        return count;
+                    });
+                } catch (IllegalArgumentException e) {
+                    // Too long to keep encrypted: left as it is, and the others still done.
+                    log.warn("Webhook {} was left unencrypted: {}", endpoint.getId(), e.getMessage());
+                    continue;
+                }
                 encrypted[0] += done == null ? 0 : done;
             }
         });

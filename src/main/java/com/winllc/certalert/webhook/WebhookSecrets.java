@@ -38,6 +38,10 @@ public class WebhookSecrets {
 
     private static final SecureRandom RANDOM = new SecureRandom();
 
+    /** AES-GCM's nonce and authentication tag, around the ciphertext in what is stored. */
+    private static final int IV_BYTES = 12;
+    private static final int TAG_BYTES = 16;
+
     private final SecretKeySpec key;
 
     public WebhookSecrets(WebhookProperties properties) {
@@ -62,22 +66,54 @@ public class WebhookSecrets {
         return PREFIX + Base64.getUrlEncoder().withoutPadding().encodeToString(random);
     }
 
-    Stored store(String secret) {
+    /** A signing secret, as it is kept in the {@code secret} column. */
+    Stored storeSecret(String secret) {
+        return store(secret, WebhookEndpoint.SECRET_LENGTH, "signing secret");
+    }
+
+    /** An endpoint's URL, as it is kept in the {@code url} column. */
+    Stored storeUrl(String url) {
+        return store(url, WebhookEndpoint.URL_LENGTH, "URL");
+    }
+
+    /**
+     * The longest value, in UTF-8 bytes, that still fits a column of {@code column}
+     * characters once encrypted: {@code v1:} and the base64 of nonce, ciphertext and tag.
+     */
+    static int encryptedCapacity(int column) {
+        return (column - ENCRYPTED.length()) / 4 * 3 - IV_BYTES - TAG_BYTES;
+    }
+
+    /**
+     * Refuses, before encrypting, a value too long for its column - rather than leaving the
+     * database to refuse it, or the arithmetic below to see a length nothing has bounded.
+     */
+    private Stored store(String value, int column, String what) {
         if (key == null) {
-            return new Stored(secret, false);
+            if (value.length() > column) {
+                throw new IllegalArgumentException("The webhook's " + what + " is longer than the " + column
+                        + " characters it can be kept in");
+            }
+            return new Stored(value, false);
+        }
+        byte[] plain = value.getBytes(StandardCharsets.UTF_8);
+        int capacity = encryptedCapacity(column);
+        if (plain.length > capacity) {
+            throw new IllegalArgumentException("The webhook's " + what + " is longer than the " + capacity
+                    + " bytes (UTF-8) it can be kept in, encrypted");
         }
         try {
-            byte[] iv = new byte[12];
+            byte[] iv = new byte[IV_BYTES];
             RANDOM.nextBytes(iv);
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(128, iv));
-            byte[] sealed = cipher.doFinal(secret.getBytes(StandardCharsets.UTF_8));
-            byte[] out = new byte[iv.length + sealed.length];
+            cipher.init(Cipher.ENCRYPT_MODE, key, new GCMParameterSpec(TAG_BYTES * 8, iv));
+            byte[] sealed = cipher.doFinal(plain);
+            byte[] out = new byte[Math.addExact(iv.length, sealed.length)];
             System.arraycopy(iv, 0, out, 0, iv.length);
             System.arraycopy(sealed, 0, out, iv.length, sealed.length);
             return new Stored(ENCRYPTED + Base64.getEncoder().encodeToString(out), true);
         } catch (GeneralSecurityException e) {
-            throw new IllegalStateException("Could not encrypt a webhook secret", e);
+            throw new IllegalStateException("Could not encrypt a webhook " + what, e);
         }
     }
 

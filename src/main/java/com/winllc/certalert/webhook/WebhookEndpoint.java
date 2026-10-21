@@ -30,6 +30,12 @@ public class WebhookEndpoint {
         TEAMS
     }
 
+    /** The {@code url} column's size (V28). */
+    static final int URL_LENGTH = 4000;
+
+    /** The {@code secret} column's size (V26). */
+    static final int SECRET_LENGTH = 500;
+
     @Id
     @GeneratedValue(strategy = GenerationType.SEQUENCE, generator = "webhook_endpoint_seq")
     @SequenceGenerator(name = "webhook_endpoint_seq", sequenceName = "webhook_endpoint_seq", allocationSize = 50)
@@ -39,7 +45,7 @@ public class WebhookEndpoint {
     private String name;
 
     /** The URL, encrypted where a key is configured: a chat webhook's URL is its credential. */
-    @Column(nullable = false, length = 4000)
+    @Column(nullable = false, length = URL_LENGTH)
     private String url;
 
     @Column(name = "url_encrypted", nullable = false)
@@ -53,7 +59,7 @@ public class WebhookEndpoint {
     private String events;
 
     /** The signing secret, encrypted where a key is configured (see {@link WebhookSecrets}). */
-    @Column(nullable = false, length = 500)
+    @Column(nullable = false, length = SECRET_LENGTH)
     private String secret;
 
     @Column(name = "secret_encrypted", nullable = false)
