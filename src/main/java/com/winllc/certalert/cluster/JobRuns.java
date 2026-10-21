@@ -107,7 +107,8 @@ public class JobRuns {
     /** A job that was already running when this run came to start it. */
     public static final class AlreadyRunningException extends RuntimeException {
         public AlreadyRunningException(String job) {
-            super("A run of the " + job + " was already going, here or on another replica; this one did nothing");
+            super("The " + job + " is running, or its schedule has just run it, here or on another replica; "
+                    + "this run did nothing");
         }
     }
 

@@ -14,8 +14,9 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
- * How the jobs started by hand are going (see {@link JobRuns}). Anybody signed in may ask:
- * a run says which job it was and its counts, which the run log already shows them.
+ * How the jobs started by hand are going (see {@link JobRuns}). Administrators - who start
+ * them - and auditors only (SecurityConfig): a result can name the people a round-up wrote to,
+ * and an error can carry the mail server's or the directory's own words.
  */
 @RestController
 @RequestMapping(JobRunController.PATH)

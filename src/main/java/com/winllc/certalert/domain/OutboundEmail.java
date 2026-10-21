@@ -46,6 +46,12 @@ public class OutboundEmail {
     public enum State {
         /** Not sent yet: due at {@code nextAttemptAt}. */
         PENDING,
+        /**
+         * Claimed by one replica, which is sending it now. Back to PENDING after a failure,
+         * or - should that replica die mid-send - once {@code nextAttemptAt}, the claim's
+         * lease, has passed.
+         */
+        SENDING,
         SENT,
         /** Tried until it was too old to be worth sending, and given up on. */
         FAILED,
@@ -140,6 +146,7 @@ public class OutboundEmail {
 
     /** A failed attempt, and when to try again. */
     public void failed(String error, Instant retryAt) {
+        this.state = State.PENDING;
         this.attempts++;
         this.lastError = clip(error, 1000);
         this.nextAttemptAt = retryAt;

@@ -149,12 +149,12 @@ public class DirectoryPrincipalResolver {
     }
 
     /**
-     * @param providerGroups the groups an identity provider says they are in, for a single
-     *     sign-on; empty otherwise
+     * @param providerRoles roles a single sign-on provider's groups grant them (see
+     *     {@code SsoIdentityResolver}); empty otherwise
      */
     @Transactional(readOnly = true)
     public DirectoryPrincipal principalFor(
-            DirectoryUser user, DirectoryPrincipal.AuthenticationMethod method, Collection<String> providerGroups) {
+            DirectoryUser user, DirectoryPrincipal.AuthenticationMethod method, Collection<String> providerRoles) {
         String username = user.getEmail() != null ? user.getEmail() : user.getUid();
         return new DirectoryPrincipal(
                 username == null ? user.getDn() : username,
@@ -162,7 +162,7 @@ public class DirectoryPrincipalResolver {
                 user.getId(),
                 user.getDn(),
                 method,
-                authoritiesFor(roleIdentifiersOf(user), user.getDn(), providerGroups));
+                authoritiesFor(roleIdentifiersOf(user), user.getDn(), providerRoles));
     }
 
     /**
@@ -191,13 +191,13 @@ public class DirectoryPrincipalResolver {
         return unknownPrincipal(username, dn, uids, method, Set.of());
     }
 
-    /** The same, with the groups an identity provider says they are in. */
+    /** The same, with the roles a single sign-on provider's groups grant them. */
     public DirectoryPrincipal unknownPrincipal(
             String username,
             String dn,
             Collection<String> uids,
             DirectoryPrincipal.AuthenticationMethod method,
-            Collection<String> providerGroups) {
+            Collection<String> providerRoles) {
         Set<String> candidates = new LinkedHashSet<>();
         if (dn != null) {
             candidates.add(normalise(dn));
@@ -205,7 +205,7 @@ public class DirectoryPrincipalResolver {
         uids.forEach(uid -> candidates.add(normalise(uid)));
         candidates.remove("");
         return new DirectoryPrincipal(
-                username, username, null, dn, method, authoritiesFor(candidates, dn, providerGroups));
+                username, username, null, dn, method, authoritiesFor(candidates, dn, providerRoles));
     }
 
     /**
@@ -297,44 +297,43 @@ public class DirectoryPrincipalResolver {
 
     /**
      * Everybody signed in is a user. An administrator by {@code admin-identifiers} - matched
-     * against the DN and uid only - or by an administrators' group; an auditor likewise, by
-     * {@code auditor-identifiers} or an auditors' group.
+     * against the DN and uid only - or by a directory group {@code groups.admin} names, or by a
+     * single sign-on provider's group that provider's own list names; an auditor likewise.
      *
      * @param dn the entry they are, whose directory groups count where groups are mapped
-     * @param providerGroups what an identity provider says, for a single sign-on
+     * @param providerRoles the roles a provider's groups grant, worked out against that
+     *     provider's own lists - never matched against the directory's
      */
     private Collection<GrantedAuthority> authoritiesFor(
-            Collection<String> identifiers, String dn, Collection<String> providerGroups) {
+            Collection<String> identifiers, String dn, Collection<String> providerRoles) {
         Set<GrantedAuthority> authorities = new LinkedHashSet<>();
         authorities.add(new SimpleGrantedAuthority(ROLE_USER));
         Set<String> normalised = new LinkedHashSet<>();
         identifiers.stream().map(DirectoryPrincipalResolver::normalise).forEach(normalised::add);
 
-        Set<String> groups = groupsOf(dn, providerGroups);
+        Set<String> groups = directoryGroupsOf(dn);
         RoleProperties mapping = properties.getGroups();
         boolean admin = intersects(normalised, roleIdentifiers(properties.getAdminIdentifiers()))
-                || intersects(groups, DirectoryGroups.normaliseAll(mapping.getAdmin()));
+                || intersects(groups, DirectoryGroups.normaliseAll(mapping.getAdmin()))
+                || providerRoles.contains(ROLE_ADMIN);
         if (admin || isTheDemoAdministrator(identifiers)) {
             authorities.add(new SimpleGrantedAuthority(ROLE_ADMIN));
         }
         boolean auditor = intersects(normalised, roleIdentifiers(properties.getAuditorIdentifiers()))
-                || intersects(groups, DirectoryGroups.normaliseAll(mapping.getAuditor()));
+                || intersects(groups, DirectoryGroups.normaliseAll(mapping.getAuditor()))
+                || providerRoles.contains(ROLE_AUDITOR);
         if (auditor) {
             authorities.add(new SimpleGrantedAuthority(ROLE_AUDITOR));
         }
         return authorities;
     }
 
-    /** The groups that may grant a role: the directory's for this entry, and an identity provider's. */
-    private Set<String> groupsOf(String dn, Collection<String> providerGroups) {
-        if (!properties.getGroups().anyMapped()) {
+    /** This entry's directory groups, where a directory group grants anything. */
+    private Set<String> directoryGroupsOf(String dn) {
+        if (!properties.getGroups().anyMapped() || directoryGroups == null) {
             return Set.of();
         }
-        Set<String> groups = new LinkedHashSet<>(DirectoryGroups.normaliseAll(providerGroups));
-        if (directoryGroups != null) {
-            groups.addAll(directoryGroups.of(dn));
-        }
-        return groups;
+        return directoryGroups.of(dn);
     }
 
     private static boolean intersects(Set<String> values, Set<String> granting) {

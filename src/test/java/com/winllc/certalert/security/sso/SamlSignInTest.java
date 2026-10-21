@@ -51,13 +51,17 @@ import org.springframework.web.context.WebApplicationContext;
     "cert-alert.sso.saml.display-name=Sign in with Test SAML",
     "cert-alert.sso.saml.groups-attribute=groups",
     "cert-alert.sso.saml.clock-skew=1m",
-    "cert-alert.security.groups.auditor[0]=CertAlert-Auditors"
+    "cert-alert.sso.saml.auditor-groups[0]=CertAlert-Auditors",
+    // A directory group of the same name: a provider's group is never matched against it.
+    "cert-alert.security.groups.admin[0]=CertAlert-Admins",
+    "cert-alert.sso.public-url=" + SamlSignInTest.PUBLIC_URL
 })
 @ActiveProfiles("test")
 class SamlSignInTest {
 
-    private static final String ACS = "http://localhost/login/saml2/sso/saml";
-    private static final String SP_ENTITY_ID = "http://localhost/saml2/service-provider-metadata/saml";
+    static final String PUBLIC_URL = "https://certalert.example.gov";
+    private static final String ACS = PUBLIC_URL + "/login/saml2/sso/saml";
+    private static final String SP_ENTITY_ID = PUBLIC_URL + "/saml2/service-provider-metadata/saml";
 
     private static EmbeddedDirectory directory;
     private static TestSamlIdentityProvider provider;
@@ -111,16 +115,25 @@ class SamlSignInTest {
     }
 
     /** A sign-in started here: the request's id, and the RelayState that comes back with the answer. */
-    private record Started(String requestId, String relayState) {}
+    private record Started(String requestId, String relayState, jakarta.servlet.http.Cookie binding) {}
 
     private Started signInStarted() throws Exception {
         MvcResult redirect = mockMvc.perform(get("/saml2/authenticate/saml"))
                 .andExpect(status().is3xxRedirection())
                 .andReturn();
+        // The cookie binding the sign-in to this browser: only to the assertion consumer,
+        // and sent with the provider's cross-site POST.
+        String setCookie = redirect.getResponse().getHeaders("Set-Cookie").stream()
+                .filter(header -> header.startsWith(JdbcSaml2AuthenticationRequests.COOKIE + "="))
+                .findFirst()
+                .orElseThrow();
+        assertThat(setCookie).contains("HttpOnly", "Secure", "SameSite=None", "Path=/login/saml2/sso");
+        String value = setCookie.substring(setCookie.indexOf('=') + 1, setCookie.indexOf(';'));
         String location = redirect.getResponse().getRedirectedUrl();
         assertThat(location).startsWith(TestSamlIdentityProvider.SSO_URL);
         Map<String, String> query = query(location);
-        return new Started(TestSamlIdentityProvider.requestId(query.get("SAMLRequest")), query.get("RelayState"));
+        return new Started(TestSamlIdentityProvider.requestId(query.get("SAMLRequest")), query.get("RelayState"),
+                new jakarta.servlet.http.Cookie(JdbcSaml2AuthenticationRequests.COOKIE, value));
     }
 
     /** A good answer to it, for the test to spoil. */
@@ -133,13 +146,28 @@ class SamlSignInTest {
         return answer;
     }
 
-    /** Posted as the identity provider's page posts it: cross-site, so with no session cookie. */
+    /**
+     * Posted as the identity provider's page posts it: cross-site, so with no session cookie,
+     * but with the binding cookie of the browser that started it.
+     */
+    private MvcResult answerWith(String response, Started started) throws Exception {
+        return answerWith(mockMvc, response, started, true, request -> request);
+    }
+
     private MvcResult answerWith(String response, String relayState) throws Exception {
-        var request = post("/login/saml2/sso/saml").param("SAMLResponse", response);
-        if (relayState != null) {
-            request.param("RelayState", relayState);
+        return mockMvc.perform(post("/login/saml2/sso/saml").param("SAMLResponse", response)
+                        .param("RelayState", relayState == null ? "" : relayState))
+                .andReturn();
+    }
+
+    private static MvcResult answerWith(MockMvc mvc, String response, Started started, boolean withBinding,
+            org.springframework.test.web.servlet.request.RequestPostProcessor spoof) throws Exception {
+        var request = post("/login/saml2/sso/saml").param("SAMLResponse", response)
+                .param("RelayState", started.relayState());
+        if (withBinding) {
+            request.cookie(started.binding());
         }
-        return mockMvc.perform(request).andReturn();
+        return mvc.perform(request.with(spoof)).andReturn();
     }
 
     private static Authentication signedIn(MvcResult result) {
@@ -168,7 +196,7 @@ class SamlSignInTest {
         long head = auditStore.headSeq();
         Started started = signInStarted();
 
-        MvcResult result = answerWith(provider.respond(answer(started, "sally")), started.relayState());
+        MvcResult result = answerWith(provider.respond(answer(started, "sally")), started);
 
         assertThat(result.getResponse().getRedirectedUrl()).isEqualTo("/");
         Authentication who = signedIn(result);
@@ -185,17 +213,21 @@ class SamlSignInTest {
     void aMappedGroupAttributeGrantsItsRole() throws Exception {
         Started started = signInStarted();
         TestSamlIdentityProvider.Answer answer = answer(started, "sally");
-        answer.attributes = Map.of("groups", List.of("CertAlert-Auditors"));
-        assertThat(roles(signedIn(answerWith(provider.respond(answer), started.relayState())))).contains("ROLE_AUDITOR");
+        // CertAlert-Admins is a directory group the configuration names; said by the
+        // provider, it is the provider's group, and grants nothing.
+        answer.attributes = Map.of("groups", List.of("CertAlert-Auditors", "CertAlert-Admins"));
+        assertThat(roles(signedIn(answerWith(provider.respond(answer), started))))
+                .contains("ROLE_AUDITOR")
+                .doesNotContain("ROLE_ADMIN");
     }
 
     @Test
     void theSameAnswerTwiceIsRefusedTheSecondTime() throws Exception {
         Started started = signInStarted();
         String response = provider.respond(answer(started, "sally"));
-        assertThat(signedIn(answerWith(response, started.relayState()))).isNotNull();
+        assertThat(signedIn(answerWith(response, started))).isNotNull();
 
-        assertRefused(answerWith(response, started.relayState()));
+        assertRefused(answerWith(response, started));
     }
 
     @Test
@@ -204,8 +236,8 @@ class SamlSignInTest {
         Started started = signInStarted();
         TestSamlIdentityProvider.Answer unsolicited = answer(started, "sally");
         unsolicited.inResponseTo = null;
-        assertRefused(answerWith(provider.respond(unsolicited), null));
-        assertRefused(answerWith(provider.respond(unsolicited), started.relayState()));
+        assertRefused(answerWith(provider.respond(unsolicited), (String) null));
+        assertRefused(answerWith(provider.respond(unsolicited), started));
         assertThat(logins(head)).allSatisfy(line -> assertThat(line)
                 .contains("\"outcome\":\"failure\"", "\"method\":\"saml\""));
     }
@@ -215,7 +247,7 @@ class SamlSignInTest {
         Started started = signInStarted();
         TestSamlIdentityProvider.Answer answer = answer(started, "sally");
         answer.inResponseTo = "_some-other-request";
-        assertRefused(answerWith(provider.respond(answer), started.relayState()));
+        assertRefused(answerWith(provider.respond(answer), started));
     }
 
     @Test
@@ -223,7 +255,7 @@ class SamlSignInTest {
         Started started = signInStarted();
         TestSamlIdentityProvider.Answer answer = answer(started, "sally");
         answer.issuer = "https://idp.attacker.example/saml";
-        assertRefused(answerWith(provider.respond(answer), started.relayState()));
+        assertRefused(answerWith(provider.respond(answer), started));
     }
 
     @Test
@@ -231,7 +263,7 @@ class SamlSignInTest {
         Started started = signInStarted();
         TestSamlIdentityProvider.Answer answer = answer(started, "sally");
         answer.signed = false;
-        assertRefused(answerWith(provider.respond(answer), started.relayState()));
+        assertRefused(answerWith(provider.respond(answer), started));
     }
 
     @Test
@@ -239,7 +271,7 @@ class SamlSignInTest {
         Started started = signInStarted();
         TestSamlIdentityProvider.Answer answer = answer(started, "sally");
         answer.signedByAnotherKey = true;
-        assertRefused(answerWith(provider.respond(answer), started.relayState()));
+        assertRefused(answerWith(provider.respond(answer), started));
     }
 
     @Test
@@ -247,7 +279,7 @@ class SamlSignInTest {
         Started started = signInStarted();
         directory.addUser("mallory", "Mallory Changed", "mallory@example.gov");
         String response = provider.respond(answer(started, "sally"));
-        assertRefused(answerWith(TestSamlIdentityProvider.tampered(response, ">sally<", ">mallory<"), started.relayState()));
+        assertRefused(answerWith(TestSamlIdentityProvider.tampered(response, ">sally<", ">mallory<"), started));
     }
 
     @Test
@@ -255,7 +287,7 @@ class SamlSignInTest {
         Started started = signInStarted();
         TestSamlIdentityProvider.Answer answer = answer(started, "sally");
         answer.notOnOrAfter = Instant.now().minus(Duration.ofMinutes(10));
-        assertRefused(answerWith(provider.respond(answer), started.relayState()));
+        assertRefused(answerWith(provider.respond(answer), started));
     }
 
     @Test
@@ -263,16 +295,77 @@ class SamlSignInTest {
         Started started = signInStarted();
         TestSamlIdentityProvider.Answer answer = answer(started, "sally");
         answer.audience = "https://another-sp.example/saml";
-        assertRefused(answerWith(provider.respond(answer), started.relayState()));
+        assertRefused(answerWith(provider.respond(answer), started));
     }
 
     @Test
     void somebodyTheDirectoryDoesNotHoldIsRefused() throws Exception {
         long head = auditStore.headSeq();
         Started started = signInStarted();
-        assertRefused(answerWith(provider.respond(answer(started, "stranger")), started.relayState()));
+        assertRefused(answerWith(provider.respond(answer(started, "stranger")), started));
         assertThat(logins(head)).singleElement().satisfies(line -> assertThat(line)
                 .contains("\"outcome\":\"failure\"", "\"method\":\"saml\"", "does not hold"));
+    }
+
+    /** Login CSRF: an answer posted from a browser that did not start the sign-in. */
+    @Test
+    void anAnswerFromAnotherBrowserIsRefused() throws Exception {
+        Started started = signInStarted();
+        String response = provider.respond(answer(started, "sally"));
+
+        assertRefused(answerWith(mockMvc, response, started, false, request -> request));
+        Started other = signInStarted();
+        Started wrongCookie = new Started(started.requestId(), started.relayState(), other.binding());
+        assertRefused(answerWith(mockMvc, response, wrongCookie, true, request -> request));
+
+        // The browser that did start it still can.
+        assertThat(signedIn(answerWith(response, started))).isNotNull();
+    }
+
+    /**
+     * Behind a proxy with forwarded headers trusted - even by Spring's own filter, which
+     * believes a client's Forwarded host - the audience and destination a response must carry
+     * stay this deployment's, whatever the request says its host is.
+     */
+    @Test
+    void aSpoofedHostCannotChangeWhatAResponseMustBeAddressedTo() throws Exception {
+        for (jakarta.servlet.Filter forwarded : List.of(
+                new org.springframework.web.filter.ForwardedHeaderFilter(),
+                new com.winllc.certalert.config.ForwardedHeadersConfig.HostPinningForwardedHeaderFilter())) {
+            MockMvc behindProxy = MockMvcBuilders.webAppContextSetup(context)
+                    .addFilters(forwarded)
+                    .apply(SecurityMockMvcConfigurers.springSecurity())
+                    .build();
+            org.springframework.test.web.servlet.request.RequestPostProcessor spoof = request -> {
+                request.setServerName("sp-b.attacker.example");
+                request.addHeader("Host", "sp-b.attacker.example");
+                request.addHeader("Forwarded", "host=sp-b.attacker.example;proto=https");
+                request.addHeader("X-Forwarded-Host", "sp-b.attacker.example");
+                return request;
+            };
+
+            // Addressed to the other service provider: refused.
+            Started started = signInStarted();
+            TestSamlIdentityProvider.Answer forOther = answer(started, "sally");
+            forOther.audience = "https://sp-b.attacker.example/saml2/service-provider-metadata/saml";
+            forOther.destination = "https://sp-b.attacker.example/login/saml2/sso/saml";
+            MvcResult refused = answerWith(behindProxy, provider.respond(forOther), started, true, spoof);
+            // A forwarded-header filter makes the redirect absolute, on whatever host it believes.
+            assertThat(refused.getResponse().getRedirectedUrl()).endsWith("/login?sso_error");
+            assertThat(signedIn(refused)).isNull();
+
+            // Addressed to this one: accepted, whatever the headers said.
+            Started again = signInStarted();
+            assertThat(signedIn(answerWith(behindProxy, provider.respond(answer(again, "sally")), again, true, spoof)))
+                    .isNotNull();
+        }
+        // And the metadata says this deployment's addresses, not the request's.
+        mockMvc.perform(get("/saml2/service-provider-metadata/saml").with(request -> {
+                    request.setServerName("sp-b.attacker.example");
+                    return request;
+                }))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString(ACS)))
+                .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("attacker"))));
     }
 
     private static List<String> roles(Authentication who) {

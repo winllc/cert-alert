@@ -24,6 +24,11 @@ cert-alert:
       user-search-base: ou=people
       user-search-filter: "(uid={0})"
 
+  # Tests drive scheduled jobs one after another, against one shared database; the minimum
+  # hold that keeps a late replica from repeating a firing would make the second wait.
+  cluster:
+    scheduled-lock-at-least-for: 0s
+
   # Tests send queued mail themselves (MailOutbox.deliver / deliverDue); nothing in the
   # background picks up another test's messages.
   mail:

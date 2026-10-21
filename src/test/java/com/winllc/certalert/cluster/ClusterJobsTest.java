@@ -107,6 +107,24 @@ class ClusterJobsTest {
         assertThat(locks.runExclusively("test-job", () -> {})).isTrue();
     }
 
+    /**
+     * A replica whose schedule fires a little late must not run the same firing again: a
+     * scheduled run holds its lock for a while after finishing.
+     */
+    @Test
+    void aScheduledRunHoldsItsLockAfterItFinishes() {
+        ClusterProperties held = new ClusterProperties();
+        held.setScheduledLockAtLeastFor(java.time.Duration.ofMinutes(10));
+        JobLocks first = new JobLocks(dataSource, held);
+        JobLocks late = new JobLocks(dataSource, held);
+        java.util.concurrent.atomic.AtomicInteger runs = new java.util.concurrent.atomic.AtomicInteger();
+
+        assertThat(first.runScheduled("test-digest", runs::incrementAndGet)).isTrue();
+        assertThat(late.runScheduled("test-digest", runs::incrementAndGet)).isFalse();
+        assertThat(runs).hasValue(1);
+        new org.springframework.jdbc.core.JdbcTemplate(dataSource).update("DELETE FROM shedlock WHERE name = 'test-digest'");
+    }
+
     @Test
     void aRunStartedByHandAnswersAtOnceAndIsAskedAfter() throws Exception {
         long requested = audit.count();
@@ -144,7 +162,7 @@ class ClusterJobsTest {
             JobRunsAwait.finished(mockMvc,
                             mockMvc.perform(post("/api/v1/sync/refresh").with(admin()).with(csrf())), admin())
                     .andExpect(jsonPath("$.state").value("SKIPPED"))
-                    .andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("already going")));
+                    .andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("this run did nothing")));
         } finally {
             release.countDown();
             scheduled.join(10_000);
@@ -171,9 +189,13 @@ class ClusterJobsTest {
     }
 
     @Test
-    void aReaderCannotStartOne() throws Exception {
+    void aReaderCannotStartOneNorReadThem() throws Exception {
         mockMvc.perform(post("/api/v1/sync/refresh").with(user("reader").roles("USER")).with(csrf()))
                 .andExpect(status().isForbidden());
+        // A run's result can name the people a round-up wrote to.
+        mockMvc.perform(get("/api/v1/jobs").with(user("reader").roles("USER"))).andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/jobs/nope").with(user("reader").roles("USER"))).andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/jobs").with(user("auditor").roles("USER", "AUDITOR"))).andExpect(status().isOk());
     }
 
     private static void await(CountDownLatch latch) {

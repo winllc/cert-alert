@@ -50,12 +50,19 @@ import org.springframework.web.context.WebApplicationContext;
     "cert-alert.sso.oidc.scopes=openid",
     "cert-alert.sso.oidc.groups-claim=groups",
     "cert-alert.sso.oidc.clock-skew=30s",
-    "cert-alert.security.groups.admin[0]=cert-alert-admins",
+    "cert-alert.sso.oidc.admin-groups[0]=cert-alert-admins",
+    // A directory group: an IdP group spelled the same - which anybody able to create groups
+    // there could make - is never matched against it.
+    "cert-alert.security.groups.admin[0]=" + OidcSignInTest.DIRECTORY_ADMINS,
+    "cert-alert.sso.public-url=" + OidcSignInTest.PUBLIC_URL,
     // The sign-in search covers the whole tree, as it does by default; the sweep does not.
     "cert-alert.security.ldap.user-search-base="
 })
 @ActiveProfiles("test")
 class OidcSignInTest {
+
+    static final String PUBLIC_URL = "https://certalert.example.gov";
+    static final String DIRECTORY_ADMINS = "cn=CertAlert Admins,ou=groups,dc=example,dc=test";
 
     private static EmbeddedDirectory directory;
     private static TestOidcProvider provider;
@@ -123,6 +130,8 @@ class OidcSignInTest {
         // PKCE, with a client secret or without.
         assertThat(query).containsEntry("code_challenge_method", "S256").containsKey("code_challenge");
         assertThat(query).containsKey("nonce").containsKey("state");
+        // Pinned to the public address, not built from the request's host.
+        assertThat(query).containsEntry("redirect_uri", PUBLIC_URL + "/login/oauth2/code/oidc");
         provider.authorizationRequested(query.get("nonce"), query.get("code_challenge"));
         provider.nextToken(token, extra, otherKey);
         return mockMvc.perform(get("/login/oauth2/code/oidc")
@@ -197,7 +206,8 @@ class OidcSignInTest {
         assertThat(roles(signedIn(admin))).contains("ROLE_ADMIN");
 
         MockHttpSession notAdmin = new MockHttpSession();
-        signIn(notAdmin, Map.of("preferred_username", "olivia", "groups", List.of("admins", "Administrators")));
+        signIn(notAdmin, Map.of("preferred_username", "olivia",
+                "groups", List.of("admins", "Administrators", DIRECTORY_ADMINS)));
         assertThat(roles(signedIn(notAdmin))).containsExactly("ROLE_USER");
     }
 
@@ -262,11 +272,27 @@ class OidcSignInTest {
     @Test
     void aDnIsMatchedToTheEntryAtIt() {
         assertThat(identities.resolve("uid=olivia," + EmbeddedDirectory.PEOPLE_DN, SsoProperties.Match.DN, List.of(),
-                        DirectoryPrincipal.AuthenticationMethod.OIDC))
+                        new SsoProperties.Oidc(), DirectoryPrincipal.AuthenticationMethod.OIDC))
                 .hasValueSatisfying(person -> assertThat(person.getDirectoryUserId()).isNotNull());
         assertThat(identities.resolve("uid=olivia,o=elsewhere", SsoProperties.Match.DN, List.of(),
-                        DirectoryPrincipal.AuthenticationMethod.OIDC))
+                        new SsoProperties.Oidc(), DirectoryPrincipal.AuthenticationMethod.OIDC))
                 .isEmpty();
+    }
+
+    @Test
+    void aSpoofedHostCannotMoveTheRedirectUri() throws Exception {
+        MvcResult start = MockMvcBuilders.webAppContextSetup(context)
+                .addFilters(new org.springframework.web.filter.ForwardedHeaderFilter())
+                .apply(SecurityMockMvcConfigurers.springSecurity())
+                .build()
+                .perform(get("/oauth2/authorization/oidc").with(request -> {
+                    request.setServerName("evil.example");
+                    request.addHeader("Forwarded", "host=evil.example;proto=https");
+                    return request;
+                }))
+                .andReturn();
+        assertThat(query(start.getResponse().getRedirectedUrl()))
+                .containsEntry("redirect_uri", PUBLIC_URL + "/login/oauth2/code/oidc");
     }
 
     private List<String> logins(long head) {

@@ -68,6 +68,9 @@ public class MailOutbox {
 
     private static final Logger log = LoggerFactory.getLogger(MailOutbox.class);
 
+    /** How long a claim on a message lasts, should the replica sending it die first. */
+    static final Duration CLAIM_LEASE = Duration.ofMinutes(10);
+
     /** The lock every send holds, on whichever replica. */
     static final String LOCK = "mail-outbox";
 
@@ -209,6 +212,9 @@ public class MailOutbox {
             return locks.runExclusively(LOCK, () -> {
                 int sent = 0;
                 int failedInARow = 0;
+                // Whatever a replica claimed and never finished, its lease over, goes back in.
+                independent.executeWithoutResult(status -> outbox.releaseLapsed(
+                        OutboundEmail.State.SENDING, OutboundEmail.State.PENDING, Instant.now(clock)));
                 pass:
                 while (true) {
                     List<Long> due = outbox.findDue(
@@ -235,7 +241,8 @@ public class MailOutbox {
                     }
                 }
                 independent.executeWithoutResult(status -> outbox.deleteFinishedBefore(
-                        OutboundEmail.State.PENDING, Instant.now(clock).minus(properties.getKeep())));
+                        OutboundEmail.State.PENDING, OutboundEmail.State.SENDING,
+                        Instant.now(clock).minus(properties.getKeep())));
                 return sent;
             }).orElse(0);
         } finally {
@@ -335,6 +342,13 @@ public class MailOutbox {
             return new Attempt(message, false, "no mail server is configured (spring.mail.host)");
         }
         Instant now = Instant.now(clock);
+        // Claimed in the database before it is sent: of two replicas reaching it at once,
+        // one sends it and the other moves on.
+        Integer claimed = independent.execute(status -> outbox.claim(
+                id, OutboundEmail.State.PENDING, OutboundEmail.State.SENDING, now.plus(CLAIM_LEASE)));
+        if (claimed == null || claimed == 0) {
+            return new Attempt(null, false, null, false);
+        }
         try {
             send(message);
         } catch (MessagingException | RuntimeException e) {

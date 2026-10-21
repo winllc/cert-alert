@@ -5,17 +5,20 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Roles from groups, bound from {@code cert-alert.security.groups}: a directory group (its
- * DN, from the person's {@code memberOf}) or a group an identity provider says a person is
- * in (whatever its groups claim or attribute carries - a name, a DN, an object id).
+ * Roles from directory groups, bound from {@code cert-alert.security.groups}: a group's DN,
+ * from the person's {@code memberOf}. Only the directory's groups are matched against these
+ * lists. A single sign-on provider's groups have lists of their own
+ * ({@code cert-alert.sso.<provider>.admin-groups}, {@code auditor-groups}), so a group
+ * somebody can create at the provider, named like a directory group's DN, grants nothing
+ * here.
  *
- * <p>Nothing is granted by a group unless it is listed here. In particular nobody becomes
- * an administrator because an identity provider says they are in a group called "admins":
- * the group has to be named in {@code admin}.
+ * <p>Nothing is granted by a group unless it is listed. In particular nobody becomes an
+ * administrator because they are in a group called "admins": the group has to be named in
+ * {@code admin}.
  */
 public class RoleProperties {
 
-    /** Groups whose members are administrators. */
+    /** Directory groups (DNs) whose members are administrators. */
     private List<String> admin = new ArrayList<>();
 
     /**
@@ -26,8 +29,7 @@ public class RoleProperties {
 
     /**
      * Whether a person's directory groups count, read from {@link #memberOfAttribute} on
-     * their entry when they sign in, however they sign in. Off reads only what an identity
-     * provider says.
+     * their entry when they sign in, however they sign in.
      */
     private boolean directory = true;
 

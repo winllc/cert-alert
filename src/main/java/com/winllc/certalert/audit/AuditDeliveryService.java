@@ -204,7 +204,7 @@ public class AuditDeliveryService implements SmartLifecycle {
 
     private void succeeded(String name, long seq) {
         boolean recovered = Boolean.TRUE.equals(transaction.execute(status -> {
-            AuditDelivery cursor = cursors.findById(name).orElseGet(() -> cursors.save(new AuditDelivery(name, 0)));
+            AuditDelivery cursor = cursors.lockByOutput(name).orElseGet(() -> cursors.save(new AuditDelivery(name, 0)));
             boolean wasAlerted = cursor.isAlerted();
             cursor.delivered(seq, Instant.now(clock));
             cursor.setAlerted(false);
@@ -227,7 +227,7 @@ public class AuditDeliveryService implements SmartLifecycle {
         String message = error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
         Instant now = Instant.now(clock);
         Optional<String> alert = Optional.ofNullable(transaction.execute(status -> {
-            AuditDelivery cursor = cursors.findById(name).orElseGet(() -> cursors.save(new AuditDelivery(name, 0)));
+            AuditDelivery cursor = cursors.lockByOutput(name).orElseGet(() -> cursors.save(new AuditDelivery(name, 0)));
             cursor.failed(message, now);
             if (!cursor.isAlerted()
                     && Duration.between(cursor.getFailingSince(), now).compareTo(properties.getFailureAlertAfter()) >= 0) {

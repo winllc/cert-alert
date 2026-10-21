@@ -55,7 +55,7 @@ public class AuditScheduler {
     @Scheduled(cron = "${cert-alert.audit.retention.cron}", zone = "UTC")
     public void prune() {
         try {
-            locks.runExclusively("audit-retention", (Runnable) retention::prune);
+            locks.runScheduled("audit-retention", retention::prune);
         } catch (RuntimeException e) {
             log.error("Pruning the audit trail failed", e);
         }

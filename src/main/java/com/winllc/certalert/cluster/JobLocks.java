@@ -44,6 +44,7 @@ public class JobLocks {
 
     private final LockProvider provider;
     private final Duration lockAtMostFor;
+    private final Duration scheduledAtLeastFor;
     private final ScheduledExecutorService renewals = Executors.newSingleThreadScheduledExecutor(runnable -> {
         Thread thread = new Thread(runnable, "job-lock-renewal");
         thread.setDaemon(true);
@@ -54,6 +55,8 @@ public class JobLocks {
         this.lockAtMostFor = properties.getLockAtMostFor().compareTo(MINIMUM) < 0
                 ? MINIMUM
                 : properties.getLockAtMostFor();
+        Duration atLeast = properties.getScheduledLockAtLeastFor();
+        this.scheduledAtLeastFor = atLeast == null || atLeast.isNegative() ? Duration.ZERO : atLeast;
         JdbcTemplateLockProvider jdbc = new JdbcTemplateLockProvider(JdbcTemplateLockProvider.Configuration.builder()
                 .withJdbcTemplate(new JdbcTemplate(dataSource))
                 .withTableName("shedlock")
@@ -69,7 +72,25 @@ public class JobLocks {
      *     nothing (a job that returns null also comes back empty)
      */
     public <T> Optional<T> runExclusively(String job, Supplier<T> work) {
-        Optional<SimpleLock> lock = provider.lock(new LockConfiguration(Instant.now(), job, lockAtMostFor, Duration.ZERO));
+        return runExclusively(job, Duration.ZERO, work);
+    }
+
+    /**
+     * A scheduled run: as {@link #runExclusively(String, Runnable)}, and the lock is then held
+     * for {@code cert-alert.cluster.scheduled-lock-at-least-for} from when it was taken, however
+     * soon the job finished - so a replica whose schedule fires a little later does not run the
+     * same firing again.
+     */
+    public boolean runScheduled(String job, Runnable work) {
+        return runExclusively(job, scheduledAtLeastFor, () -> {
+            work.run();
+            return Boolean.TRUE;
+        }).isPresent();
+    }
+
+    private <T> Optional<T> runExclusively(String job, Duration atLeastFor, Supplier<T> work) {
+        Duration atMost = atLeastFor.compareTo(lockAtMostFor) >= 0 ? atLeastFor.plus(lockAtMostFor) : lockAtMostFor;
+        Optional<SimpleLock> lock = provider.lock(new LockConfiguration(Instant.now(), job, atMost, atLeastFor));
         if (lock.isEmpty()) {
             log.info("Not running {}: it is already running", job);
             return Optional.empty();

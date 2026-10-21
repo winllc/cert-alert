@@ -68,7 +68,9 @@ public class SsoIdentityResolver {
 
     /**
      * @param name the uid or DN the provider gave
-     * @param groups the groups it says they are in (they count only where configured)
+     * @param groups the groups it says they are in: they grant a role only where the
+     *     provider's own {@code admin-groups} or {@code auditor-groups} names them
+     * @param provider the provider that signed them in, whose lists those are
      * @return the person, with their roles; empty where the directory does not hold them
      */
     @Transactional(readOnly = true)
@@ -76,14 +78,16 @@ public class SsoIdentityResolver {
             String name,
             SsoProperties.Match match,
             Collection<String> groups,
+            SsoProperties.Provider provider,
             DirectoryPrincipal.AuthenticationMethod method) {
         if (name == null || name.isBlank()) {
             return Optional.empty();
         }
+        Set<String> roles = rolesFrom(groups, provider);
         String value = name.trim();
         Optional<DirectoryUser> cached = match == SsoProperties.Match.DN ? resolver.findByDn(value) : cachedByUid(value);
         if (cached.isPresent()) {
-            return Optional.of(resolver.principalFor(cached.get(), method, groups));
+            return Optional.of(resolver.principalFor(cached.get(), method, roles));
         }
         Optional<DirContextOperations> entry;
         try {
@@ -97,10 +101,46 @@ public class SsoIdentityResolver {
             // Swept since it was searched for, or reached by a DN spelled differently.
             Optional<DirectoryUser> byDn = resolver.findByDn(dn);
             if (byDn.isPresent()) {
-                return resolver.principalFor(byDn.get(), method, groups);
+                return resolver.principalFor(byDn.get(), method, roles);
             }
-            return resolver.unknownPrincipal(value, dn, uidsOf(found), method, groups);
+            return resolver.unknownPrincipal(value, dn, uidsOf(found), method, roles);
         });
+    }
+
+    /**
+     * The roles a provider's groups grant: compared - without regard to case, and DNs in one
+     * spelling - with that provider's own lists, and nothing else.
+     */
+    static Set<String> rolesFrom(Collection<String> groups, SsoProperties.Provider provider) {
+        Set<String> said = normalised(groups);
+        Set<String> roles = new LinkedHashSet<>();
+        if (said.stream().anyMatch(normalised(provider.getAdminGroups())::contains)) {
+            roles.add(DirectoryPrincipalResolver.ROLE_ADMIN);
+        }
+        if (said.stream().anyMatch(normalised(provider.getAuditorGroups())::contains)) {
+            roles.add(DirectoryPrincipalResolver.ROLE_AUDITOR);
+        }
+        return roles;
+    }
+
+    private static Set<String> normalised(Collection<String> values) {
+        Set<String> out = new LinkedHashSet<>();
+        if (values != null) {
+            for (String value : values) {
+                String n = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+                if (n.indexOf('=') > 0) {
+                    try {
+                        n = new LdapName(new LdapName(n).getRdns()).toString();
+                    } catch (InvalidNameException e) {
+                        // not a DN after all
+                    }
+                }
+                if (!n.isEmpty()) {
+                    out.add(n);
+                }
+            }
+        }
+        return out;
     }
 
     /** The one cached person whose uid this is - their uid, not an address or a name. */

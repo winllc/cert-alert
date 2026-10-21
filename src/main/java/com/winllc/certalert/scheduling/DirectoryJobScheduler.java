@@ -141,7 +141,7 @@ public class DirectoryJobScheduler {
             return;
         }
         try {
-            locks.runExclusively(EXPIRY_DIGEST, (Runnable) () -> {
+            locks.runScheduled(EXPIRY_DIGEST, () -> {
                 if (licensing.mayRun("notifications", "expiry digest")) {
                     jobs.run("expiry digest", notificationService::digest);
                 }
@@ -204,8 +204,8 @@ public class DirectoryJobScheduler {
      */
     private void runOnce(SyncJob job, String name, java.util.function.Supplier<?> work) {
         try {
-            if (!locks.runExclusively(job.lockName(), (Runnable) () -> jobs.run(name, work))) {
-                log.info("Skipping the scheduled {} job: a run of it has not finished", job);
+            if (!locks.runScheduled(job.lockName(), () -> jobs.run(name, work))) {
+                log.info("Skipping the scheduled {} job: it is running, or has just run, on this replica or another", job);
             }
         } catch (RuntimeException e) {
             // Already logged with context by the service; swallowing it here keeps the

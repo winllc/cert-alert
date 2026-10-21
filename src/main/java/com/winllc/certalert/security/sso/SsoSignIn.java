@@ -134,6 +134,14 @@ public class SsoSignIn {
 
     /** Adds whichever providers are configured to the chain. */
     public void apply(HttpSecurity http, AuthenticationEventPublisher events) throws Exception {
+        if (properties.getOidc().isEnabled() || properties.getSaml().isEnabled()) {
+            // At startup, not at the first sign-in: a deployment without its public address
+            // configured does not start with single sign-on half working.
+            String publicUrl = properties.requirePublicUrl();
+            if (properties.getSaml().isEnabled()) {
+                entityIdOf(properties.getSaml(), publicUrl);
+            }
+        }
         if (properties.getOidc().isEnabled()) {
             applyOidc(http);
             log.info("Single sign-on: OpenID Connect from {}", properties.getOidc().getIssuerUri());
@@ -180,12 +188,14 @@ public class SsoSignIn {
 
     /** The registration, from the provider's discovery document, read the first time it is wanted. */
     private ClientRegistrationRepository lazyRegistrations(SsoProperties.Oidc oidc) {
+        String publicUrl = properties.requirePublicUrl();
         Supplier<ClientRegistration> registration = SingletonSupplier.of(() -> {
             ClientRegistration.Builder builder = ClientRegistrations.fromOidcIssuerLocation(oidc.getIssuerUri())
                     .registrationId(SsoProperties.Oidc.REGISTRATION_ID)
                     .clientId(oidc.getClientId())
                     .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
-                    .redirectUri("{baseUrl}/login/oauth2/code/{registrationId}")
+                    // Pinned, not built from the request's Host or Forwarded headers.
+                    .redirectUri(publicUrl + "/login/oauth2/code/" + SsoProperties.Oidc.REGISTRATION_ID)
                     .scope(oidc.getScopes())
                     // Always present; the claim naming the person is read separately, so a
                     // token without it is refused as a sign-in rather than failing as an error.
@@ -222,7 +232,7 @@ public class SsoSignIn {
             Object name = claims.get(oidc.getUsernameClaim());
             Collection<String> groups = listOf(StringUtils.hasText(oidc.getGroupsClaim()) ? claims.get(oidc.getGroupsClaim()) : null);
             DirectoryPrincipal person = identities
-                    .resolve(name == null ? null : name.toString(), oidc.getMatch(), groups,
+                    .resolve(name == null ? null : name.toString(), oidc.getMatch(), groups, oidc,
                             DirectoryPrincipal.AuthenticationMethod.OIDC)
                     .orElseThrow(() -> {
                         String message = "The identity provider signed in " + describe(oidc.getUsernameClaim(), name)
@@ -318,7 +328,7 @@ public class SsoSignIn {
                 ? listOf(asserted.getAttribute(saml.getGroupsAttribute()))
                 : List.of();
         DirectoryPrincipal person = identities
-                .resolve(name == null ? null : name.toString(), saml.getMatch(), groups,
+                .resolve(name == null ? null : name.toString(), saml.getMatch(), groups, saml,
                         DirectoryPrincipal.AuthenticationMethod.SAML)
                 .orElseThrow(() -> new Saml2AuthenticationException(new Saml2Error(Saml2ErrorCodes.USERNAME_NOT_FOUND,
                         "The identity provider signed in "
@@ -330,12 +340,16 @@ public class SsoSignIn {
 
     /** The relying party, from the identity provider's metadata, read the first time it is wanted. */
     private RelyingPartyRegistrationRepository lazyRelyingParty(SsoProperties.Saml saml) {
+        String publicUrl = properties.requirePublicUrl();
+        String entityId = entityIdOf(saml, publicUrl);
         Supplier<RelyingPartyRegistration> registration = SingletonSupplier.of(() -> {
             RelyingPartyRegistration.Builder builder = RelyingPartyRegistrations
                     .fromMetadataLocation(saml.getMetadataLocation())
                     .registrationId(SsoProperties.Saml.REGISTRATION_ID)
-                    .entityId(saml.getEntityId())
-                    .assertionConsumerServiceLocation("{baseUrl}/login/saml2/sso/{registrationId}");
+                    // Both pinned: the audience and destination a response must carry are this
+                    // deployment's, whatever Host or Forwarded header the request came with.
+                    .entityId(entityId)
+                    .assertionConsumerServiceLocation(publicUrl + "/login/saml2/sso/" + SsoProperties.Saml.REGISTRATION_ID);
             if (StringUtils.hasText(saml.getSigningKeyLocation())) {
                 Saml2X509Credential signing = signingCredential(saml);
                 builder.signingX509Credentials(credentials -> credentials.add(signing));
@@ -368,6 +382,28 @@ public class SsoSignIn {
         } catch (IOException | java.security.cert.CertificateException e) {
             throw new IllegalStateException("Could not read the SAML signing key or certificate", e);
         }
+    }
+
+    /**
+     * The entity id: as configured - an absolute URI, never a template the request fills in -
+     * or {@code <public-url>/saml2/service-provider-metadata/saml}.
+     */
+    static String entityIdOf(SsoProperties.Saml saml, String publicUrl) {
+        String configured = saml.getEntityId() == null ? "" : saml.getEntityId().trim();
+        if (configured.isEmpty()) {
+            return publicUrl + "/saml2/service-provider-metadata/" + SsoProperties.Saml.REGISTRATION_ID;
+        }
+        java.net.URI uri;
+        try {
+            uri = new java.net.URI(configured);
+        } catch (java.net.URISyntaxException e) {
+            uri = null;
+        }
+        if (configured.contains("{") || uri == null || !uri.isAbsolute()) {
+            throw new IllegalStateException("cert-alert.sso.saml.entity-id must be an absolute URI (it is '" + configured
+                    + "'); a template such as {baseUrl} would let the request's Host header decide it");
+        }
+        return configured;
     }
 
     // --- shared --------------------------------------------------------------------------

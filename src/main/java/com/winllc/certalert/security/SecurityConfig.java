@@ -159,6 +159,11 @@ public class SecurityConfig {
                 // a value is the same decision made about one server. Reading either is
                 // ordinary: they are attributes of a server, shown with the rest of it.
                 // Verifying the audit chain reads it, and is an auditor's to do as well.
+                // Jobs started by hand: a run's result can name recipients and carry the
+                // mail server's or directory's own errors, so it is for the people who start
+                // them, and auditors.
+                .requestMatchers("/api/v1/jobs", "/api/v1/jobs/**")
+                .hasAnyRole("ADMIN", "AUDITOR")
                 .requestMatchers(HttpMethod.GET, "/api/v1/admin/**")
                 .hasAnyRole("ADMIN", "AUDITOR")
                 .requestMatchers(HttpMethod.POST, "/api/v1/admin/audit/verify")

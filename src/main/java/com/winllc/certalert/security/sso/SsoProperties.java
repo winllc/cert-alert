@@ -15,14 +15,63 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * address or a name. Somebody the directory does not hold is refused: the identity
  * provider says who somebody is; the directory says whether they are somebody this
  * application serves. Their roles come from the directory and the configuration, as for
- * anybody else, and from the provider's groups only where
- * {@code cert-alert.security.groups} names them.
+ * anybody else, and from the provider's groups only where that provider's own
+ * {@code admin-groups} or {@code auditor-groups} names them - lists kept apart from the
+ * directory's groups, so a group somebody can create at the provider can never be mistaken
+ * for a directory group of the same name.
+ *
+ * <p>Every address the providers are given - the OIDC redirect URI, the SAML entity id and
+ * assertion consumer - is built from {@link #publicUrl}, never from the request: a
+ * {@code Host} or {@code Forwarded} header a client sets cannot change what a response must
+ * be addressed to.
  */
 @ConfigurationProperties(prefix = "cert-alert.sso")
 public class SsoProperties {
 
+    /**
+     * The address people reach this application at, e.g. {@code https://certalert.example.gov}:
+     * what the providers are told to send people back to, and what a SAML response must be
+     * addressed to. Required when either provider is enabled.
+     */
+    private String publicUrl;
+
     private final Oidc oidc = new Oidc();
     private final Saml saml = new Saml();
+
+    public String getPublicUrl() {
+        return publicUrl;
+    }
+
+    public void setPublicUrl(String publicUrl) {
+        this.publicUrl = publicUrl;
+    }
+
+    /**
+     * {@link #publicUrl}, checked: absolute http(s), no template, no query, without a trailing
+     * slash.
+     *
+     * @throws IllegalStateException where it is missing or is not one
+     */
+    public String requirePublicUrl() {
+        String value = publicUrl == null ? "" : publicUrl.trim();
+        while (value.endsWith("/")) {
+            value = value.substring(0, value.length() - 1);
+        }
+        java.net.URI uri;
+        try {
+            uri = new java.net.URI(value);
+        } catch (java.net.URISyntaxException e) {
+            uri = null;
+        }
+        if (value.isEmpty() || value.contains("{") || uri == null || uri.getHost() == null
+                || uri.getQuery() != null || uri.getFragment() != null
+                || !("https".equalsIgnoreCase(uri.getScheme()) || "http".equalsIgnoreCase(uri.getScheme()))) {
+            throw new IllegalStateException("cert-alert.sso.public-url (CERT_ALERT_SSO_PUBLIC_URL) must be the absolute "
+                    + "address people reach this application at, e.g. https://certalert.example.gov, when single "
+                    + "sign-on is enabled; it is '" + publicUrl + "'");
+        }
+        return value;
+    }
 
     public Oidc getOidc() {
         return oidc;
@@ -52,6 +101,31 @@ public class SsoProperties {
 
         /** How far apart this application's clock and the provider's may be. */
         private Duration clockSkew = Duration.ofMinutes(2);
+
+        /**
+         * Groups, as this provider names them, whose members are administrators. Only this
+         * provider's groups are matched against it, never the directory's.
+         */
+        private java.util.List<String> adminGroups = new ArrayList<>();
+
+        /** Groups, as this provider names them, whose members are auditors. */
+        private java.util.List<String> auditorGroups = new ArrayList<>();
+
+        public java.util.List<String> getAdminGroups() {
+            return adminGroups;
+        }
+
+        public void setAdminGroups(java.util.List<String> adminGroups) {
+            this.adminGroups = adminGroups;
+        }
+
+        public java.util.List<String> getAuditorGroups() {
+            return auditorGroups;
+        }
+
+        public void setAuditorGroups(java.util.List<String> auditorGroups) {
+            this.auditorGroups = auditorGroups;
+        }
 
         public boolean isEnabled() {
             return enabled;
@@ -92,7 +166,7 @@ public class SsoProperties {
      */
     public static class Oidc extends Provider {
 
-        /** The registration id, in the redirect URI: {@code {baseUrl}/login/oauth2/code/oidc}. */
+        /** The registration id, in the redirect URI: {@code <public-url>/login/oauth2/code/oidc}. */
         public static final String REGISTRATION_ID = "oidc";
 
         /** The issuer; its discovery document is read at startup. Must match the tokens' iss exactly. */
@@ -178,14 +252,18 @@ public class SsoProperties {
      */
     public static class Saml extends Provider {
 
-        /** The registration id: {@code {baseUrl}/login/saml2/sso/saml} is the assertion consumer. */
+        /** The registration id: {@code <public-url>/login/saml2/sso/saml} is the assertion consumer. */
         public static final String REGISTRATION_ID = "saml";
 
         /** The identity provider's metadata: an https:// URL, or file: for a copy on disk. */
         private String metadataLocation;
 
-        /** This service provider's entity id, as registered with the identity provider. */
-        private String entityId = "{baseUrl}/saml2/service-provider-metadata/{registrationId}";
+        /**
+         * This service provider's entity id, as registered with the identity provider: an
+         * absolute URI. Empty means {@code <public-url>/saml2/service-provider-metadata/saml}.
+         * Never a template filled in from the request.
+         */
+        private String entityId = "";
 
         /**
          * A PEM private key and certificate to sign authentication requests with, for an

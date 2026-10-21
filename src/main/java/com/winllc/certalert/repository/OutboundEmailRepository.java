@@ -33,8 +33,36 @@ public interface OutboundEmailRepository extends JpaRepository<OutboundEmail, Lo
 
     /** Forgets what is finished with - sent, given up on or replaced - once it is this old. */
     @Modifying
-    @Query("delete from OutboundEmail e where e.state <> :pending and e.createdAt < :before")
-    int deleteFinishedBefore(@Param("pending") OutboundEmail.State pending, @Param("before") Instant before);
+    @Query("delete from OutboundEmail e where e.state <> :pending and e.state <> :sending and e.createdAt < :before")
+    int deleteFinishedBefore(
+            @Param("pending") OutboundEmail.State pending,
+            @Param("sending") OutboundEmail.State sending,
+            @Param("before") Instant before);
 
     long countByState(OutboundEmail.State state);
+
+    /**
+     * Claims a waiting message for sending, if nobody else has: one replica, one send.
+     *
+     * @param leaseUntil when the claim lapses, should the claimant die before it finishes
+     * @return 1 if this caller has it
+     */
+    @Modifying
+    @Query("""
+            update OutboundEmail e set e.state = :sending, e.nextAttemptAt = :leaseUntil
+            where e.id = :id and e.state = :pending
+            """)
+    int claim(
+            @Param("id") Long id,
+            @Param("pending") OutboundEmail.State pending,
+            @Param("sending") OutboundEmail.State sending,
+            @Param("leaseUntil") Instant leaseUntil);
+
+    /** Puts back what a replica claimed and never finished sending. */
+    @Modifying
+    @Query("update OutboundEmail e set e.state = :pending where e.state = :sending and e.nextAttemptAt < :now")
+    int releaseLapsed(
+            @Param("sending") OutboundEmail.State sending,
+            @Param("pending") OutboundEmail.State pending,
+            @Param("now") Instant now);
 }

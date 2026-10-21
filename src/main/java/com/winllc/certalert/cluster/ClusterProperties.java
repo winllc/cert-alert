@@ -20,6 +20,22 @@ public class ClusterProperties {
      */
     private Duration lockAtMostFor = Duration.ofMinutes(10);
 
+    /**
+     * How long a scheduled run keeps its job's lock at the least, however quickly it
+     * finished. Every replica's schedule fires; one whose clock or scheduler runs late must
+     * still find the lock held, or it would run the job - the round-up, say - a second time.
+     * Keep it below the shortest interval of any schedule (the expiry refresh's, hourly).
+     */
+    private Duration scheduledLockAtLeastFor = Duration.ofMinutes(10);
+
+    public Duration getScheduledLockAtLeastFor() {
+        return scheduledLockAtLeastFor;
+    }
+
+    public void setScheduledLockAtLeastFor(Duration scheduledLockAtLeastFor) {
+        this.scheduledLockAtLeastFor = scheduledLockAtLeastFor;
+    }
+
     /** How long a run started by hand is kept, for the page that asked after it. */
     private Duration runRetention = Duration.ofDays(7);
 

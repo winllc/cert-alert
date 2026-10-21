@@ -152,6 +152,36 @@ class MailOutboxTest {
                 .satisfies(notification -> assertThat(notification.getEmailedAt()).isNotNull());
     }
 
+    /** Two replicas reaching one message at once: one claims it and sends it; the other moves on. */
+    @Test
+    void aMessageIsClaimedByOneSenderOnly() {
+        mailSender.down = true;
+        notificationService.digest();
+        mailSender.down = false;
+        OutboundEmail waiting = outboundEmails.findAll().getFirst();
+        Instant lease = Instant.now().plus(Duration.ofMinutes(10));
+        org.springframework.transaction.support.TransactionTemplate tx =
+                new org.springframework.transaction.support.TransactionTemplate(transactions);
+
+        // Another replica has it.
+        Integer first = tx.execute(status -> outboundEmails.claim(
+                waiting.getId(), OutboundEmail.State.PENDING, OutboundEmail.State.SENDING, lease));
+        Integer second = tx.execute(status -> outboundEmails.claim(
+                waiting.getId(), OutboundEmail.State.PENDING, OutboundEmail.State.SENDING, lease));
+        assertThat(first).isEqualTo(1);
+        assertThat(second).isZero();
+        assertThat(outbox.deliver(List.of(waiting.getId())).sent()).isZero();
+        assertThat(mailSender.sent).isEmpty();
+
+        // It died before finishing: once the lease is over, the message is back and goes once.
+        tx.executeWithoutResult(status -> outboundEmails.releaseLapsed(
+                OutboundEmail.State.SENDING, OutboundEmail.State.PENDING, lease.plusSeconds(1)));
+        assertThat(outbox.deliver(List.of(waiting.getId())).sent()).isEqualTo(1);
+        assertThat(mailSender.sent).hasSize(1);
+        assertThat(outboundEmails.findById(waiting.getId()).orElseThrow().getState())
+                .isEqualTo(OutboundEmail.State.SENT);
+    }
+
     @Test
     void aMailServerThatIsDownLosesNothing() {
         mailSender.down = true;

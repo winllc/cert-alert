@@ -137,7 +137,7 @@ public class DemoSecurityConfig {
                         // roles differ once every write is refused anyway.
                         .requestMatchers(ManagementEndpoints.prometheusScrape(environment))
                         .permitAll()
-                        .requestMatchers("/admin", "/api/v1/audit/summary", "/actuator/**")
+                        .requestMatchers("/admin", "/api/v1/audit/summary", "/actuator/**", "/api/v1/jobs", "/api/v1/jobs/**")
                         .hasRole("ADMIN")
                         // The audit log page and its reads, and verifying the trail - which
                         // writes nothing but its own audit record.
