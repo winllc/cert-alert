@@ -66,9 +66,10 @@ end user license agreement ([`EULA`](EULA) - a placeholder until ENS Solutions p
 text there, to be replaced before a release): its source being visible does not license it. It needs an **ENS license** to run. Licenses are issued by the ENS licensing portal
 (an evaluation, or the license issued against an order) in the portal's `ens-license/1`
 format, for the product id **`certalert`**, and are checked offline: the application
-verifies the Ed25519 signature against the ENS public key built into it
-(`license/EnsKeys.java`; not configurable), so no network is involved. The verifier is the
-portal's zero-dependency library, copied unchanged into `com.enssolutions.license`.
+verifies the license's Ed25519 or ECDSA P-256 signature against the ENS public keys built
+into it (`license/EnsKeys.java`; not configurable), so no network is involved. The verifier is
+the portal's zero-dependency library (ens-license 1.2.0), copied unchanged into
+`com.enssolutions.license`; license state is kept in files as before.
 
 ### What the license does
 
@@ -679,14 +680,20 @@ profile; see Red Hat's *Configuring OpenJDK on RHEL with FIPS*). The application
 setting of its own for that, and claims no validation of its own: the validated module is the
 platform's.
 
-**The license check is not yet supported in FIPS mode.** An ENS license is signed with
-Ed25519, which CertAlert verifies through the platform's providers like everything else. It
-has not been tested whether a host in FIPS mode offers Ed25519 to it; where it does not,
-CertAlert can refuse a valid license (as one whose signature could not be checked) or fail
-to start. Version 1.1.0 of the ENS license library adds an ECDSA P-256 co-signature so that a
-license can be checked with the FIPS-mode providers; CertAlert does not use that version yet.
-Until a release says otherwise here, do not rely on CertAlert accepting its license on a host
-in FIPS mode.
+**The license check in FIPS mode.** From this release CertAlert ships ens-license 1.2.0 and
+trusts two ENS production keys: Ed25519 (key id `dabdc531a28916c5`) and ECDSA P-256
+(prime256v1, key id `e0a2e4ff9c4f5bfc`). A license file may carry the same license signed by
+both; CertAlert accepts it if any signature with a trusted key verifies with an algorithm the
+platform provides, trying Ed25519 first. Java in FIPS mode has no Ed25519, so there the
+P-256 signature is the one that counts. Elsewhere nothing changes: Ed25519-only licenses keep
+working on hosts that are not in FIPS mode.
+
+Licenses issued before ENS enabled P-256 signing carry only an Ed25519 signature. On a FIPS
+host such a license is refused (`INVALID`, with a message that the file is signed only with
+Ed25519, which the Java runtime does not provide) and CertAlert runs unlicensed: before moving
+to a FIPS host, ask ENS Solutions for a re-signed file of the same license (it carries a
+P-256 signature) and upload it on the license screen. The installation id and revisions are
+unaffected.
 
 Not appropriate on a FIPS system, and off by default:
 

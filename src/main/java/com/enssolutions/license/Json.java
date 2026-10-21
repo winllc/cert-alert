@@ -1,4 +1,4 @@
-// From the ENS products-page repository, licensing/java (ens-license 1.2.0, commit 60378de). Copied unchanged; do not edit here.
+// From the ENS products-page repository, licensing/java (ens-license). Copied unchanged; do not edit here.
 package com.enssolutions.license;
 
 import java.util.ArrayList;
