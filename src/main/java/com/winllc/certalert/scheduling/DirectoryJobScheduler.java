@@ -11,9 +11,7 @@ import com.winllc.certalert.service.DirectoryPruneService;
 import com.winllc.certalert.service.DirectorySyncService;
 import com.winllc.certalert.service.NotificationService;
 import com.winllc.certalert.service.RevocationService;
-import java.util.EnumMap;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicBoolean;
+import com.winllc.certalert.cluster.JobLocks;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -46,9 +44,12 @@ import org.springframework.stereotype.Component;
  *       who has to renew it.
  * </ul>
  *
- * <p>Every job is guarded against overlapping itself. A sweep of a directory with 100,000+
- * entries can outlast its own interval, and two concurrent sweeps would fight over the
- * same rows to no benefit. A job that finds itself already running logs and stands down.
+ * <p>Every job is guarded against overlapping itself - on this replica and on any other, and
+ * whether the other run was scheduled or started by hand - by a lock in the database (see
+ * {@link JobLocks}). A sweep of a directory with 100,000+ entries can outlast its own
+ * interval, and two concurrent sweeps would fight over the same rows to no benefit. A job
+ * that finds itself already running logs and stands down. With more than one replica every
+ * replica's schedule fires, and the first to take the lock runs the job.
  *
  * <p>Every job is licensed (see {@link Licensing#mayRun}): the sweeps and the refresh are
  * {@code directory-sync}, revocation {@code revocation-checks}, certificate cleanup and
@@ -78,8 +79,7 @@ public class DirectoryJobScheduler {
     private final CertificateCleanupService cleanupService;
     private final LdapProperties properties;
     private final Licensing licensing;
-
-    private final Map<SyncJob, AtomicBoolean> running = new EnumMap<>(SyncJob.class);
+    private final JobLocks locks;
 
     public DirectoryJobScheduler(
             DirectorySyncService syncService,
@@ -91,7 +91,8 @@ public class DirectoryJobScheduler {
             RevocationService revocationService,
             CertificateCleanupService cleanupService,
             LdapProperties properties,
-            Licensing licensing) {
+            Licensing licensing,
+            JobLocks locks) {
         this.syncService = syncService;
         this.refreshService = refreshService;
         this.pruneService = pruneService;
@@ -102,9 +103,7 @@ public class DirectoryJobScheduler {
         this.cleanupService = cleanupService;
         this.properties = properties;
         this.licensing = licensing;
-        for (SyncJob job : SyncJob.values()) {
-            running.put(job, new AtomicBoolean(false));
-        }
+        this.locks = locks;
     }
 
     @Scheduled(cron = "${cert-alert.ldap.sync.users-cron}", zone = "UTC")
@@ -142,14 +141,18 @@ public class DirectoryJobScheduler {
             return;
         }
         try {
-            if (licensing.mayRun("notifications", "expiry digest")) {
-                jobs.run("expiry digest", notificationService::digest);
-            }
-            // Trimming old notifications is housekeeping for the in-app ones, which stay
-            // whatever the license includes - but nothing runs while it is not in full effect.
-            if (licensing.mayRun("notification trim")) {
-                jobs.run("notification trim", notificationService::trim, removed -> java.util.Map.of("removed", removed));
-            }
+            locks.runScheduled(EXPIRY_DIGEST, () -> {
+                if (licensing.mayRun("notifications", "expiry digest")) {
+                    jobs.run("expiry digest", notificationService::digest);
+                }
+                // Trimming old notifications is housekeeping for the in-app ones, which stay
+                // whatever the license includes - but nothing runs while it is not in full
+                // effect.
+                if (licensing.mayRun("notification trim")) {
+                    jobs.run("notification trim", notificationService::trim,
+                            removed -> java.util.Map.of("removed", removed));
+                }
+            });
         } catch (RuntimeException e) {
             log.error("The expiry digest failed", e);
         }
@@ -191,24 +194,23 @@ public class DirectoryJobScheduler {
         runOnce(SyncJob.PRUNE, "prune", pruneService::prune);
     }
 
+    /** The lock the round-up and its trim hold, scheduled or started by hand. */
+    public static final String EXPIRY_DIGEST = "expiry-digest";
+
     /**
-     * Runs the job unless it is already running, and never lets it escape as an exception.
-     * The run is audited as job.completed or job.failed.
+     * Runs the job unless it is already running - here or on another replica, scheduled or
+     * started by hand - and never lets it escape as an exception. The run is audited as
+     * job.completed or job.failed.
      */
     private void runOnce(SyncJob job, String name, java.util.function.Supplier<?> work) {
-        AtomicBoolean guard = running.get(job);
-        if (!guard.compareAndSet(false, true)) {
-            log.warn("Skipping the scheduled {} job: the previous run has not finished", job);
-            return;
-        }
         try {
-            jobs.run(name, work);
+            if (!locks.runScheduled(job.lockName(), () -> jobs.run(name, work))) {
+                log.info("Skipping the scheduled {} job: it is running, or has just run, on this replica or another", job);
+            }
         } catch (RuntimeException e) {
             // Already logged with context by the service; swallowing it here keeps the
             // scheduler alive for the next firing.
             log.error("Scheduled {} job failed", job, e);
-        } finally {
-            guard.set(false);
         }
     }
 }

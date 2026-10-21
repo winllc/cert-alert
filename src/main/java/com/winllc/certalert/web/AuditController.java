@@ -163,8 +163,8 @@ public class AuditController {
     }
 
     private void requireAdministrator(Authentication authentication) {
-        if (!SignedInDirectoryUser.isAdmin(authentication)) {
-            throw new AccessDeniedException("The whole audit trail is an administrator's to read");
+        if (!SignedInDirectoryUser.isAdmin(authentication) && !SignedInDirectoryUser.isAuditor(authentication)) {
+            throw new AccessDeniedException("The whole audit trail is an administrator's or an auditor's to read");
         }
     }
 

@@ -1,6 +1,10 @@
 package com.winllc.certalert.web;
 
-import com.winllc.certalert.audit.JobAudit;
+import com.winllc.certalert.cluster.JobRunController;
+import com.winllc.certalert.cluster.JobRunView;
+import com.winllc.certalert.cluster.JobRuns;
+import com.winllc.certalert.domain.SyncJob;
+import org.springframework.http.ResponseEntity;
 import com.winllc.certalert.license.RequiresFeature;
 import com.winllc.certalert.config.RevocationProperties;
 import com.winllc.certalert.domain.RevocationStatus;
@@ -25,7 +29,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/revocation")
 public class RevocationController {
 
-    private final JobAudit jobs;
+    private final JobRuns runs;
 
     private final RevocationService revocationService;
     private final CachedCertificateRepository certificates;
@@ -37,8 +41,8 @@ public class RevocationController {
             CachedCertificateRepository certificates,
             IssuerCertificates issuers,
             RevocationProperties properties,
-            JobAudit jobs) {
-        this.jobs = jobs;
+            JobRuns runs) {
+        this.runs = runs;
         this.revocationService = revocationService;
         this.certificates = certificates;
         this.issuers = issuers;
@@ -85,7 +89,10 @@ public class RevocationController {
     }
 
     @PostMapping("/check")
-    public RunResult check() {
-        return RunResult.of(jobs.run("revocation", revocationService::checkAll));
+    public ResponseEntity<JobRunView> check() {
+        // In the background, under the scheduled check's lock: 202 and a run to ask after,
+        // whose result is a RunResult.
+        return JobRunController.accepted(runs, "revocation", step -> RunResult.of(
+                step.exclusive(SyncJob.REVOCATION.lockName(), "revocation", revocationService::checkAll)));
     }
 }

@@ -7,6 +7,7 @@ import com.winllc.certalert.audit.AccessDenials;
 import com.winllc.certalert.audit.AuditingAccessDeniedHandler;
 import com.winllc.certalert.demo.DemoMode;
 import com.winllc.certalert.observability.ManagementEndpoints;
+import com.winllc.certalert.security.sso.SsoSignIn;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
@@ -26,7 +27,10 @@ import org.springframework.security.authorization.AuthorityAuthorizationManager;
 import org.springframework.security.authorization.AuthorizationManager;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
+import org.springframework.security.saml2.provider.service.authentication.Saml2AuthenticationException;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.logout.LogoutFilter;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.access.AccessDeniedHandlerImpl;
 import org.springframework.security.web.access.ExceptionTranslationFilter;
@@ -90,12 +94,14 @@ public class SecurityConfig {
             EnsX509Properties x509,
             ForwardedCertificates forwardedCertificates,
             AuthenticationEventPublisher authenticationEvents,
-            Environment environment)
+            Environment environment,
+            SsoSignIn sso)
             throws Exception {
 
         SecurityHeaders.apply(http, ens.getCsp().isReportOnly());
-        // Ahead of every sign-in filter, so nothing signs anybody in before they have agreed.
-        http.addFilterBefore(new ConsentFilter(consentBanner), X509AuthenticationFilter.class);
+        // Ahead of every sign-in filter - including those that send a browser off to a
+        // single sign-on provider - so nothing signs anybody in before they have agreed.
+        http.addFilterBefore(new ConsentFilter(consentBanner), LogoutFilter.class);
         // Then where the certificate comes from: the TLS handshake, or a trusted proxy's header.
         http.addFilterBefore(
                 new ClientCertificateHeaderFilter(x509, forwardedCertificates, authenticationEvents),
@@ -103,9 +109,16 @@ public class SecurityConfig {
         // After every sign-in filter, before anything is authorised: idle, absolute and
         // concurrent limits, the same whichever way somebody signed in.
         http.addFilterBefore(new SessionPolicyFilter(sessionPolicy), ExceptionTranslationFilter.class);
+        // Then, ahead of every rule below: an auditor changes nothing, whatever a rule says.
+        http.addFilterAfter(new ReadOnlyRoleFilter(), ExceptionTranslationFilter.class);
 
+        boolean singleSignOn = !sso.options().isEmpty();
         http.authorizeHttpRequests(authorize -> authorize
                 .requestMatchers(PUBLIC_PATHS)
+                .permitAll()
+                // Single sign-on's own endpoints, where it is configured: starting it, the
+                // provider's answer, and this service provider's SAML metadata.
+                .requestMatchers(singleSignOn ? SsoSignIn.PUBLIC_PATHS : new String[] {"/__no-single-sign-on"})
                 .permitAll()
                 // Liveness has to answer before anyone signs in; everything else the
                 // management endpoints expose is for administrators.
@@ -120,23 +133,41 @@ public class SecurityConfig {
                 // The administration page reads the whole audit trail: who has been here,
                 // what they touched and when. The endpoint behind it checks the same thing
                 // for itself, because a table is asked for directly as often as it is
-                // reached through the page it sits on.
+                // reached through the page it sits on. Auditors read it too; what they may
+                // not do is change anything (ReadOnlyRoleFilter, and the rules below).
+                .requestMatchers(HttpMethod.GET, "/admin", "/api/v1/audit/summary")
+                .hasAnyRole("ADMIN", "AUDITOR")
                 .requestMatchers("/admin", "/api/v1/audit/summary")
                 .hasRole("ADMIN")
                 // The audit log page: the whole trail, its export, verification, delivery
-                // status and the SIEM tokens. Administrators only; its API is under
-                // /api/v1/admin, below. The SIEM pull API has a chain of its own
-                // (AuditApiSecurityConfig), authenticated by bearer token.
+                // status and the SIEM tokens. Its API is under /api/v1/admin, below. The SIEM
+                // pull API has a chain of its own (AuditApiSecurityConfig), authenticated by
+                // bearer token.
+                .requestMatchers(HttpMethod.GET, "/admin/audit", "/admin/audit/**")
+                .hasAnyRole("ADMIN", "AUDITOR")
                 .requestMatchers("/admin/audit", "/admin/audit/**")
                 .hasRole("ADMIN")
                 // The license screen: what is installed, this installation's id, and the
-                // upload. Reachable whatever the license says, and only by administrators.
+                // upload. Reachable whatever the license says. Installing is an
+                // administrator's; an auditor may read it.
+                .requestMatchers(HttpMethod.GET, "/admin/license", "/admin/license/**")
+                .hasAnyRole("ADMIN", "AUDITOR")
                 .requestMatchers("/admin/license", "/admin/license/**")
                 .hasRole("ADMIN")
                 // Defining what this deployment keeps about its servers adds a field to
                 // every server at once, and retiring one takes every value with it; setting
                 // a value is the same decision made about one server. Reading either is
                 // ordinary: they are attributes of a server, shown with the rest of it.
+                // Verifying the audit chain reads it, and is an auditor's to do as well.
+                // Jobs started by hand: a run's result can name recipients and carry the
+                // mail server's or directory's own errors, so it is for the people who start
+                // them, and auditors.
+                .requestMatchers("/api/v1/jobs", "/api/v1/jobs/**")
+                .hasAnyRole("ADMIN", "AUDITOR")
+                .requestMatchers(HttpMethod.GET, "/api/v1/admin/**")
+                .hasAnyRole("ADMIN", "AUDITOR")
+                .requestMatchers(HttpMethod.POST, "/api/v1/admin/audit/verify")
+                .hasAnyRole("ADMIN", "AUDITOR")
                 .requestMatchers("/api/v1/admin/**")
                 .hasRole("ADMIN")
                 .requestMatchers(HttpMethod.PUT, "/api/v1/servers/*/attributes/**")
@@ -202,6 +233,9 @@ public class SecurityConfig {
 
         authenticationProviders.forEach(http::authenticationProvider);
 
+        // OpenID Connect and SAML, each only where it is configured.
+        sso.apply(http, authenticationEvents);
+
         http.formLogin(form -> form.loginPage("/login").permitAll())
                 .logout(logout -> logout
                         .addLogoutHandler(sessionPolicy::loggingOut)
@@ -228,7 +262,11 @@ public class SecurityConfig {
         DefaultAuthenticationEventPublisher events = new DefaultAuthenticationEventPublisher(publisher);
         events.setAdditionalExceptionMappings(Map.of(
                 RefusedCertificateException.class, AuthenticationFailureBadCredentialsEvent.class,
-                InternalAuthenticationServiceException.class, AuthenticationFailureServiceExceptionEvent.class));
+                InternalAuthenticationServiceException.class, AuthenticationFailureServiceExceptionEvent.class,
+                // A single sign-on refused: a token or response that did not check out, or
+                // a person the directory does not hold.
+                OAuth2AuthenticationException.class, AuthenticationFailureBadCredentialsEvent.class,
+                Saml2AuthenticationException.class, AuthenticationFailureBadCredentialsEvent.class));
         return events;
     }
 

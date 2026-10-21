@@ -52,9 +52,10 @@ holds the license, this installation's id and the license revisions seen. The in
 is what a bound license is tied to, so **keep this PVC**:
 
 - `helm upgrade` keeps it.
-- `helm uninstall` deletes it with the release, and a reinstall gets a new installation id (a
-  bound license must then be re-bound on the portal). To keep it across uninstalls, create the
-  PVC yourself and pass `persistence.license.existingClaim`.
+- `helm uninstall` and an Argo CD prune keep it too (`helm.sh/resource-policy: keep`,
+  `argocd.argoproj.io/sync-options: Prune=false`); delete it yourself when it is no longer
+  needed. The license state itself is kept in the database: the volume matters until an
+  upgraded installation has imported its id from it.
 
 The license screen shows the installation id; after the first sign-in it is also in
 `/var/lib/ens/certalert/installation-id` in the pod.
@@ -72,8 +73,10 @@ The license screen shows the installation id; after the first sign-in it is also
 | `image.pullPolicy` | `IfNotPresent` | |
 | `imagePullSecrets` | `[]` | e.g. `[{name: ghcr-pull}]` |
 | `nameOverride`, `fullnameOverride` | `""` | |
-| `replicaCount` | `1` | Only 1 is supported: the scheduled jobs and the changelog connector run in-process, and a second replica would run them twice |
-| `strategy.type` | `Recreate` | The old pod releases the license volume and stops its jobs before the new one starts |
+| `replicaCount` | `1` | Above 1 needs a shared license volume: see [High availability](#high-availability) |
+| `strategy` | `{}` | Empty: `Recreate` for one replica (the old pod releases the license volume first), `RollingUpdate` with `maxUnavailable: 0` above one |
+| `minReadySeconds` | `10` | How long a new pod must stay ready to count as available |
+| `podDisruptionBudget.enabled` / `.minAvailable` | `null` / `1` | `null`: on when `replicaCount` is above 1 |
 | `revisionHistoryLimit` | `3` | |
 | `serviceAccount.create` / `.name` / `.annotations` | `true` / `""` / `{}` | |
 | `automountServiceAccountToken` | `false` | The application uses no Kubernetes API |
@@ -105,6 +108,24 @@ The license screen shows the installation id; after the first sign-in it is also
 | `security.ldap.userSearchBase` | `""` | `CERT_ALERT_SECURITY_LDAP_USER_SEARCH_BASE` | e.g. `ou=people` |
 | `security.ldap.userSearchFilter` | `""` | `CERT_ALERT_SECURITY_LDAP_USER_SEARCH_FILTER` | e.g. `(uid={0})` |
 | `security.ldap.userDnPatterns` | `[]` | `CERT_ALERT_SECURITY_LDAP_USER_DN_PATTERNS` | e.g. `[uid={0},ou=people]` |
+| `security.auditorIdentifiers` | `[]` | `CERT_ALERT_SECURITY_AUDITOR_IDENTIFIERS_<n>` | uids or entry DNs of read-only auditors |
+| `security.groups.admin` / `.auditor` | `[]` | `CERT_ALERT_SECURITY_GROUPS_ADMIN_<n>` / `_AUDITOR_<n>` | Directory group DNs (`memberOf`) granting the role |
+| `sso.publicUrl` | `""` | `CERT_ALERT_SSO_PUBLIC_URL` | Required with single sign-on: the address people reach CertAlert at; the providers' addresses are built from it, never from request headers |
+| `security.groups.directory` / `.memberOfAttribute` | `null` / `""` | `CERT_ALERT_SECURITY_GROUPS_DIRECTORY` / `_MEMBER_OF_ATTRIBUTE` | Read `memberOf` at sign-in (default true, `memberOf`) |
+| `sso.oidc.enabled` | `false` | `CERT_ALERT_SSO_OIDC_ENABLED` | OpenID Connect sign-in (authorization code with PKCE) |
+| `sso.oidc.issuerUri` / `.clientId` | `""` | `CERT_ALERT_SSO_OIDC_ISSUER_URI` / `_CLIENT_ID` | Required when enabled. Redirect URI: `https://<host>/login/oauth2/code/oidc` |
+| `sso.oidc.clientSecret` | `""` | `CERT_ALERT_SSO_OIDC_CLIENT_SECRET` | Or `sso.oidc.existingSecret` + `.existingSecretKey` (`oidc-client-secret`); empty for a public client |
+| `sso.oidc.usernameClaim` / `.match` / `.groupsClaim` | `""` | `CERT_ALERT_SSO_OIDC_USERNAME_CLAIM` / `_MATCH` / `_GROUPS_CLAIM` | Default `preferred_username`, `UID` (or `DN`), none |
+| `sso.oidc.adminGroups` / `.auditorGroups` | `[]` | `CERT_ALERT_SSO_OIDC_ADMIN_GROUPS_<n>` / `_AUDITOR_GROUPS_<n>` | This provider's groups granting the role; only its groups are matched |
+| `sso.oidc.displayName`, `.scopes`, `.jwsAlgorithm`, `.clockSkew` | | `CERT_ALERT_SSO_OIDC_*` | |
+| `sso.saml.enabled` | `false` | `CERT_ALERT_SSO_SAML_ENABLED` | SAML 2.0 sign-in. SP metadata: `https://<host>/saml2/service-provider-metadata/saml` |
+| `sso.saml.metadataUrl` or `.metadataConfigMap` (+ `.metadataConfigMapKey`) | `""` | `CERT_ALERT_SSO_SAML_METADATA_LOCATION` | The identity provider's metadata, from a URL or a ConfigMap of your own |
+| `sso.saml.signingSecret` | `""` | `CERT_ALERT_SSO_SAML_SIGNING_*_LOCATION` | A Secret with `tls.key` (PKCS#8 PEM) and `tls.crt` to sign requests with |
+| `sso.saml.usernameAttribute` / `.match` / `.groupsAttribute` | `""` | `CERT_ALERT_SSO_SAML_*` | Default the NameID, `UID`, none |
+| `sso.saml.adminGroups` / `.auditorGroups` | `[]` | `CERT_ALERT_SSO_SAML_ADMIN_GROUPS_<n>` / `_AUDITOR_GROUPS_<n>` | As for OIDC |
+| `sso.saml.entityId` | `""` | `CERT_ALERT_SSO_SAML_ENTITY_ID` | An absolute URI; empty: `<publicUrl>/saml2/service-provider-metadata/saml` |
+| `sso.saml.displayName`, `.clockSkew` | | `CERT_ALERT_SSO_SAML_*` | |
+| `session.store` | `""` | `CERT_ALERT_SESSION_STORE` | `jdbc` (the default here): sessions in the database; `memory`: in the pod |
 
 `null` and `""` mean "not passed": the application default applies.
 
@@ -187,6 +208,9 @@ A release without audit logging ignores these variables.
 | `persistence.license.enabled` | `true` | PVC at `/var/lib/ens`. `false` uses an `emptyDir`: the license and id go with the pod |
 | `persistence.license.size` / `.storageClass` / `.accessModes` | `100Mi` / `""` / `[ReadWriteOnce]` | `storageClass: "-"` means `""` (no dynamic provisioning) |
 | `persistence.license.existingClaim` | `""` | A PVC of your own, kept across uninstalls |
+| `license.allowNewInstallationId` | `false` | Lets a new installation id be made where the application would refuse (volume not mounted, upgraded installation with no id anywhere), only while the database holds no license state; logged as an error while set |
+| `persistence.license.imported` | `false` | Says the license state is already in the database (started once with one replica since upgrading, or new); required above one replica unless `readWriteMany` |
+| `persistence.license.readWriteMany` | `false` | Says the license volume is ReadWriteMany, so it stays mounted above one replica (only needed to import from it while scaled up) |
 | `license.existingSecret` / `.existingSecretKey` | `""` / `license.lic` | A Secret holding the license |
 | `license.file` | `""` | `--set-file license.file=./license.lic` |
 | `license.initImage.*` | the application image | The init container's image (it needs `sh`, `cp`, `mv`) |
@@ -455,13 +479,42 @@ A random database password is generated on install and kept on upgrade. `helm un
 the StatefulSet's PVC (`data-cert-alert-postgresql-0` for a release named `cert-alert`) behind; delete it yourself to
 start over.
 
+### High availability
+
+```yaml
+replicaCount: 2
+```
+
+Every scheduled job takes a lock in the database, so it runs on one replica at a time, and
+sessions are kept in the database, so any replica serves any request and a rolling update
+signs nobody out (see the [main README](../../../README.md#high-availability)). Above one
+replica the chart renders a `RollingUpdate` strategy (`maxUnavailable: 0`), a
+PodDisruptionBudget (`minAvailable: 1`), a soft anti-affinity across nodes (unless `affinity`
+is set) and a 5-second `preStop` pause.
+
+**The license volume.** The license, the installation id and the revisions seen are kept in
+the database, shared by every replica. The license volume is only where an installation
+upgraded from a release that kept them in files has them imported from, on the first start.
+So upgrade with one replica (the volume is mounted, as before), then set
+`persistence.license.imported: true` and raise `replicaCount`; the chart refuses more than one
+replica without it (or a ReadWriteMany volume), and the application refuses to start an
+upgraded installation that has no installation id anywhere rather than make up a new one.
+Above one replica the volume is not mounted - a ReadWriteOnce claim cannot follow pods across
+nodes - unless it is ReadWriteMany and `persistence.license.readWriteMany: true` says so; keep
+the claim anyway (scaling does not delete it). A license given with `license.file` or
+`license.existingSecret` is passed as `ENS_LICENSE` and installed into the database if none
+is, or if it is a newer revision.
+
+`session.store: memory` is refused above one replica: sessions would then be each pod's own.
+
 ### Upgrade
 
 ```bash
 helm upgrade cert-alert oci://ghcr.io/winllc/charts/cert-alert --version X.Y.Z -f my-values.yaml
 ```
 
-The pod is replaced (`Recreate`), the database schema is migrated on start, and the license PVC
+With one replica the pod is replaced (`Recreate`); with more, they are rolled one at a time.
+The database schema is migrated on start, and the license PVC
 is kept, with the installed license and the installation id. A license given with
 `license.file` or `license.existingSecret` is not copied again while one is installed. Back up
 the database first: migrations are not undone by `helm rollback`.
@@ -471,6 +524,9 @@ Before upgrading, read the [upgrade notes](../../../README.md#upgrade-notes). In
 - `security.adminIdentifiers` now matches a uid or an entry DN only. An e-mail address there
   is ignored, and the NOTES and the startup log warn about it.
 - `x509.revocation` now defaults to the application's live, soft-fail check.
+- Jobs started by hand answer 202 and run in the background (`/api/v1/jobs/{id}`), and
+  sessions are kept in the database: everybody signs in once more after the upgrade.
+- `strategy` now defaults to `{}` (`Recreate` for one replica, as before).
 
 ### Uninstall
 
@@ -478,8 +534,10 @@ Before upgrading, read the [upgrade notes](../../../README.md#upgrade-notes). In
 helm uninstall cert-alert
 ```
 
-This deletes the license PVC the chart created (and with it the installation id), but not an
-`existingClaim`, and not the embedded database's PVC. Back up what you need first.
+This keeps the license PVC the chart created (`helm.sh/resource-policy: keep`; an Argo CD
+prune leaves it too), as well as an `existingClaim` and the embedded database's PVC. Delete the
+license PVC yourself once you are sure the installation id is in the database or no longer
+wanted.
 
 ## Tests
 

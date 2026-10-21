@@ -23,7 +23,7 @@ public final class AuditActions {
             // data
             "project.created", "project.updated", "project.deleted",
             // system
-            "system.started", "system.stopped", "job.completed", "job.failed", "job.skipped",
+            "system.started", "system.stopped", "job.requested", "job.completed", "job.failed", "job.skipped",
             // audit
             "audit.exported", "audit.verified", "audit.token-created", "audit.token-revoked", "audit.pruned",
             "audit.delivery-failed", "audit.delivery-recovered");

@@ -53,17 +53,38 @@
     "replicaCount": {
       "type": "integer",
       "minimum": 0,
-      "maximum": 1,
-      "description": "One replica only: the scheduled jobs run in-process."
+      "description": "Replicas. Above 1 needs persistence.license.readWriteMany=true and sessions in the database."
     },
     "strategy": {
       "type": "object",
+      "description": "Empty: Recreate for one replica, RollingUpdate (maxUnavailable 0) above.",
       "properties": {
         "type": {
           "type": "string",
           "enum": [
             "Recreate",
             "RollingUpdate"
+          ]
+        }
+      }
+    },
+    "minReadySeconds": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "podDisruptionBudget": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "minAvailable": {
+          "type": [
+            "integer",
+            "string"
           ]
         }
       }
@@ -268,6 +289,171 @@
               "type": "string"
             },
             "userDnPatterns": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "auditorIdentifiers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "uids or entry DNs granted the read-only auditor role."
+        },
+        "groups": {
+          "type": "object",
+          "properties": {
+            "admin": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "auditor": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "directory": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "memberOfAttribute": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "sso": {
+      "type": "object",
+      "properties": {
+        "publicUrl": {
+          "type": "string",
+          "description": "Absolute address people reach CertAlert at; required with single sign-on."
+        },
+        "oidc": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "displayName": {
+              "type": "string"
+            },
+            "issuerUri": {
+              "type": "string"
+            },
+            "clientId": {
+              "type": "string"
+            },
+            "clientSecret": {
+              "type": "string"
+            },
+            "existingSecret": {
+              "type": "string"
+            },
+            "existingSecretKey": {
+              "type": "string"
+            },
+            "scopes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "usernameClaim": {
+              "type": "string"
+            },
+            "match": {
+              "type": "string",
+              "enum": [
+                "",
+                "UID",
+                "DN",
+                "uid",
+                "dn"
+              ]
+            },
+            "groupsClaim": {
+              "type": "string"
+            },
+            "jwsAlgorithm": {
+              "type": "string"
+            },
+            "clockSkew": {
+              "type": "string"
+            },
+            "adminGroups": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "auditorGroups": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "saml": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "displayName": {
+              "type": "string"
+            },
+            "metadataUrl": {
+              "type": "string"
+            },
+            "metadataConfigMap": {
+              "type": "string"
+            },
+            "metadataConfigMapKey": {
+              "type": "string"
+            },
+            "entityId": {
+              "type": "string"
+            },
+            "signingSecret": {
+              "type": "string"
+            },
+            "usernameAttribute": {
+              "type": "string"
+            },
+            "match": {
+              "type": "string",
+              "enum": [
+                "",
+                "UID",
+                "DN",
+                "uid",
+                "dn"
+              ]
+            },
+            "groupsAttribute": {
+              "type": "string"
+            },
+            "clockSkew": {
+              "type": "string"
+            },
+            "adminGroups": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "auditorGroups": {
               "type": "array",
               "items": {
                 "type": "string"
@@ -664,6 +850,14 @@
             "null"
           ],
           "minimum": 0
+        },
+        "store": {
+          "type": "string",
+          "enum": [
+            "",
+            "jdbc",
+            "memory"
+          ]
         }
       }
     },
@@ -999,6 +1193,14 @@
             },
             "existingClaim": {
               "type": "string"
+            },
+            "readWriteMany": {
+              "type": "boolean",
+              "description": "Says the license volume is ReadWriteMany; required for replicaCount above 1."
+            },
+            "imported": {
+              "type": "boolean",
+              "description": "The license state is in the database already; required for replicaCount above 1 without readWriteMany."
             }
           }
         }
@@ -1037,6 +1239,9 @@
               ]
             }
           }
+        },
+        "allowNewInstallationId": {
+          "type": "boolean"
         }
       }
     },

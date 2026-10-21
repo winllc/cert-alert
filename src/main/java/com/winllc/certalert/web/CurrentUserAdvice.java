@@ -7,6 +7,7 @@ import com.enssolutions.license.LicenseCheck;
 import com.winllc.certalert.license.Licensing;
 import com.winllc.certalert.security.DirectoryPrincipal;
 import com.winllc.certalert.security.DirectoryPrincipalResolver;
+import com.winllc.certalert.security.ReadOnlyRoleFilter;
 import java.util.List;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.webmvc.autoconfigure.error.BasicErrorController;
@@ -94,6 +95,18 @@ public class CurrentUserAdvice {
         return authentication != null
                 && authentication.getAuthorities().stream()
                         .anyMatch(authority -> DirectoryPrincipalResolver.ROLE_ADMIN.equals(authority.getAuthority()));
+    }
+
+    /** An auditor and not an administrator: reads everything, changes nothing. */
+    @ModelAttribute("isAuditor")
+    public boolean isAuditor() {
+        return ReadOnlyRoleFilter.isReadOnly(SecurityContextHolder.getContext().getAuthentication());
+    }
+
+    /** May read what administrators read: the administration page, the audit log, the license. */
+    @ModelAttribute("canReadAdmin")
+    public boolean canReadAdmin() {
+        return isAdmin() || isAuditor();
     }
 
     @ModelAttribute("license")

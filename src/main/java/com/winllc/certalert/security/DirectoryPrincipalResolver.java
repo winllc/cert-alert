@@ -50,6 +50,12 @@ public class DirectoryPrincipalResolver {
     public static final String ROLE_USER = "ROLE_USER";
     public static final String ROLE_ADMIN = "ROLE_ADMIN";
 
+    /**
+     * Read-only: everything an administrator can see, nothing anybody can change (see
+     * {@link ReadOnlyRoleFilter}). Granted by {@code auditor-identifiers} or an auditor group.
+     */
+    public static final String ROLE_AUDITOR = "ROLE_AUDITOR";
+
     private final DirectoryUserRepository userRepository;
     private final SecurityProperties properties;
 
@@ -60,13 +66,26 @@ public class DirectoryPrincipalResolver {
      */
     private final ObjectProvider<DemoAccounts> demoAccounts;
 
+    /** A person's directory groups, where a group grants anything; absent in unit tests. */
+    private final DirectoryGroups directoryGroups;
+
     public DirectoryPrincipalResolver(
             DirectoryUserRepository userRepository,
             SecurityProperties properties,
             ObjectProvider<DemoAccounts> demoAccounts) {
+        this(userRepository, properties, demoAccounts, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public DirectoryPrincipalResolver(
+            DirectoryUserRepository userRepository,
+            SecurityProperties properties,
+            ObjectProvider<DemoAccounts> demoAccounts,
+            DirectoryGroups directoryGroups) {
         this.userRepository = userRepository;
         this.properties = properties;
         this.demoAccounts = demoAccounts;
+        this.directoryGroups = directoryGroups;
     }
 
     /**
@@ -126,6 +145,16 @@ public class DirectoryPrincipalResolver {
     /** Builds the principal for a person the directory holds. */
     @Transactional(readOnly = true)
     public DirectoryPrincipal principalFor(DirectoryUser user, DirectoryPrincipal.AuthenticationMethod method) {
+        return principalFor(user, method, Set.of());
+    }
+
+    /**
+     * @param providerRoles roles a single sign-on provider's groups grant them (see
+     *     {@code SsoIdentityResolver}); empty otherwise
+     */
+    @Transactional(readOnly = true)
+    public DirectoryPrincipal principalFor(
+            DirectoryUser user, DirectoryPrincipal.AuthenticationMethod method, Collection<String> providerRoles) {
         String username = user.getEmail() != null ? user.getEmail() : user.getUid();
         return new DirectoryPrincipal(
                 username == null ? user.getDn() : username,
@@ -133,7 +162,7 @@ public class DirectoryPrincipalResolver {
                 user.getId(),
                 user.getDn(),
                 method,
-                authoritiesFor(roleIdentifiersOf(user)));
+                authoritiesFor(roleIdentifiersOf(user), user.getDn(), providerRoles));
     }
 
     /**
@@ -159,13 +188,24 @@ public class DirectoryPrincipalResolver {
             String dn,
             Collection<String> uids,
             DirectoryPrincipal.AuthenticationMethod method) {
+        return unknownPrincipal(username, dn, uids, method, Set.of());
+    }
+
+    /** The same, with the roles a single sign-on provider's groups grant them. */
+    public DirectoryPrincipal unknownPrincipal(
+            String username,
+            String dn,
+            Collection<String> uids,
+            DirectoryPrincipal.AuthenticationMethod method,
+            Collection<String> providerRoles) {
         Set<String> candidates = new LinkedHashSet<>();
         if (dn != null) {
             candidates.add(normalise(dn));
         }
         uids.forEach(uid -> candidates.add(normalise(uid)));
         candidates.remove("");
-        return new DirectoryPrincipal(username, username, null, dn, method, authoritiesFor(candidates));
+        return new DirectoryPrincipal(
+                username, username, null, dn, method, authoritiesFor(candidates, dn, providerRoles));
     }
 
     /**
@@ -255,20 +295,54 @@ public class DirectoryPrincipalResolver {
         }
     }
 
-    private Collection<GrantedAuthority> authoritiesFor(Collection<String> identifiers) {
+    /**
+     * Everybody signed in is a user. An administrator by {@code admin-identifiers} - matched
+     * against the DN and uid only - or by a directory group {@code groups.admin} names, or by a
+     * single sign-on provider's group that provider's own list names; an auditor likewise.
+     *
+     * @param dn the entry they are, whose directory groups count where groups are mapped
+     * @param providerRoles the roles a provider's groups grant, worked out against that
+     *     provider's own lists - never matched against the directory's
+     */
+    private Collection<GrantedAuthority> authoritiesFor(
+            Collection<String> identifiers, String dn, Collection<String> providerRoles) {
         Set<GrantedAuthority> authorities = new LinkedHashSet<>();
         authorities.add(new SimpleGrantedAuthority(ROLE_USER));
-        Set<String> admins = adminIdentifiers();
-        boolean admin = identifiers.stream().map(DirectoryPrincipalResolver::normalise).anyMatch(admins::contains);
+        Set<String> normalised = new LinkedHashSet<>();
+        identifiers.stream().map(DirectoryPrincipalResolver::normalise).forEach(normalised::add);
+
+        Set<String> groups = directoryGroupsOf(dn);
+        RoleProperties mapping = properties.getGroups();
+        boolean admin = intersects(normalised, roleIdentifiers(properties.getAdminIdentifiers()))
+                || intersects(groups, DirectoryGroups.normaliseAll(mapping.getAdmin()))
+                || providerRoles.contains(ROLE_ADMIN);
         if (admin || isTheDemoAdministrator(identifiers)) {
             authorities.add(new SimpleGrantedAuthority(ROLE_ADMIN));
+        }
+        boolean auditor = intersects(normalised, roleIdentifiers(properties.getAuditorIdentifiers()))
+                || intersects(groups, DirectoryGroups.normaliseAll(mapping.getAuditor()))
+                || providerRoles.contains(ROLE_AUDITOR);
+        if (auditor) {
+            authorities.add(new SimpleGrantedAuthority(ROLE_AUDITOR));
         }
         return authorities;
     }
 
-    /** The entries that can grant the role: DNs and uids, without the addresses. */
-    private Set<String> adminIdentifiers() {
-        return properties.getAdminIdentifiers().stream()
+    /** This entry's directory groups, where a directory group grants anything. */
+    private Set<String> directoryGroupsOf(String dn) {
+        if (!properties.getGroups().anyMapped() || directoryGroups == null) {
+            return Set.of();
+        }
+        return directoryGroups.of(dn);
+    }
+
+    private static boolean intersects(Set<String> values, Set<String> granting) {
+        return values.stream().anyMatch(granting::contains);
+    }
+
+    /** The entries of a list of identifiers that can grant a role: DNs and uids, without the addresses. */
+    private static Set<String> roleIdentifiers(List<String> configured) {
+        return configured.stream()
                 .filter(value -> value != null && !isAddressNotDn(value))
                 .map(DirectoryPrincipalResolver::normalise)
                 .filter(value -> !value.isEmpty())

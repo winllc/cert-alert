@@ -4,6 +4,7 @@ import com.enssolutions.license.LicenseManager;
 import com.enssolutions.license.LicenseVerifier;
 import java.time.Instant;
 import java.util.Optional;
+import javax.sql.DataSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -16,12 +17,16 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 /**
  * The ENS license: the {@link LicenseManager}, and the gate in front of every request.
  *
- * <p>Where the license and the installation's state are kept comes from the environment,
- * not from Spring configuration: {@code ENS_LICENSE_FILE} (default
- * {@code /etc/ens/certalert.lic}) and {@code ENS_LICENSE_STATE_DIR} (default
- * {@code /var/lib/ens/certalert}). The container image points both at its
- * {@code /var/lib/ens/certalert} volume. The keys a license is checked against are built in
- * ({@link EnsKeys}) and are not configurable at all.
+ * <p>The license, this installation's id and the license revisions seen are kept in the
+ * application's database ({@code ens_license_*}, V25), through the library's
+ * {@code JdbcLicenseStore}, so every replica shares one installation id and one license, and
+ * an upload on one is in force on the others within seconds. On first use, where the
+ * database holds no installation id yet, the library adopts the one in
+ * {@code ENS_LICENSE_STATE_DIR} (default {@code /var/lib/ens/certalert}) together with its
+ * revisions and the license at {@code ENS_LICENSE_FILE}: an installation upgraded from the
+ * file-based releases keeps its id, as long as its license volume is mounted for that first
+ * start. After that the files are not read. The keys a license is checked against are built
+ * in ({@link EnsKeys}) and are not configurable at all.
  *
  * <p>The release date that perpetual licenses' maintenance is measured against is this
  * build's time, from Spring Boot's build-info.
@@ -55,11 +60,26 @@ public class LicensingConfiguration implements WebMvcConfigurer {
     }
 
     @Bean
-    public LicenseManager licenseManager(ObjectProvider<BuildProperties> build) {
+    public LicenseManager licenseManager(
+            ObjectProvider<BuildProperties> build,
+            DataSource dataSource,
+            ObjectProvider<org.springframework.boot.flyway.autoconfigure.FlywayMigrationInitializer> migrations,
+            @org.springframework.beans.factory.annotation.Value("${cert-alert.license.allow-new-installation-id:false}")
+                    boolean allowNewInstallationId,
+            @org.springframework.beans.factory.annotation.Value("${ENS_LICENSE_EXPECT_INSTALLATION_ID:false}")
+                    boolean expectInstallationId) {
         Optional<Instant> released = Optional.ofNullable(build.getIfAvailable()).map(BuildProperties::getTime);
+        // The schema first, then the check that an upgraded installation is not about to be
+        // given a new installation id (see LicenseImportGuard).
+        migrations.getIfAvailable();
+        LicenseImportGuard.check(new org.springframework.jdbc.core.JdbcTemplate(dataSource), PRODUCT,
+                java.nio.file.Path.of(System.getenv().getOrDefault("ENS_LICENSE_STATE_DIR", "/var/lib/ens/" + PRODUCT)),
+                allowNewInstallationId, expectInstallationId);
+        // The pool itself, not a transaction-aware proxy: the store runs its own short
+        // transactions, and must not join (or be rolled back with) a caller's.
         LicenseManager manager = LicenseManager.fromEnvironment(
-                PRODUCT, LicenseVerifier.trusting(EnsKeys.PUBLIC_KEYS), released);
-        log.info("ENS license file {}; release date {}", manager.licenseLocation(),
+                PRODUCT, LicenseVerifier.trusting(EnsKeys.PUBLIC_KEYS), released, dataSource);
+        log.info("ENS license state in {}; release date {}", manager.licenseLocation(),
                 released.map(Instant::toString).orElse("unknown"));
         return manager;
     }

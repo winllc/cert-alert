@@ -1,5 +1,6 @@
 package com.winllc.certalert.service;
 
+import com.winllc.certalert.cluster.JobLocks;
 import com.winllc.certalert.config.MailOutboxProperties;
 import com.winllc.certalert.domain.OutboundEmail;
 import com.winllc.certalert.repository.NotificationRepository;
@@ -56,14 +57,22 @@ import org.springframework.transaction.support.TransactionTemplate;
  * with the same key still waiting: a mail server back after three days delivers today's
  * round-up, not three of them.
  *
- * <p>One instance runs the jobs (see the chart's {@code replicaCount}), and a lock keeps the
- * background pass and an explicit delivery from sending the same message twice.
+ * <p><b>Sent by one replica at a time.</b> A lock in the database (see {@link JobLocks}),
+ * as well as one in this process, keeps a background pass and an explicit delivery - here
+ * or on another replica - from sending the same message twice. An explicit delivery that
+ * finds another replica sending leaves its messages to the background, which says so.
  */
 @Service
 @EnableScheduling
 public class MailOutbox {
 
     private static final Logger log = LoggerFactory.getLogger(MailOutbox.class);
+
+    /** How long a claim on a message lasts, should the replica sending it die first. */
+    static final Duration CLAIM_LEASE = Duration.ofMinutes(10);
+
+    /** The lock every send holds, on whichever replica. */
+    static final String LOCK = "mail-outbox";
 
     /** Messages sent per pass, so one pass after a long outage does not run unbounded. */
     private static final int BATCH = 50;
@@ -75,6 +84,7 @@ public class MailOutbox {
     private final Clock clock;
     private final TransactionTemplate joining;
     private final TransactionTemplate independent;
+    private final JobLocks locks;
     private final ReentrantLock sending = new ReentrantLock();
     private final AtomicBoolean nudged = new AtomicBoolean();
     private final ExecutorService background = Executors.newSingleThreadExecutor(runnable -> {
@@ -90,12 +100,14 @@ public class MailOutbox {
             Optional<JavaMailSender> mailSender,
             MailOutboxProperties properties,
             PlatformTransactionManager transactions,
-            Clock clock) {
+            Clock clock,
+            JobLocks locks) {
         this.outbox = outbox;
         this.notifications = notifications;
         this.mailSender = mailSender;
         this.properties = properties;
         this.clock = clock;
+        this.locks = locks;
         this.joining = new TransactionTemplate(transactions);
         this.independent = new TransactionTemplate(transactions);
         this.independent.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -164,17 +176,21 @@ public class MailOutbox {
         }
         sending.lock();
         try {
-            int sent = 0;
-            List<Delivery.Failure> failures = new ArrayList<>();
-            for (Long id : ids) {
-                Attempt attempt = attempt(id);
-                if (attempt.sent() || attempt.alreadySent()) {
-                    sent++;
-                } else if (attempt.message() != null) {
-                    failures.add(new Delivery.Failure(attempt.message().getRecipients(), attempt.error()));
-                }
-            }
-            return new Delivery(sent, failures, false);
+            return locks.runExclusively(LOCK, () -> {
+                        int sent = 0;
+                        List<Delivery.Failure> failures = new ArrayList<>();
+                        for (Long id : ids) {
+                            Attempt attempt = attempt(id);
+                            if (attempt.sent() || attempt.alreadySent()) {
+                                sent++;
+                            } else if (attempt.message() != null) {
+                                failures.add(new Delivery.Failure(attempt.message().getRecipients(), attempt.error()));
+                            }
+                        }
+                        return new Delivery(sent, failures, false);
+                    })
+                    // Another replica is sending: these go with its pass or the next one.
+                    .orElseGet(() -> new Delivery(0, List.of(), true));
         } finally {
             sending.unlock();
         }
@@ -193,36 +209,42 @@ public class MailOutbox {
             return 0;
         }
         try {
-            int sent = 0;
-            int failedInARow = 0;
-            pass:
-            while (true) {
-                List<Long> due = outbox.findDue(
-                        OutboundEmail.State.PENDING, Instant.now(clock), PageRequest.of(0, BATCH));
-                if (due.isEmpty() || mailSender.isEmpty()) {
-                    if (!due.isEmpty()) {
-                        attempt(due.getFirst());
+            return locks.runExclusively(LOCK, () -> {
+                int sent = 0;
+                int failedInARow = 0;
+                // Whatever a replica claimed and never finished, its lease over, goes back in.
+                independent.executeWithoutResult(status -> outbox.releaseLapsed(
+                        OutboundEmail.State.SENDING, OutboundEmail.State.PENDING, Instant.now(clock)));
+                pass:
+                while (true) {
+                    List<Long> due = outbox.findDue(
+                            OutboundEmail.State.PENDING, Instant.now(clock), PageRequest.of(0, BATCH));
+                    if (due.isEmpty() || mailSender.isEmpty()) {
+                        if (!due.isEmpty()) {
+                            attempt(due.getFirst());
+                        }
+                        break;
                     }
-                    break;
-                }
-                for (Long id : due) {
-                    Attempt attempt = attempt(id);
-                    if (attempt.sent()) {
-                        sent++;
-                        failedInARow = 0;
-                    } else if (attempt.message() != null && ++failedInARow >= FAILURES_PER_PASS) {
-                        // A mail server that is down fails every message the same way, each
-                        // after a full timeout. The rest wait for the next pass.
-                        break pass;
+                    for (Long id : due) {
+                        Attempt attempt = attempt(id);
+                        if (attempt.sent()) {
+                            sent++;
+                            failedInARow = 0;
+                        } else if (attempt.message() != null && ++failedInARow >= FAILURES_PER_PASS) {
+                            // A mail server that is down fails every message the same way,
+                            // each after a full timeout. The rest wait for the next pass.
+                            break pass;
+                        }
+                    }
+                    if (due.size() < BATCH) {
+                        break;
                     }
                 }
-                if (due.size() < BATCH) {
-                    break;
-                }
-            }
-            independent.executeWithoutResult(status -> outbox.deleteFinishedBefore(
-                    OutboundEmail.State.PENDING, Instant.now(clock).minus(properties.getKeep())));
-            return sent;
+                independent.executeWithoutResult(status -> outbox.deleteFinishedBefore(
+                        OutboundEmail.State.PENDING, OutboundEmail.State.SENDING,
+                        Instant.now(clock).minus(properties.getKeep())));
+                return sent;
+            }).orElse(0);
         } finally {
             sending.unlock();
         }
@@ -320,6 +342,13 @@ public class MailOutbox {
             return new Attempt(message, false, "no mail server is configured (spring.mail.host)");
         }
         Instant now = Instant.now(clock);
+        // Claimed in the database before it is sent: of two replicas reaching it at once,
+        // one sends it and the other moves on.
+        Integer claimed = independent.execute(status -> outbox.claim(
+                id, OutboundEmail.State.PENDING, OutboundEmail.State.SENDING, now.plus(CLAIM_LEASE)));
+        if (claimed == null || claimed == 0) {
+            return new Attempt(null, false, null, false);
+        }
         try {
             send(message);
         } catch (MessagingException | RuntimeException e) {

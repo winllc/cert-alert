@@ -24,8 +24,8 @@ import org.springframework.stereotype.Component;
 
 /**
  * {@code auth.login} and {@code auth.logout}, from Spring Security's own authentication
- * events - so every way in is covered: a client certificate ({@code x509}) and a directory
- * password ({@code ldap}).
+ * events - so every way in is covered: a client certificate ({@code x509}), a directory
+ * password ({@code ldap}) and single sign-on ({@code oidc}, {@code saml}).
  *
  * <p>A failed sign-in is recorded with the attempted name as an {@code anonymous} actor and
  * the reason. A sign-in that cannot be recorded does not happen: the failure to write is
@@ -132,7 +132,9 @@ public class AuthenticationAudit {
             new java.util.concurrent.ConcurrentHashMap<>();
 
     private int recentFailures(String name) {
-        if (name == null) {
+        // A single sign-on refused before anybody was named attempts no name; those are not
+        // one person's run of failures.
+        if (name == null || name.isBlank()) {
             return 0;
         }
         java.time.Instant now = java.time.Instant.now();
@@ -200,6 +202,15 @@ public class AuthenticationAudit {
         }
         if (authentication instanceof AuditTokenAuthentication) {
             return "api-token";
+        }
+        if (authentication instanceof org.springframework.security.oauth2.client.authentication.OAuth2LoginAuthenticationToken
+                || authentication instanceof org.springframework.security.oauth2.client.authentication.OAuth2AuthorizationCodeAuthenticationToken
+                || authentication instanceof org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken) {
+            return "oidc";
+        }
+        if (authentication instanceof org.springframework.security.saml2.provider.service.authentication.Saml2AuthenticationToken
+                || authentication instanceof org.springframework.security.saml2.provider.service.authentication.Saml2Authentication) {
+            return "saml";
         }
         return "password";
     }

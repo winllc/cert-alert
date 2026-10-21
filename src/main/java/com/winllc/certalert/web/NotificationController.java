@@ -1,6 +1,9 @@
 package com.winllc.certalert.web;
 
-import com.winllc.certalert.audit.JobAudit;
+import com.winllc.certalert.cluster.JobRunController;
+import com.winllc.certalert.cluster.JobRuns;
+import com.winllc.certalert.scheduling.DirectoryJobScheduler;
+import org.springframework.http.ResponseEntity;
 import com.winllc.certalert.license.RequiresFeature;
 import com.winllc.certalert.config.NotificationProperties;
 import com.winllc.certalert.security.SignedInDirectoryUser;
@@ -40,7 +43,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/notifications")
 public class NotificationController {
 
-    private final JobAudit jobs;
+    private final JobRuns runs;
 
     private static final int DEFAULT_PAGE_SIZE = 20;
     private static final int MAX_PAGE_SIZE = 100;
@@ -55,8 +58,8 @@ public class NotificationController {
             NotificationSettingsService settingsService,
             NotificationProperties properties,
             SignedInDirectoryUser signedIn,
-            JobAudit jobs) {
-        this.jobs = jobs;
+            JobRuns runs) {
+        this.runs = runs;
         this.notificationService = notificationService;
         this.settingsService = settingsService;
         this.properties = properties;
@@ -130,12 +133,16 @@ public class NotificationController {
      */
     @RequiresFeature("notifications")
     @PostMapping("/digest")
-    public NotificationService.DigestResult digest(
+    public ResponseEntity<?> digest(
             @RequestParam(defaultValue = "false") boolean dryRun) {
-        // A rehearsal writes nothing and sends nothing, so it is not a run of the job.
-        return dryRun
-                ? notificationService.digest(true)
-                : jobs.run("expiry digest", () -> notificationService.digest(false));
+        // A rehearsal writes nothing and sends nothing, so it is not a run of the job, and
+        // answers straight away. A real one runs in the background under the scheduled
+        // round-up's lock: 202, and a run to ask after whose result is a DigestResult.
+        if (dryRun) {
+            return ResponseEntity.ok(notificationService.digest(true));
+        }
+        return JobRunController.accepted(runs, "expiry digest", step -> step.exclusive(
+                DirectoryJobScheduler.EXPIRY_DIGEST, "expiry digest", () -> notificationService.digest(false)));
     }
 
     private boolean isAdmin(Authentication authentication) {

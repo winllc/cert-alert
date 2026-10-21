@@ -13,6 +13,7 @@ import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.DirectoryUserRepository;
 import com.winllc.certalert.security.ServerAccessPolicy;
 import com.winllc.certalert.security.SignedInDirectoryUser;
+import com.winllc.certalert.security.sso.SsoSignIn;
 import com.winllc.certalert.service.CertificateIssuance;
 import com.winllc.certalert.service.EndpointAddress;
 import com.winllc.certalert.service.ProjectService;
@@ -188,11 +189,19 @@ public class ViewController {
         return "notifications";
     }
 
-    /** The password fallback, for a browser that presented no client certificate. */
+    /**
+     * The password fallback, for a browser that presented no client certificate - and a
+     * button for each single sign-on provider configured, where there are any.
+     */
     @GetMapping("/login")
-    public String login() {
+    public String login(Model model) {
+        SsoSignIn sso = singleSignOn.getIfAvailable();
+        model.addAttribute("ssoOptions", sso == null ? List.of() : sso.options());
         return "login";
     }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private org.springframework.beans.factory.ObjectProvider<SsoSignIn> singleSignOn;
 
     /** Soonest to expire first: on a page about one entry, that is the one being looked for. */
     private List<CachedCertificate> byExpiry(List<CachedCertificate> certificates) {

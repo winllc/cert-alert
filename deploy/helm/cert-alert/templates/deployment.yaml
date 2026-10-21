@@ -11,6 +11,10 @@
   (dict "env" "SPRING_MAIL_PASSWORD" "ref" (include "cert-alert.secretRef" (dict "root" . "inline" $v.mail.password "existing" $v.mail.existingSecret "existingKey" $v.mail.existingSecretKey "key" "mail-password")))
   (dict "env" "ENS_AUDIT_SPLUNK_TOKEN" "ref" (include "cert-alert.secretRef" (dict "root" . "inline" $v.audit.splunk.token "existing" $v.audit.splunk.existingSecret "existingKey" $v.audit.splunk.existingSecretKey "key" "splunk-hec-token")))
 -}}
+{{- if $v.sso.oidc.enabled -}}
+{{- $secretEnv = append $secretEnv (dict "env" "CERT_ALERT_SSO_OIDC_CLIENT_SECRET" "ref" (include "cert-alert.secretRef" (dict "root" . "inline" $v.sso.oidc.clientSecret "existing" $v.sso.oidc.existingSecret "existingKey" $v.sso.oidc.existingSecretKey "key" "oidc-client-secret"))) -}}
+{{- end -}}
+{{- $replicated := gt (int $v.replicaCount) 1 -}}
 {{- if $v.tls.enabled -}}
 {{- $secretEnv = append $secretEnv (dict "env" "CERT_ALERT_KEYSTORE_PASSWORD" "ref" (include "cert-alert.secretRef" (dict "root" . "inline" $v.tls.keystore.password "existing" $v.tls.keystore.passwordExistingSecret "existingKey" $v.tls.keystore.passwordExistingSecretKey "key" "keystore-password"))) -}}
 {{- $secretEnv = append $secretEnv (dict "env" "CERT_ALERT_TRUSTSTORE_PASSWORD" "ref" (include "cert-alert.secretRef" (dict "root" . "inline" $v.tls.truststore.password "existing" $v.tls.truststore.passwordExistingSecret "existingKey" $v.tls.truststore.passwordExistingSecretKey "key" "truststore-password"))) -}}
@@ -26,11 +30,13 @@ metadata:
   labels:
     {{- include "cert-alert.labels" . | nindent 4 }}
 spec:
-  # See replicaCount in values.yaml: one replica only.
+  # See replicaCount in values.yaml.
   replicas: {{ $v.replicaCount }}
   revisionHistoryLimit: {{ $v.revisionHistoryLimit }}
+  # A pod counts as available only once it has been ready this long.
+  minReadySeconds: {{ $v.minReadySeconds }}
   strategy:
-    {{- toYaml $v.strategy | nindent 4 }}
+    {{- include "cert-alert.strategy" . | nindent 4 }}
   selector:
     matchLabels:
       {{- include "cert-alert.selectorLabels" . | nindent 6 }}
@@ -61,7 +67,7 @@ spec:
       terminationGracePeriodSeconds: {{ $v.terminationGracePeriodSeconds }}
       securityContext:
         {{- include "cert-alert.securityContext" (dict "ctx" $v.podSecurityContext "root" .) | nindent 8 }}
-      {{- if and (include "cert-alert.licenseSupplied" .) $v.persistence.license.enabled }}
+      {{- if and (include "cert-alert.licenseSupplied" .) (include "cert-alert.licenseVolumeMounted" .) }}
       initContainers:
         # Installs the supplied license into the license volume only if none is there yet,
         # as the release bundle's install.sh does: a license already installed - perhaps a
@@ -134,6 +140,25 @@ spec:
                   key: {{ $ref.key }}
             {{- end }}
             {{- end }}
+            {{- if and $v.persistence.license.enabled (not (include "cert-alert.licenseVolumeMounted" .)) }}
+            # The license volume is left out here, so the installation id must already be in
+            # the database: the application refuses to make up a new one (LicenseImportGuard).
+            - name: ENS_LICENSE_EXPECT_INSTALLATION_ID
+              value: "true"
+            {{- end }}
+            {{- if $v.license.allowNewInstallationId }}
+            - name: CERT_ALERT_LICENSE_ALLOW_NEW_INSTALLATION_ID
+              value: "true"
+            {{- end }}
+            {{- if include "cert-alert.licenseSupplied" . }}
+            # The supplied license, installed if none is (or if it is a newer revision of the
+            # one that is) - into the database, whichever replica checks first.
+            - name: ENS_LICENSE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "cert-alert.licenseSecretName" . }}
+                  key: {{ ternary $v.license.existingSecretKey "license.lic" (ne $v.license.existingSecret "") }}
+            {{- end }}
             # After CA_TRUSTSTORE_PASSWORD, which it may reference.
             - name: JAVA_OPTS
               value: {{ include "cert-alert.javaOpts" . | quote }}
@@ -172,6 +197,14 @@ spec:
             periodSeconds: {{ $v.readinessProbe.periodSeconds }}
             timeoutSeconds: {{ $v.readinessProbe.timeoutSeconds }}
             failureThreshold: {{ $v.readinessProbe.failureThreshold }}
+          {{- end }}
+          {{- if $replicated }}
+          # Out of the Service's endpoints before it stops taking requests: the endpoint
+          # controller and the ingress take a moment to notice a pod is terminating.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 5"]
           {{- end }}
           resources:
             {{- toYaml $v.resources | nindent 12 }}
@@ -213,6 +246,16 @@ spec:
               mountPath: /etc/cert-alert/templates/email
               readOnly: true
             {{- end }}
+            {{- if and $v.sso.saml.enabled $v.sso.saml.metadataConfigMap }}
+            - name: saml-idp-metadata
+              mountPath: /etc/cert-alert/saml/idp
+              readOnly: true
+            {{- end }}
+            {{- if and $v.sso.saml.enabled $v.sso.saml.signingSecret }}
+            - name: saml-signing
+              mountPath: /etc/cert-alert/saml/signing
+              readOnly: true
+            {{- end }}
             {{- with $v.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -220,15 +263,16 @@ spec:
         - name: tmp
           emptyDir: {}
         - name: license-state
-          {{- if $v.persistence.license.enabled }}
+          {{- if include "cert-alert.licenseVolumeMounted" . }}
+          # The license state is in the database; this volume is where an installation
+          # upgraded from a file-based release has its id and license imported from.
           persistentVolumeClaim:
             claimName: {{ include "cert-alert.licenseClaimName" . }}
           {{- else }}
-          # persistence.license.enabled=false: the license and installation id go with the
-          # pod. Evaluation only.
+          # The license state is in the database. Nothing to import from here.
           emptyDir: {}
           {{- end }}
-        {{- if and (include "cert-alert.licenseSupplied" .) $v.persistence.license.enabled }}
+        {{- if and (include "cert-alert.licenseSupplied" .) (include "cert-alert.licenseVolumeMounted" .) }}
         - name: license-source
           secret:
             secretName: {{ include "cert-alert.licenseSecretName" . }}
@@ -288,6 +332,24 @@ spec:
           configMap:
             name: {{ $v.notifications.email.templatesConfigMap }}
         {{- end }}
+        {{- if and $v.sso.saml.enabled $v.sso.saml.metadataConfigMap }}
+        - name: saml-idp-metadata
+          configMap:
+            name: {{ $v.sso.saml.metadataConfigMap }}
+            items:
+              - key: {{ $v.sso.saml.metadataConfigMapKey }}
+                path: {{ $v.sso.saml.metadataConfigMapKey }}
+        {{- end }}
+        {{- if and $v.sso.saml.enabled $v.sso.saml.signingSecret }}
+        - name: saml-signing
+          secret:
+            secretName: {{ $v.sso.saml.signingSecret }}
+            items:
+              - key: tls.key
+                path: tls.key
+              - key: tls.crt
+                path: tls.crt
+        {{- end }}
         {{- with $v.extraVolumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -295,9 +357,21 @@ spec:
       nodeSelector:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with $v.affinity }}
+      {{- if $v.affinity }}
       affinity:
-        {{- toYaml . | nindent 8 }}
+        {{- toYaml $v.affinity | nindent 8 }}
+      {{- else if $replicated }}
+      # More than one replica, and no affinity of your own: prefer different nodes, so one
+      # node going down does not take every replica with it.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    {{- include "cert-alert.selectorLabels" . | nindent 20 }}
       {{- end }}
       {{- with $v.tolerations }}
       tolerations:

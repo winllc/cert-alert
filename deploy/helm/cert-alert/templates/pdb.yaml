@@ -1,0 +1,16 @@
+{{- if include "cert-alert.pdbEnabled" . }}
+# Keeps a voluntary disruption - a node drain, a cluster upgrade - from taking every replica
+# at once (podDisruptionBudget in values.yaml).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "cert-alert.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cert-alert.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "cert-alert.selectorLabels" . | nindent 6 }}
+{{- end }}

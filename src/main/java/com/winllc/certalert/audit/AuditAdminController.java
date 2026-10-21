@@ -88,7 +88,7 @@ public class AuditAdminController {
 
     @GetMapping("/admin/audit")
     public String page(Model model, Authentication authentication) {
-        requireAdministrator(authentication);
+        requireAuditReader(authentication);
         model.addAttribute("actions", AuditActions.all(store.actions()));
         model.addAttribute("categories", Arrays.stream(AuditRecord.Category.values()).map(AuditRecord.Category::id).toList());
         model.addAttribute("outcomes", Arrays.stream(AuditRecord.Outcome.values()).map(AuditRecord.Outcome::id).toList());
@@ -123,7 +123,7 @@ public class AuditAdminController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "25") int size,
             Authentication authentication) {
-        requireAdministrator(authentication);
+        requireAuditReader(authentication);
         return PageResponse.of(store.search(filter.toQuery(), page, size), this::row);
     }
 
@@ -131,7 +131,7 @@ public class AuditAdminController {
     @GetMapping("/api/v1/admin/audit/events/{seq}")
     @ResponseBody
     public Map<String, Object> event(@PathVariable long seq, Authentication authentication) {
-        requireAdministrator(authentication);
+        requireAuditReader(authentication);
         AuditEvent event = store.bySeq(seq).orElseThrow(
                 () -> new com.winllc.certalert.service.ResourceNotFoundException("No audit event " + seq));
         JsonNode parsed = json.readTree(event.getLine());
@@ -156,7 +156,7 @@ public class AuditAdminController {
             @RequestParam(defaultValue = "csv") String format,
             Authentication authentication,
             HttpServletResponse response) throws IOException {
-        requireAdministrator(authentication);
+        requireAuditReader(authentication);
         boolean csv = !"ndjson".equalsIgnoreCase(format);
         AuditQuery query = filter.toQuery();
         long matching = repository.count(query.toSpecification());
@@ -254,7 +254,7 @@ public class AuditAdminController {
     @PostMapping("/api/v1/admin/audit/verify")
     @ResponseBody
     public Map<String, Object> verify(Authentication authentication) {
-        requireAdministrator(authentication);
+        requireAuditReader(authentication);
         AuditVerifier.Result result = verifier.verify();
         AuditRecord event = AuditRecord.of(AuditRecord.Category.AUDIT, "audit.verified")
                 .outcome(result.intact() ? AuditRecord.Outcome.SUCCESS : AuditRecord.Outcome.FAILURE)
@@ -283,7 +283,7 @@ public class AuditAdminController {
     @GetMapping("/api/v1/admin/audit/delivery")
     @ResponseBody
     public Map<String, Object> delivery(Authentication authentication) {
-        requireAdministrator(authentication);
+        requireAuditReader(authentication);
         return Map.of(
                 "head", store.headSeq(),
                 "outputs", delivery.statuses(),
@@ -311,7 +311,7 @@ public class AuditAdminController {
     @GetMapping("/api/v1/admin/audit/tokens")
     @ResponseBody
     public List<TokenRow> tokens(Authentication authentication) {
-        requireAdministrator(authentication);
+        requireAuditReader(authentication);
         return tokens.list().stream().map(TokenRow::of).toList();
     }
 
@@ -333,7 +333,14 @@ public class AuditAdminController {
 
     private static void requireAdministrator(Authentication authentication) {
         if (!SignedInDirectoryUser.isAdmin(authentication)) {
-            throw new AccessDeniedException("The audit log is an administrator's to read");
+            throw new AccessDeniedException("The audit log's tokens are an administrator's to manage");
+        }
+    }
+
+    /** Reading the trail, its export, its delivery and verifying it: administrators and auditors. */
+    private static void requireAuditReader(Authentication authentication) {
+        if (!SignedInDirectoryUser.isAdmin(authentication) && !SignedInDirectoryUser.isAuditor(authentication)) {
+            throw new AccessDeniedException("The audit log is an administrator's or an auditor's to read");
         }
     }
 

@@ -1,0 +1,43 @@
+# Two replicas on a shared (ReadWriteMany) license volume, with single sign-on through both
+# OpenID Connect and SAML, and roles from groups.
+replicaCount: 2
+ldap:
+  url: ldaps://directory.example.gov:636
+  base: dc=example,dc=gov
+  bindDn: cn=cert-alert,ou=services,dc=example,dc=gov
+  bindPassword: change-me
+database:
+  host: postgres.example.gov
+  password: change-me
+persistence:
+  license:
+    accessModes: [ReadWriteMany]
+    storageClass: nfs-client
+    readWriteMany: true
+security:
+  adminIdentifiers: [pki-admin]
+  auditorIdentifiers: ["uid=inspector,ou=people,dc=example,dc=gov"]
+  groups:
+    admin: ["cn=CertAlert Admins,ou=groups,dc=example,dc=gov"]
+    auditor: ["cn=CertAlert Auditors,ou=groups,dc=example,dc=gov"]
+sso:
+  publicUrl: https://certalert.example.gov
+  oidc:
+    enabled: true
+    displayName: Sign in with Entra ID
+    issuerUri: https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000/v2.0
+    clientId: 11111111-2222-3333-4444-555555555555
+    clientSecret: change-me
+    usernameClaim: preferred_username
+    match: UID
+    groupsClaim: groups
+    adminGroups: ["5b0f1c2e-0000-4000-8000-00000000a11d"]
+  saml:
+    enabled: true
+    displayName: Sign in with ADFS
+    metadataConfigMap: adfs-metadata
+    signingSecret: cert-alert-saml-signing
+    usernameAttribute: http://schemas.xmlsoap.org/claims/CommonName
+    match: UID
+    groupsAttribute: http://schemas.microsoft.com/ws/2008/06/identity/claims/groups
+    auditorGroups: ["CONTOSO\\CertAlert Auditors"]

@@ -69,7 +69,7 @@ public class LicenseController {
         LicenseCheck check = licensing.current();
         EnsLicense l = check.license().orElse(null);
         long used = users.count();
-        boolean admin = currentUser.isAdmin();
+        boolean admin = currentUser.isAdmin() || currentUser.isAuditor();
         return new Status(
                 licensing.manager().product(),
                 check.state().name(),

@@ -83,6 +83,12 @@ public class GlobalExceptionHandler {
         return respond(request, HttpStatus.CONFLICT, e.getTitle(), e.getMessage());
     }
 
+    /** Too many jobs started by hand are already waiting to run (see JobRuns). */
+    @ExceptionHandler(java.util.concurrent.RejectedExecutionException.class)
+    public Object handleBusy(java.util.concurrent.RejectedExecutionException e, HttpServletRequest request) {
+        return respond(request, HttpStatus.SERVICE_UNAVAILABLE, "Busy", e.getMessage());
+    }
+
     /**
      * A request the application rejected on its own terms - an address that is not one, say.
      * The message is the point of it, so unlike the unexpected case it is passed through.

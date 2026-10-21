@@ -1,5 +1,6 @@
 package com.winllc.certalert.audit;
 
+import com.winllc.certalert.cluster.JobLocks;
 import com.winllc.certalert.observability.EnsMetrics;
 import com.winllc.certalert.repository.AuditDeliveryRepository;
 import java.time.Clock;
@@ -29,6 +30,9 @@ import org.springframework.transaction.support.TransactionTemplate;
  * request: requests only write the store. A failing output retries with exponential backoff
  * up to five minutes; one that has failed for fifteen records {@code audit.delivery-failed},
  * once, and {@code audit.delivery-recovered} when it delivers again.
+ *
+ * <p>With more than one replica, each output is delivered to by one of them at a time (see
+ * {@link JobLocks}); the others' workers find it taken and wait for their next poll.
  */
 @Service
 public class AuditDeliveryService implements SmartLifecycle {
@@ -45,6 +49,7 @@ public class AuditDeliveryService implements SmartLifecycle {
     private final TransactionTemplate transaction;
     private final ObjectProvider<EnsMetrics> metrics;
     private final Clock clock;
+    private final JobLocks locks;
 
     private final Map<String, AuditForwarder> forwarders = new LinkedHashMap<>();
     private final Map<String, Thread> workers = new LinkedHashMap<>();
@@ -59,7 +64,8 @@ public class AuditDeliveryService implements SmartLifecycle {
             AuditSinks sinks,
             PlatformTransactionManager transactions,
             ObjectProvider<EnsMetrics> metrics,
-            Clock clock) {
+            Clock clock,
+            JobLocks locks) {
         this.properties = properties;
         this.store = store;
         this.cursors = cursors;
@@ -69,6 +75,7 @@ public class AuditDeliveryService implements SmartLifecycle {
         this.transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.metrics = metrics;
         this.clock = clock;
+        this.locks = locks;
         configure();
     }
 
@@ -155,6 +162,24 @@ public class AuditDeliveryService implements SmartLifecycle {
         if (forwarder == null) {
             return 0;
         }
+        // One replica delivers to each output at a time. Two would both read from the same
+        // cursor and send the same batch, and the slower would then move the cursor back.
+        Exception[] failure = new Exception[1];
+        Optional<Integer> delivered = locks.runExclusively("audit-delivery-" + name, () -> {
+            try {
+                return deliverBatch(name, forwarder);
+            } catch (Exception e) {
+                failure[0] = e;
+                return 0;
+            }
+        });
+        if (failure[0] != null) {
+            throw failure[0];
+        }
+        return delivered.orElse(0);
+    }
+
+    private int deliverBatch(String name, AuditForwarder forwarder) throws Exception {
         AuditDelivery cursor = cursor(name);
         List<StoredEvent> batch = store.after(cursor.getLastSeq(), forwarder.batchSize());
         if (batch.isEmpty()) {
@@ -179,7 +204,7 @@ public class AuditDeliveryService implements SmartLifecycle {
 
     private void succeeded(String name, long seq) {
         boolean recovered = Boolean.TRUE.equals(transaction.execute(status -> {
-            AuditDelivery cursor = cursors.findById(name).orElseGet(() -> cursors.save(new AuditDelivery(name, 0)));
+            AuditDelivery cursor = cursors.lockByOutput(name).orElseGet(() -> cursors.save(new AuditDelivery(name, 0)));
             boolean wasAlerted = cursor.isAlerted();
             cursor.delivered(seq, Instant.now(clock));
             cursor.setAlerted(false);
@@ -202,7 +227,7 @@ public class AuditDeliveryService implements SmartLifecycle {
         String message = error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
         Instant now = Instant.now(clock);
         Optional<String> alert = Optional.ofNullable(transaction.execute(status -> {
-            AuditDelivery cursor = cursors.findById(name).orElseGet(() -> cursors.save(new AuditDelivery(name, 0)));
+            AuditDelivery cursor = cursors.lockByOutput(name).orElseGet(() -> cursors.save(new AuditDelivery(name, 0)));
             cursor.failed(message, now);
             if (!cursor.isAlerted()
                     && Duration.between(cursor.getFailingSince(), now).compareTo(properties.getFailureAlertAfter()) >= 0) {

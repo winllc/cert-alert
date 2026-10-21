@@ -363,7 +363,7 @@
         $('#revocation-result').removeClass('text-danger')
             .html('<span class="spinner-border spinner-border-sm me-2" role="status"></span>Asking the authorities…');
 
-        $.ajax({url: '/api/v1/revocation/check', type: 'POST'})
+        CertAlert.runJob('/api/v1/revocation/check')
             .done(function (result) {
                 $('#revocation-result').text(
                     result.certificatesChecked + ' certificate(s) across ' + result.entries + ' entr'

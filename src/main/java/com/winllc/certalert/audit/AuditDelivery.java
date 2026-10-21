@@ -75,6 +75,7 @@ public class AuditDelivery {
         return alerted;
     }
 
+    /** Never backwards: a slower delivery of an earlier batch leaves a later cursor where it is. */
     void delivered(long seq, Instant at) {
         this.lastSeq = Math.max(lastSeq, seq);
         this.deliveredAt = at;

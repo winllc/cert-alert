@@ -40,6 +40,17 @@ public class SecurityProperties {
      */
     private ContactEditors contactEditors = ContactEditors.ADMIN;
 
+    /**
+     * Identifiers granted the read-only auditor role, matched exactly as
+     * {@link #adminIdentifiers} are: the DN of a person's entry or their uid, never an
+     * address or a name. An auditor reads everything an administrator can and changes
+     * nothing; somebody who is both is an administrator.
+     */
+    private List<String> auditorIdentifiers = new ArrayList<>();
+
+    /** Roles from directory and identity-provider groups. Nothing unless configured. */
+    private final RoleProperties groups = new RoleProperties();
+
     private final X509 x509 = new X509();
     private final Ldap ldap = new Ldap();
 
@@ -73,6 +84,18 @@ public class SecurityProperties {
 
     public void setAdminIdentifiers(List<String> adminIdentifiers) {
         this.adminIdentifiers = adminIdentifiers;
+    }
+
+    public List<String> getAuditorIdentifiers() {
+        return auditorIdentifiers;
+    }
+
+    public void setAuditorIdentifiers(List<String> auditorIdentifiers) {
+        this.auditorIdentifiers = auditorIdentifiers;
+    }
+
+    public RoleProperties getGroups() {
+        return groups;
     }
 
     public X509 getX509() {

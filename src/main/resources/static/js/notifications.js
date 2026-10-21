@@ -13,6 +13,9 @@
         INFO: 'bg-blue-lt'
     };
 
+    // An auditor changes nothing - marking a notification read included - so is not offered to.
+    var readOnly = document.querySelector('meta[name="cert-alert-read-only"]') !== null;
+
     function post(url) {
         return $.ajax({url: url, type: 'POST'});
     }
@@ -226,6 +229,9 @@
                 $('#notifications-next').prop('disabled', result.last)
                     .off('click').on('click', function () { loadPage(result.page + 1); });
 
+                if (readOnly) {
+                    $body.find('.notification-read').remove();
+                }
                 $body.find('.notification-read').on('click', function () {
                     var id = $(this).closest('tr').data('notification-id');
                     post('/api/v1/notifications/' + id + '/read').done(function () {
@@ -259,6 +265,9 @@
             }
         });
 
+        if (readOnly) {
+            $('#notifications-read-all').addClass('d-none');
+        }
         $('#notifications-read-all').on('click', function () {
             post('/api/v1/notifications/read-all').done(function () {
                 loadPage(0);
@@ -292,7 +301,7 @@
         $('#notifications-digest').on('click', function () {
             var $button = $(this).prop('disabled', true);
             $('#notifications-digest-status').text('Running…');
-            post('/api/v1/notifications/digest')
+            window.CertAlert.runJob('/api/v1/notifications/digest')
                 .done(function (result) {
                     $('#notifications-digest-status').text(
                         result.certificates + ' expiring, ' + result.peopleTold + ' told, '
@@ -307,7 +316,9 @@
                         $('#notifications-digest-status').text('');
                         return;
                     }
-                    $('#notifications-digest-status').text('The round-up failed; see the log.');
+                    $('#notifications-digest-status').text(xhr.status === 409
+                        ? 'A round-up is already running.'
+                        : 'The round-up failed; see the log.');
                 })
                 .always(function () {
                     $button.prop('disabled', false);
