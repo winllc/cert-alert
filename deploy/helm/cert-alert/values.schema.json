@@ -1197,6 +1197,10 @@
             "readWriteMany": {
               "type": "boolean",
               "description": "Says the license volume is ReadWriteMany; required for replicaCount above 1."
+            },
+            "imported": {
+              "type": "boolean",
+              "description": "The license state is in the database already; required for replicaCount above 1 without readWriteMany."
             }
           }
         }

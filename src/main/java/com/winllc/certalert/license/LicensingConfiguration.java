@@ -60,8 +60,19 @@ public class LicensingConfiguration implements WebMvcConfigurer {
     }
 
     @Bean
-    public LicenseManager licenseManager(ObjectProvider<BuildProperties> build, DataSource dataSource) {
+    public LicenseManager licenseManager(
+            ObjectProvider<BuildProperties> build,
+            DataSource dataSource,
+            ObjectProvider<org.springframework.boot.flyway.autoconfigure.FlywayMigrationInitializer> migrations,
+            @org.springframework.beans.factory.annotation.Value("${cert-alert.license.allow-new-installation-id:false}")
+                    boolean allowNewInstallationId) {
         Optional<Instant> released = Optional.ofNullable(build.getIfAvailable()).map(BuildProperties::getTime);
+        // The schema first, then the check that an upgraded installation is not about to be
+        // given a new installation id (see LicenseImportGuard).
+        migrations.getIfAvailable();
+        LicenseImportGuard.check(new org.springframework.jdbc.core.JdbcTemplate(dataSource), PRODUCT,
+                java.nio.file.Path.of(System.getenv().getOrDefault("ENS_LICENSE_STATE_DIR", "/var/lib/ens/" + PRODUCT)),
+                allowNewInstallationId);
         // The pool itself, not a transaction-aware proxy: the store runs its own short
         // transactions, and must not join (or be rolled back with) a caller's.
         LicenseManager manager = LicenseManager.fromEnvironment(

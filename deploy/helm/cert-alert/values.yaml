@@ -659,6 +659,12 @@ persistence:
     # mounted only if it is ReadWriteMany (accessModes above, or the existingClaim's own) and
     # this says so; otherwise upgrade with one replica first, then scale up.
     readWriteMany: false
+    # Says the license state is already in the database - this installation has started once
+    # with replicaCount 1 since upgrading (or is new) - so above one replica the volume is not
+    # needed. Required for replicaCount above 1 unless readWriteMany is set: the chart will
+    # not scale an upgraded installation before its installation id has been imported. The
+    # application refuses to start, too, rather than make up a new id for an upgraded one.
+    imported: false
 
 license:
   # Optional. Without one, cert-alert starts and only sign-in and the license screen

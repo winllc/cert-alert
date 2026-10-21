@@ -3125,7 +3125,11 @@ database and survive a restart. The session cookie is now called `SESSION` inste
 `strategy` now defaults to empty, which chooses `Recreate` for one replica (as before) and
 `RollingUpdate` above one; a values file that sets `strategy.type` keeps it. `replicaCount`
 may now be above 1. Upgrade with one replica first, so the license volume is mounted for the
-import above; then scale. Above one replica the license volume is mounted only if it is
+import above; then set `persistence.license.imported: true` and scale - the chart refuses more
+than one replica without it (or a ReadWriteMany volume). The application refuses to start an
+upgraded installation whose installation id is neither in the database nor on a mounted
+volume; if the volume is really gone, set `CERT_ALERT_LICENSE_ALLOW_NEW_INSTALLATION_ID=true`
+and re-bind the license on the ENS portal. Above one replica the license volume is mounted only if it is
 ReadWriteMany and `persistence.license.readWriteMany: true` says so. See
 [High availability](#high-availability).
 

@@ -207,6 +207,7 @@ A release without audit logging ignores these variables.
 | `persistence.license.enabled` | `true` | PVC at `/var/lib/ens`. `false` uses an `emptyDir`: the license and id go with the pod |
 | `persistence.license.size` / `.storageClass` / `.accessModes` | `100Mi` / `""` / `[ReadWriteOnce]` | `storageClass: "-"` means `""` (no dynamic provisioning) |
 | `persistence.license.existingClaim` | `""` | A PVC of your own, kept across uninstalls |
+| `persistence.license.imported` | `false` | Says the license state is already in the database (started once with one replica since upgrading, or new); required above one replica unless `readWriteMany` |
 | `persistence.license.readWriteMany` | `false` | Says the license volume is ReadWriteMany, so it stays mounted above one replica (only needed to import from it while scaled up) |
 | `license.existingSecret` / `.existingSecretKey` | `""` / `license.lic` | A Secret holding the license |
 | `license.file` | `""` | `--set-file license.file=./license.lic` |
@@ -492,7 +493,10 @@ is set) and a 5-second `preStop` pause.
 **The license volume.** The license, the installation id and the revisions seen are kept in
 the database, shared by every replica. The license volume is only where an installation
 upgraded from a release that kept them in files has them imported from, on the first start.
-So upgrade with one replica (the volume is mounted, as before), then raise `replicaCount`.
+So upgrade with one replica (the volume is mounted, as before), then set
+`persistence.license.imported: true` and raise `replicaCount`; the chart refuses more than one
+replica without it (or a ReadWriteMany volume), and the application refuses to start an
+upgraded installation that has no installation id anywhere rather than make up a new one.
 Above one replica the volume is not mounted - a ReadWriteOnce claim cannot follow pods across
 nodes - unless it is ReadWriteMany and `persistence.license.readWriteMany: true` says so; keep
 the claim anyway (scaling does not delete it). A license given with `license.file` or
