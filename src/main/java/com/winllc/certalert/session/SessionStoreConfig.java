@@ -46,6 +46,21 @@ public class SessionStoreConfig {
         return repository -> repository.setDefaultMaxInactiveInterval(timeout);
     }
 
+    /**
+     * How attributes are stored and read back: Java serialization, read through an allow-list
+     * (see {@link SessionAttributeSerialization}). Spring Session looks for this by name.
+     */
+    @Bean("springSessionConversionService")
+    public org.springframework.core.convert.ConversionService springSessionConversionService(
+            org.springframework.context.ApplicationContext context) {
+        org.springframework.core.convert.support.GenericConversionService conversions =
+                new org.springframework.core.convert.support.GenericConversionService();
+        conversions.addConverter(Object.class, byte[].class, SessionAttributeSerialization.serializer());
+        conversions.addConverter(byte[].class, Object.class,
+                SessionAttributeSerialization.deserializer(context.getClassLoader()));
+        return conversions;
+    }
+
     @Bean
     public CookieSerializer sessionCookie(@Value("${server.servlet.session.cookie.secure:false}") boolean secure) {
         DefaultCookieSerializer cookie = new DefaultCookieSerializer();

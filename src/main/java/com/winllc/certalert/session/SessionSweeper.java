@@ -11,7 +11,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.BeanClassLoaderAware;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.core.serializer.support.DeserializingConverter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -42,7 +41,7 @@ public class SessionSweeper implements BeanClassLoaderAware {
     private final JobLocks locks;
     private final SessionAudit audit;
     private final Clock clock;
-    private DeserializingConverter deserializer = new DeserializingConverter();
+    private ClassLoader classLoader = SessionSweeper.class.getClassLoader();
 
     public SessionSweeper(javax.sql.DataSource dataSource, JobLocks locks, SessionAudit audit, Clock clock) {
         // Its own, for its row limit: the shared one is everybody's.
@@ -55,7 +54,7 @@ public class SessionSweeper implements BeanClassLoaderAware {
 
     @Override
     public void setBeanClassLoader(ClassLoader classLoader) {
-        this.deserializer = new DeserializingConverter(classLoader);
+        this.classLoader = classLoader;
     }
 
     @Scheduled(fixedDelayString = "PT1M", initialDelayString = "PT1M")
@@ -100,7 +99,8 @@ public class SessionSweeper implements BeanClassLoaderAware {
                 rs -> {
                     String name = rs.getString(1);
                     try {
-                        attributes.put(name, deserializer.convert(rs.getBytes(2)));
+                        // Through the same allow-list as any stored attribute.
+                        attributes.put(name, SessionAttributeSerialization.read(rs.getBytes(2), classLoader));
                     } catch (RuntimeException e) {
                         // A class that has changed since: the session is cleared regardless.
                         log.debug("Could not read {} of an expired session: {}", name, e.toString());

@@ -2647,7 +2647,13 @@ More than one replica is supported. What makes it safe:
   which the chart and the release bundle use - sessions live in the database
   (`spring_session`). Any replica serves any request, and a restart or rolling update signs
   nobody out. The session controls (idle, absolute, how many per person) are enforced from
-  the database too, and idle sessions are still recorded as `auth.session-expired`.
+  the database too, and idle sessions are still recorded as `auth.session-expired`. Stored
+  attributes are read back through an allow-list of the types this application keeps
+  (strings, numbers, times, JDK collections, Spring Security's authentication, CSRF, saved
+  request and OAuth2/SAML types, the flash map, its own principals); anything else - a
+  deserialization gadget such as `java.util.PriorityQueue`, `java.rmi.*`, `java.net.URL` - is
+  refused, logged, and reads as absent. A client certificate's authentication is kept without
+  the certificate.
 - **Jobs started by hand** are recorded in `job_run`, so the page can ask any replica how one
   is going.
 - **SAML sign-in requests** wait in the database (`saml_authn_request`), so the identity

@@ -22,6 +22,7 @@ public class ClientCertificateDetails extends PreAuthenticatedGrantedAuthorities
 
     /** The certificate first, then whatever was presented or validated with it. */
     public List<X509Certificate> chain() {
-        return chain;
+        // Not kept when a session is stored: read back, a session's copy has no chain.
+        return chain == null ? List.of() : chain;
     }
 }

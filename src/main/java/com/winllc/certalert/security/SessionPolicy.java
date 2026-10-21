@@ -191,7 +191,7 @@ public class SessionPolicy implements HttpSessionListener, HttpSessionIdListener
         HttpSession session = request.getSession(false);
         Instant now = Instant.now(clock);
         session.setAttribute(SIGNED_IN_AT, now);
-        session.setAttribute(SIGNED_IN_AS, authentication);
+        session.setAttribute(SIGNED_IN_AS, storable(authentication));
         Duration idle = SignedInDirectoryUser.isAdmin(authentication)
                 ? properties.getSession().effectiveAdminIdleTimeout()
                 : properties.getSession().getIdleTimeout();
@@ -346,6 +346,23 @@ public class SessionPolicy implements HttpSessionListener, HttpSessionIdListener
         }
         Object context = session.getAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY);
         return context instanceof SecurityContext security ? security.getAuthentication() : null;
+    }
+
+    /**
+     * Who signed in, as a session keeps it: a client certificate's authentication without the
+     * certificate itself, which nothing here reads back and which a stored session's
+     * allow-list does not admit (the JDK's certificate implementation class).
+     */
+    public static Authentication storable(Authentication authentication) {
+        if (authentication instanceof org.springframework.security.web.authentication.preauth
+                        .PreAuthenticatedAuthenticationToken token
+                && token.getCredentials() != null) {
+            var copy = new org.springframework.security.web.authentication.preauth.PreAuthenticatedAuthenticationToken(
+                    token.getPrincipal(), null, token.getAuthorities());
+            copy.setDetails(token.getDetails());
+            return copy;
+        }
+        return authentication;
     }
 
     /** One person, however they signed in: their entry where they have one, else their name. */
