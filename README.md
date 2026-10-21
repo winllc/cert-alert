@@ -2688,11 +2688,23 @@ curl -H "Authorization: Bearer cat_…" \
   attribute this deployment maps (`cert-alert.ldap.user.uid`): an entry that is gone, disabled
   or locked, or a directory that cannot be read, refuses the token (401); otherwise it does no
   more than the roles the directory gives the creator today. Disabled or locked means
-  `nsAccountLock: true`; AD `userAccountControl` with ACCOUNTDISABLE; an AD lockout still in
-  force (`msDS-User-Account-Control-Computed` UF_LOCKOUT, or where that is not computed,
-  `lockoutTime` within the domain's `lockoutDuration`); or `pwdAccountLockedTime` that is
-  `000001010000Z` or within its policy's `pwdLockoutDuration`. A lockout that has lapsed no
-  longer counts.
+  `nsAccountLock: true`; AD `userAccountControl` with ACCOUNTDISABLE; or one of the lockouts
+  below, which **fail closed**: a lockout counts as lapsed only where a known, non-zero
+  lockout length shows it has.
+  - AD: `msDS-User-Account-Control-Computed` with UF_LOCKOUT (clear means not locked out,
+    whatever `lockoutTime` says). Where that is not computed, a non-zero `lockoutTime` is
+    locked unless the domain's `lockoutDuration` (on the base entry) has passed since; a
+    `lockoutDuration` of 0 or "never" is locked until an administrator unlocks it.
+  - OpenLDAP and 389 password policy: `pwdAccountLockedTime` of `000001010000Z` is locked for
+    good; any other time is locked unless its policy's (`pwdPolicySubentry`)
+    `pwdLockoutDuration` has passed since. A duration of 0, or a policy without one, is locked.
+  - 389 account policy: `accountUnlockTime` in the future, or `19700101000000Z` (an
+    administrator must unlock), is locked.
+  - Where the length cannot be found - no `pwdPolicySubentry` (a policy applied by
+    `olcPPolicyDefault`), a policy entry that is not there, no domain `lockoutDuration` - the
+    account is locked unless `cert-alert.ldap.lockout.assumed-duration` is set (unset by
+    default; set it to the real lockout length, never shorter). A value that does not parse is
+    locked, and a directory that refuses or fails a read of the policy is unreachable: refused.
   A good answer is reused for at most `cert-alert.api.creator-roles-cache-for` (a minute); a
   refusal never is. The creator's next sign-in narrows their tokens too, never widens them.
 - **A year at most.** `cert-alert.api.max-lifetime` (default `365d`) is the expiry of a token
@@ -3384,8 +3396,14 @@ What to know before anybody does:
 
 - An API token is checked against its creator's live directory entry on every use, so the
   service account must be able to read people's entries and the lock attributes
-  (`nsAccountLock`, `userAccountControl`, `lockoutTime`, `pwdAccountLockedTime`, and
-  `memberOf` where groups grant roles). Tokens last at most a year by default
+  (`nsAccountLock`, `userAccountControl`, `msDS-User-Account-Control-Computed`,
+  `lockoutTime`, `pwdAccountLockedTime`, `pwdPolicySubentry`, `accountUnlockTime`, and
+  `memberOf` where groups grant roles) and the lockout policy (the password policy entries'
+  `pwdLockoutDuration`, AD's domain `lockoutDuration`); a refused read refuses the token. A
+  lockout whose length cannot be found counts as locked unless
+  `cert-alert.ldap.lockout.assumed-duration` is set: on OpenLDAP with `olcPPolicyDefault`
+  (no `pwdPolicySubentry` on entries), a locked-out creator's tokens stay refused until an
+  administrator clears `pwdAccountLockedTime`, or until that setting's length has passed. Tokens last at most a year by default
   (`cert-alert.api.max-lifetime`), and roles from an identity provider's groups do not count
   for them: give token creators their administrator role in the directory.
 

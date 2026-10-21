@@ -224,6 +224,14 @@ cert-alert:
     # under spring.ldap.base-environment above, or it arrives as text and will not parse.
     binary-certificate-option: ${CERT_ALERT_LDAP_BINARY_CERTIFICATE_OPTION:true}
 
+    # What an API token or scheduled report does when its owner's lockout length cannot be
+    # found: a pwdAccountLockedTime with no pwdPolicySubentry (olcPPolicyDefault), or whose
+    # policy entry is not there, or an AD lockoutTime with no domain lockoutDuration. Unset,
+    # such an account is locked until an administrator clears the lock. Set to the directory's
+    # real lockout length (never shorter) to let such a lockout lapse after that long.
+    # lockout:
+    #   assumed-duration: 30m
+
     sync:
       enabled: true
       # The two sweeps are staggered so they never run at once.

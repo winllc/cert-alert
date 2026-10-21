@@ -24,6 +24,7 @@ public class LdapProperties {
     private final CertificateCleanup certificateCleanup = new CertificateCleanup();
     private final User user = new User();
     private final Server server = new Server();
+    private final Lockout lockout = new Lockout();
 
     /** Page size for paged LDAP searches. */
     private int pageSize = 500;
@@ -89,6 +90,10 @@ public class LdapProperties {
         return server;
     }
 
+    public Lockout getLockout() {
+        return lockout;
+    }
+
     public int getPageSize() {
         return pageSize;
     }
@@ -135,6 +140,30 @@ public class LdapProperties {
 
     public void setBinaryCertificateOption(boolean binaryCertificateOption) {
         this.binaryCertificateOption = binaryCertificateOption;
+    }
+
+    /**
+     * How a directory lockout is read when what decides its length cannot be: an OpenLDAP or
+     * 389 {@code pwdAccountLockedTime} with no {@code pwdPolicySubentry} (a policy applied by
+     * {@code olcPPolicyDefault}) or whose policy entry is not there, or an Active Directory
+     * {@code lockoutTime} where the domain's {@code lockoutDuration} is absent.
+     */
+    public static class Lockout {
+
+        /**
+         * The lockout length to assume then. Unset (the default), such an account counts as
+         * locked until an administrator clears the lock. Set it to the directory's real policy
+         * length, never shorter, and a lockout older than that is taken as lapsed.
+         */
+        private Duration assumedDuration;
+
+        public Duration getAssumedDuration() {
+            return assumedDuration;
+        }
+
+        public void setAssumedDuration(Duration assumedDuration) {
+            this.assumedDuration = assumedDuration;
+        }
     }
 
     /** Schedules for the scraping jobs. */
