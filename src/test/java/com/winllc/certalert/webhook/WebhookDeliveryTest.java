@@ -293,6 +293,43 @@ class WebhookDeliveryTest {
         assertThat(log(jobsOnly.endpoint())).isEmpty();
     }
 
+    @Autowired
+    private com.winllc.certalert.audit.AuditLog auditLog;
+
+    /**
+     * Saved before a key was set, stored as typed; encrypted at the next start, once - and a
+     * row changed since it was read is left for the next start rather than overwritten.
+     */
+    @Test
+    void urlsAndSecretsSavedBeforeAKeyAreEncryptedAtStartOnce() {
+        Endpoint plain = endpoint(WebhookEndpoint.Format.SLACK, WebhookEvent.JOB_FAILED);
+        String url = secrets.revealUrl(plain.endpoint());
+        assertThat(plain.endpoint().isUrlEncrypted()).isFalse();
+
+        WebhookProperties keyed = new WebhookProperties();
+        keyed.setSecretKey(java.util.Base64.getEncoder().encodeToString(new byte[32]));
+        WebhookSecrets sealing = new WebhookSecrets(keyed);
+        WebhookSecretEncryption encryption = new WebhookSecretEncryption(endpoints, sealing, locks, auditLog, transactions);
+
+        // A replica that read the row before it was changed: its update finds nothing to do.
+        assertThat(jdbc.update("UPDATE webhook_endpoint SET url = url WHERE id = ?", plain.endpoint().getId())).isOne();
+        assertThat(endpoints.encryptUrl(plain.endpoint().getId(), "https://stale.example/x", "sealed")).isZero();
+
+        assertThat(encryption.encryptStored()).isGreaterThanOrEqualTo(2);
+        WebhookEndpoint stored = endpoints.findById(plain.endpoint().getId()).orElseThrow();
+        assertThat(stored.isUrlEncrypted()).isTrue();
+        assertThat(stored.isSecretEncrypted()).isTrue();
+        assertThat(stored.getStoredUrl()).startsWith("v1:").doesNotContain("hook");
+        assertThat(sealing.revealUrl(stored)).isEqualTo(url);
+        assertThat(sealing.reveal(stored)).isEqualTo(plain.secret());
+
+        // Again - another start, another replica: nothing left to do, nothing encrypted twice.
+        assertThat(encryption.encryptStored()).isZero();
+        assertThat(sealing.revealUrl(endpoints.findById(stored.getId()).orElseThrow())).isEqualTo(url);
+        // Without a key there is nothing to do at all.
+        assertThat(new WebhookSecretEncryption(endpoints, secrets, locks, auditLog, transactions).encryptStored()).isZero();
+    }
+
     @Test
     void secretsAreEncryptedWhereAKeyIsConfigured() {
         WebhookProperties keyed = new WebhookProperties();

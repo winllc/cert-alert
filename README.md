@@ -2684,10 +2684,15 @@ curl -H "Authorization: Bearer cat_…" \
   `admin-identifiers`/`auditor-identifiers`, or a directory group in `groups` - never a single
   sign-on provider's groups: nothing could take such a role back from a token, so an
   administrator by IdP group alone can make read-only tokens only. On **every use** the
-  creator's entry is read from the live directory (not the cached copy): an entry that is
-  gone, disabled or locked (`nsAccountLock`, AD `userAccountControl` ACCOUNTDISABLE or
-  `lockoutTime`, `pwdAccountLockedTime`), or a directory that cannot be read, refuses the
-  token (401); otherwise it does no more than the roles the directory gives the creator today.
+  creator's entry is read from the live directory (not the cached copy), matched by the uid
+  attribute this deployment maps (`cert-alert.ldap.user.uid`): an entry that is gone, disabled
+  or locked, or a directory that cannot be read, refuses the token (401); otherwise it does no
+  more than the roles the directory gives the creator today. Disabled or locked means
+  `nsAccountLock: true`; AD `userAccountControl` with ACCOUNTDISABLE; an AD lockout still in
+  force (`msDS-User-Account-Control-Computed` UF_LOCKOUT, or where that is not computed,
+  `lockoutTime` within the domain's `lockoutDuration`); or `pwdAccountLockedTime` that is
+  `000001010000Z` or within its policy's `pwdLockoutDuration`. A lockout that has lapsed no
+  longer counts.
   A good answer is reused for at most `cert-alert.api.creator-roles-cache-for` (a minute); a
   refusal never is. The creator's next sign-in narrows their tokens too, never widens them.
 - **A year at most.** `cert-alert.api.max-lifetime` (default `365d`) is the expiry of a token
@@ -2743,8 +2748,8 @@ link-local (169.254.0.0/16 and fe80::/10, so never a cloud metadata service), th
 metadata addresses (fd00:ec2::254, 100.100.100.200, Azure's 168.63.129.16), unspecified,
 multicast or broadcast, nor an IPv6 address carrying one of those (IPv4-compatible, 6to4,
 NAT64 - whose embedded IPv4 address is held to the private-network rule too); and never
-Teredo (2001::/32), the local-use NAT64 prefix (64:ff9b:1::/48) or an IPv4-mapped address
-arriving as IPv6. The post
+Teredo (2001::/32), the local-use NAT64 prefix (64:ff9b:1::/48), or an IPv4-mapped or
+SIIT IPv4-translated (::ffff:0:0/96) address arriving as IPv6. The post
 then goes to the address that was checked - the connection is not made by a second lookup -
 with TLS SNI and certificate hostname verification against the URL's host and the JVM's trust
 store. So a name that pointed somewhere harmless when it was saved and at the metadata
@@ -2763,8 +2768,9 @@ host (`https://hooks.slack.com/[redacted]`).
 `cert-alert.webhooks.secret-key` (Helm: `webhooks.secretKey`/`webhooks.existingSecret`;
 bundle: `CERT_ALERT_WEBHOOKS_SECRET_KEY`) to a base64 AES key (`openssl rand -base64 32`) and
 both are stored AES-GCM encrypted; without one they are stored as they are and a warning is logged at
-startup. Changing the key makes the stored secrets unreadable: press "New secret" on each
-webhook afterwards.
+startup. URLs and secrets saved before the key was set are encrypted at the next start (once, under the
+job lock, safe with several replicas). Changing the key makes the stored secrets unreadable:
+press "New secret" and save the URL again on each webhook afterwards.
 
 #### Verifying a delivery
 

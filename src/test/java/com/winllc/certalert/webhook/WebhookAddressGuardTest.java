@@ -112,6 +112,16 @@ class WebhookAddressGuardTest {
         mapped[15] = 34;
         InetAddress v6 = java.net.Inet6Address.getByAddress(null, mapped, -1);
         assertThat(new WebhookAddressGuard(new WebhookProperties()).refusalFor(v6)).isNotNull();
+        // SIIT's IPv4-translated addresses (::ffff:0:0/96): the metadata service and loopback.
+        WebhookAddressGuard translated = guard(Map.of(
+                "siit-metadata", List.of("::ffff:0:a9fe:a9fe"),
+                "siit-loopback", List.of("::ffff:0:7f00:1"),
+                "siit-public", List.of("::ffff:0:5db8:d822")));
+        for (String host : List.of("siit-metadata", "siit-loopback", "siit-public")) {
+            assertThatThrownBy(() -> translated.checkUrl("https://" + host + "/x")).as(host)
+                    .isInstanceOf(WebhookAddressGuard.RefusedDestinationException.class)
+                    .hasMessageContaining("IPv4-translated");
+        }
     }
 
     @Test

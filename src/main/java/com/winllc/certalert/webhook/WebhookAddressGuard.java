@@ -155,7 +155,7 @@ public class WebhookAddressGuard {
         }
         if (address instanceof Inet6Address && (TRANSLATED.stream().anyMatch(range -> range.matches(address))
                 || isMappedIpv4(address))) {
-            return "a Teredo, local-use NAT64 or IPv4-mapped address, which webhooks are never sent to";
+            return "a Teredo, local-use NAT64, IPv4-mapped or IPv4-translated address, which webhooks are never sent to";
         }
         if (FetchPolicy.isNeverFetched(address) || BROADCAST.matches(address)) {
             return "a link-local, metadata, unspecified or multicast address, which webhooks are never sent to";
@@ -173,18 +173,24 @@ public class WebhookAddressGuard {
         return null;
     }
 
-    /** ::ffff:a.b.c.d held as an IPv6 address (the JDK normally turns it into IPv4). */
+    /**
+     * An IPv4 address carried in the low 32 bits after ::ffff - whether IPv4-mapped
+     * (::ffff:a.b.c.d, which the JDK normally turns into IPv4) or SIIT's IPv4-translated
+     * form (::ffff:0:a.b.c.d, ::ffff:0:0/96) - held as an IPv6 address.
+     */
     private static boolean isMappedIpv4(InetAddress address) {
         byte[] bytes = address.getAddress();
         if (bytes.length != 16) {
             return false;
         }
-        for (int i = 0; i < 10; i++) {
+        for (int i = 0; i < 8; i++) {
             if (bytes[i] != 0) {
                 return false;
             }
         }
-        return bytes[10] == (byte) 0xff && bytes[11] == (byte) 0xff;
+        boolean mapped = bytes[8] == 0 && bytes[9] == 0 && bytes[10] == (byte) 0xff && bytes[11] == (byte) 0xff;
+        boolean translated = bytes[8] == (byte) 0xff && bytes[9] == (byte) 0xff && bytes[10] == 0 && bytes[11] == 0;
+        return mapped || translated;
     }
 
     private boolean isRestricted() {

@@ -48,6 +48,11 @@ public class WebhookSecrets {
         }
     }
 
+    /** Whether a key is configured, so what is stored is encrypted. */
+    public boolean encrypts() {
+        return key != null;
+    }
+
     /** How a secret is held in the table. */
     record Stored(String value, boolean encrypted) {}
 

@@ -354,7 +354,7 @@ class ApiTokenTest {
         String dn = groupAdmin("lena");
         String token = create("certificates:read", authentication(signedIn(dn, DirectoryPrincipal.AuthenticationMethod.LDAP)), null);
         for (String[] lock : new String[][] {
-            {"nsAccountLock", "true"}, {"userAccountControl", "514"}, {"lockoutTime", "133420000000000000"},
+            {"nsAccountLock", "true"}, {"userAccountControl", "514"}, {"msDS-User-Account-Control-Computed", "16"},
             {"pwdAccountLockedTime", "000001010000Z"}
         }) {
             directory.modify(dn, lock[0], lock[1]);
@@ -368,7 +368,9 @@ class ApiTokenTest {
         }
         directory.modify(dn, "userAccountControl", "512");
         mockMvc.perform(get("/api/v1/certificates").header("Authorization", bearer(token))).andExpect(status().isOk());
-        directory.modify(dn, "lockoutTime", "0");
+        // A lockout that has lapsed: AD leaves lockoutTime set and clears the computed bit.
+        directory.modify(dn, "lockoutTime", "133420000000000000");
+        directory.modify(dn, "msDS-User-Account-Control-Computed", "0");
         mockMvc.perform(get("/api/v1/certificates").header("Authorization", bearer(token))).andExpect(status().isOk());
     }
 
