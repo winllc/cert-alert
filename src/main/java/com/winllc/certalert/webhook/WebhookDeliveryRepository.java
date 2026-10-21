@@ -10,14 +10,32 @@ import org.springframework.data.repository.query.Param;
 
 public interface WebhookDeliveryRepository extends JpaRepository<WebhookDelivery, Long> {
 
-    /** What is waiting and due, the longest-waiting first. */
+    /**
+     * What is waiting and due, the longest-waiting first. A replica without the key
+     * ({@code keyed} false) is not given deliveries to endpoints whose URL or secret is
+     * encrypted: it could not send them, and one that has the key will.
+     */
     @Query("""
             select d.id from WebhookDelivery d
             where d.state = :pending and d.nextAttemptAt <= :now
+              and (:keyed = true or not exists (
+                select e.id from WebhookEndpoint e
+                where e.id = d.endpointId and (e.urlEncrypted = true or e.secretEncrypted = true)))
             order by d.nextAttemptAt, d.id
             """)
     List<Long> findDue(
-            @Param("pending") WebhookDelivery.State pending, @Param("now") Instant now, Pageable pageable);
+            @Param("pending") WebhookDelivery.State pending,
+            @Param("now") Instant now,
+            @Param("keyed") boolean keyed,
+            Pageable pageable);
+
+    /** Endpoints whose URL or secret is encrypted and that have deliveries waiting and due. */
+    @Query("""
+            select distinct e.id from WebhookEndpoint e, WebhookDelivery d
+            where d.endpointId = e.id and d.state = :pending and d.nextAttemptAt <= :now
+              and (e.urlEncrypted = true or e.secretEncrypted = true)
+            """)
+    List<Long> findEncryptedWithDue(@Param("pending") WebhookDelivery.State pending, @Param("now") Instant now);
 
     /** Claims a waiting delivery, if nobody else has: one replica, one post. */
     @Modifying

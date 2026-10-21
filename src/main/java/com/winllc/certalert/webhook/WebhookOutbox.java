@@ -39,6 +39,10 @@ import org.springframework.transaction.support.TransactionTemplate;
  * address it checked ({@link WebhookTransport}), signed afresh with the time of the attempt.
  * A 2xx is delivered; anything else - a refusal, a redirect, a 5xx, a timeout - is tried
  * again.
+ *
+ * <p>A replica started without {@code cert-alert.webhooks.secret-key} leaves the deliveries
+ * of endpoints whose URL or secret is encrypted alone - not claimed, no attempt counted - for
+ * a replica that has the key, and says so once a pass.
  */
 @Service
 @EnableScheduling
@@ -102,16 +106,29 @@ public class WebhookOutbox {
             return locks.runExclusively(LOCK, () -> {
                 independent.executeWithoutResult(status -> deliveries.releaseLapsed(
                         WebhookDelivery.State.SENDING, WebhookDelivery.State.PENDING, Instant.now(clock)));
+                boolean keyed = secrets.encrypts();
+                if (!keyed) {
+                    List<Long> encrypted = deliveries.findEncryptedWithDue(WebhookDelivery.State.PENDING, Instant.now(clock));
+                    if (!encrypted.isEmpty()) {
+                        log.warn("Webhook(s) {} are encrypted but this node has no cert-alert.webhooks.secret-key; "
+                                + "their deliveries are left for a replica that has it", encrypted);
+                    }
+                }
                 int sent = 0;
                 while (true) {
                     List<Long> due = deliveries.findDue(
-                            WebhookDelivery.State.PENDING, Instant.now(clock), PageRequest.of(0, BATCH));
+                            WebhookDelivery.State.PENDING, Instant.now(clock), keyed, PageRequest.of(0, BATCH));
+                    int tried = 0;
                     for (Long id : due) {
-                        if (attempt(id)) {
+                        Outcome outcome = attempt(id, keyed);
+                        if (outcome != Outcome.SKIPPED) {
+                            tried++;
+                        }
+                        if (outcome == Outcome.SENT) {
                             sent++;
                         }
                     }
-                    if (due.size() < BATCH) {
+                    if (due.size() < BATCH || tried == 0) {
                         break;
                     }
                 }
@@ -185,6 +202,22 @@ public class WebhookOutbox {
                 nudged.set(false);
             }
         }
+    }
+
+    private enum Outcome { SENT, NOT_SENT, SKIPPED }
+
+    /**
+     * One delivery, if it is still waiting: posted, and what became of it recorded. Without
+     * the key, one to an endpoint that was encrypted since it was listed is left unclaimed.
+     */
+    private Outcome attempt(Long id, boolean keyed) {
+        if (!keyed && Boolean.TRUE.equals(independent.execute(status -> deliveries.findById(id)
+                .flatMap(row -> endpoints.findById(row.getEndpointId()))
+                .map(endpoint -> endpoint.isUrlEncrypted() || endpoint.isSecretEncrypted())
+                .orElse(false)))) {
+            return Outcome.SKIPPED;
+        }
+        return attempt(id) ? Outcome.SENT : Outcome.NOT_SENT;
     }
 
     /** One delivery, if it is still waiting: posted, and what became of it recorded. */

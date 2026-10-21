@@ -36,8 +36,11 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
@@ -54,6 +57,7 @@ import org.springframework.transaction.PlatformTransactionManager;
  */
 @SpringBootTest
 @ActiveProfiles("test")
+@ExtendWith(OutputCaptureExtension.class)
 class WebhookDeliveryTest {
 
     private static final String HOST = "hooks.example.test";
@@ -328,6 +332,55 @@ class WebhookDeliveryTest {
         assertThat(sealing.revealUrl(endpoints.findById(stored.getId()).orElseThrow())).isEqualTo(url);
         // Without a key there is nothing to do at all.
         assertThat(new WebhookSecretEncryption(endpoints, secrets, locks, auditLog, transactions).encryptStored()).isZero();
+    }
+
+    /**
+     * A replica started without the key leaves an encrypted endpoint's delivery alone - not
+     * claimed, no attempt counted, one warning a pass - and a replica with the key sends it.
+     */
+    @Test
+    void aReplicaWithoutTheKeyLeavesEncryptedEndpointsToOneThatHasIt(CapturedOutput output) {
+        WebhookProperties keyed = new WebhookProperties();
+        keyed.setSecretKey(java.util.Base64.getEncoder().encodeToString(new byte[32]));
+        WebhookSecrets sealing = new WebhookSecrets(keyed);
+        WebhookEndpoint sealed = new WebhookEndpoint("sealed receiver", sealing.store("https://" + HOST + ":"
+                + receiver.getAddress().getPort() + "/hook"), WebhookEndpoint.Format.JSON,
+                EnumSet.of(WebhookEvent.JOB_FAILED), "test", Instant.now());
+        String secret = sealing.generate();
+        sealed.secret(sealing.store(secret), secret.substring(0, 12), Instant.now());
+        sealed = endpoints.save(sealed);
+        created.add(sealed.getId());
+        notifications.endpointsChanged();
+        publisher.publish(WebhookEvent.JOB_FAILED, Map.of("job", "revocation"), "failed");
+        WebhookDelivery waiting = log(sealed).getFirst();
+        assertThat(secrets.encrypts()).isFalse();
+
+        int before = output.getOut().length();
+        WebhookOutbox keyless = outbox(resolvingTo("127.0.0.1"), new WebhookTransport(properties, clientTls.getSocketFactory()));
+        keyless.deliverDue();
+        keyless.deliverDue();
+
+        assertThat(received).isEmpty();
+        WebhookDelivery untouched = log(sealed).getFirst();
+        assertThat(untouched.getState()).isEqualTo(WebhookDelivery.State.PENDING);
+        assertThat(untouched.getAttempts()).isZero();
+        assertThat(untouched.getNextAttemptAt()).isEqualTo(waiting.getNextAttemptAt());
+        assertThat(untouched.getLastError()).isNull();
+        String warning = "are encrypted but this node has no cert-alert.webhooks.secret-key";
+        String logged = output.getOut().substring(before);
+        // One warning a pass, naming the endpoint: two passes, two warnings.
+        assertThat(logged.split(java.util.regex.Pattern.quote(warning), -1)).hasSize(3);
+        assertThat(logged).contains(String.valueOf(sealed.getId()));
+
+        WebhookOutbox withKey = new WebhookOutbox(deliveries, endpoints, resolvingTo("127.0.0.1"),
+                new WebhookTransport(properties, clientTls.getSocketFactory()), sealing, keyed, locks, clock, transactions);
+        assertThat(withKey.deliverDue()).isGreaterThanOrEqualTo(1);
+        assertThat(received).singleElement().satisfies(post -> assertThat(WebhookSecrets.verify(secret,
+                post.headers().get("X-certalert-signature").getFirst(), post.body(), Instant.now().getEpochSecond(), 300))
+                .isTrue());
+        WebhookDelivery sent = log(sealed).getFirst();
+        assertThat(sent.getState()).isEqualTo(WebhookDelivery.State.DELIVERED);
+        assertThat(sent.getAttempts()).isOne();
     }
 
     @Test

@@ -2782,7 +2782,9 @@ bundle: `CERT_ALERT_WEBHOOKS_SECRET_KEY`) to a base64 AES key (`openssl rand -ba
 both are stored AES-GCM encrypted; without one they are stored as they are and a warning is logged at
 startup. URLs and secrets saved before the key was set are encrypted at the next start (once, under the
 job lock, safe with several replicas). Changing the key makes the stored secrets unreadable:
-press "New secret" and save the URL again on each webhook afterwards.
+press "New secret" and save the URL again on each webhook afterwards. **Give every replica the
+same key.** A replica started without one leaves deliveries to encrypted webhooks for a replica
+that has it (not claimed, no attempt counted) and logs a warning each pass naming those webhooks.
 
 #### Verifying a delivery
 
@@ -3415,7 +3417,8 @@ What to know before anybody does:
 - Webhooks post from the application's pods to the receivers' https endpoints: with the
   chart's NetworkPolicy on, `networkPolicy.egress.web` must reach them, and an outbound HTTP
   proxy is not used. Set `cert-alert.webhooks.secret-key` (Helm `webhooks.secretKey`, bundle
-  `CERT_ALERT_WEBHOOKS_SECRET_KEY`) before creating any, so their secrets are encrypted at rest.
+  `CERT_ALERT_WEBHOOKS_SECRET_KEY`) before creating any, so their secrets are encrypted at rest,
+  and give every replica the same key.
 - Two new audit categories of event: `api.*` and `webhook.*`.
 
 ### Jobs started by hand answer 202, and run one at a time across replicas
