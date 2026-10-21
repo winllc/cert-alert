@@ -19,6 +19,12 @@ class TableWriterTest {
             assertThat(TableWriter.neutralise(hostile)).as(hostile).startsWith("'");
         }
         assertThat(TableWriter.neutralise("CN=web01")).isEqualTo("CN=web01");
+        // Spreadsheets skip leading spaces, so a formula behind them is still a formula.
+        for (String hidden : List.of(" =1+1", "  +1", "\n-1", "\u00a0@SUM(A1)", " \t=1")) {
+            assertThat(TableWriter.neutralise(hidden)).as(hidden).startsWith("'");
+        }
+        assertThat(TableWriter.neutralise("  plain")).isEqualTo("  plain");
+        assertThat(TableWriter.neutralise("   ")).isEqualTo("   ");
         assertThat(TableWriter.neutralise("")).isEmpty();
         assertThat(CsvTableWriter.format(TableWriter.number(-5))).isEqualTo("-5");
         assertThat(CsvTableWriter.format(TableWriter.text("-5"))).isEqualTo("'-5");

@@ -45,11 +45,26 @@ public interface TableWriter extends AutoCloseable {
     @Override
     void close() throws IOException;
 
-    /** The leading apostrophe that keeps a spreadsheet from running text as a formula. */
-    static String neutralise(String value) {
+    /**
+     * The leading apostrophe that keeps a spreadsheet from running text as a formula: where
+     * it starts with a tab or a carriage return, or where its first character that is not
+     * white space is {@code =}, {@code +}, {@code -} or {@code @} - spreadsheets skip leading
+     * spaces when they decide what a cell is.
+     */
+    public static String neutralise(String value) {
         if (value == null || value.isEmpty()) {
             return value;
         }
-        return "=+-@\t\r".indexOf(value.charAt(0)) >= 0 ? "'" + value : value;
+        if (value.charAt(0) == '\t' || value.charAt(0) == '\r') {
+            return "'" + value;
+        }
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (Character.isWhitespace(c) || Character.isSpaceChar(c)) {
+                continue;
+            }
+            return "=+-@".indexOf(c) >= 0 ? "'" + value : value;
+        }
+        return value;
     }
 }

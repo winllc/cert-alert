@@ -35,6 +35,10 @@ public class ScheduledReport {
     @Column(nullable = false, length = 320)
     private String owner;
 
+    /** The directory entry of whoever scheduled it, checked again at every run. */
+    @Column(name = "owner_dn", length = 1000)
+    private String ownerDn;
+
     @Column(nullable = false, length = 120)
     private String name;
 
@@ -87,6 +91,7 @@ public class ScheduledReport {
 
     ScheduledReport(
             String owner,
+            String ownerDn,
             String name,
             String query,
             CertificateExport.Format format,
@@ -97,6 +102,7 @@ public class ScheduledReport {
             int hourUtc,
             Instant now) {
         this.owner = owner;
+        this.ownerDn = ownerDn;
         this.name = name;
         this.query = query;
         this.format = format;
@@ -152,6 +158,10 @@ public class ScheduledReport {
 
     public String getOwner() {
         return owner;
+    }
+
+    public String getOwnerDn() {
+        return ownerDn;
     }
 
     public String getName() {

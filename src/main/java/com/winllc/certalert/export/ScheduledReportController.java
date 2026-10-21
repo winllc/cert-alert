@@ -69,7 +69,7 @@ public class ScheduledReportController {
     @ResponseStatus(HttpStatus.CREATED)
     public ReportRow create(@RequestBody ScheduledReports.Request request, Authentication authentication) {
         requireAdministrator(authentication);
-        return ReportRow.of(reports.create(request, AuditContext.actorOf(authentication).id()));
+        return ReportRow.of(reports.create(request, authentication));
     }
 
     @PutMapping(PATH + "/{id}/enabled")

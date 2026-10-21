@@ -1,6 +1,12 @@
 package com.winllc.certalert.export;
 
+import com.winllc.certalert.audit.AuditContext;
 import com.winllc.certalert.audit.AuditLog;
+import com.winllc.certalert.security.DirectoryPrincipal;
+import com.winllc.certalert.security.DirectoryPrincipalResolver;
+import com.winllc.certalert.security.DirectoryStanding;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
 import com.winllc.certalert.audit.AuditRecord;
 import com.winllc.certalert.cluster.JobLocks;
 import com.winllc.certalert.config.NotificationProperties;
@@ -40,8 +46,12 @@ import org.springframework.transaction.support.TransactionTemplate;
  * as {@code report.sent}, with its recipients and row count; creating and deleting one too.
  *
  * <p>Administrators only: a report goes to addresses somebody types, so it is a way to send
- * the inventory out of the building, and {@code cert-alert.exports.report-recipient-domains}
- * can hold it to the organisation's own.
+ * the inventory out of the building. So {@code cert-alert.exports.report-recipient-domains}
+ * is required - nothing can be scheduled or sent until it names the organisation's own - and
+ * every run checks again that its owner is still an administrator in the live directory
+ * (not deleted, disabled or locked; a single sign-on provider's groups do not count) and that
+ * every recipient is still inside those domains. A run that fails a check sends nothing and
+ * says why on the page and in the audit trail.
  */
 @Service
 @EnableScheduling
@@ -62,6 +72,7 @@ public class ScheduledReports {
     private final ExportProperties properties;
     private final JobLocks locks;
     private final AuditLog audit;
+    private final DirectoryStanding standing;
     private final Clock clock;
     private final TransactionTemplate independent;
 
@@ -74,6 +85,7 @@ public class ScheduledReports {
             ExportProperties properties,
             JobLocks locks,
             AuditLog audit,
+            DirectoryStanding standing,
             Clock clock,
             PlatformTransactionManager transactions) {
         this.reports = reports;
@@ -84,6 +96,7 @@ public class ScheduledReports {
         this.properties = properties;
         this.locks = locks;
         this.audit = audit;
+        this.standing = standing;
         this.clock = clock;
         this.independent = new TransactionTemplate(transactions);
         this.independent.setPropagationBehavior(TransactionTemplate.PROPAGATION_REQUIRES_NEW);
@@ -100,7 +113,16 @@ public class ScheduledReports {
             Integer hourUtc) {}
 
     @Transactional
-    public ScheduledReport create(Request request, String owner) {
+    public ScheduledReport create(Request request, Authentication creator) {
+        requireRecipientDomains();
+        if (!(creator.getPrincipal() instanceof DirectoryPrincipal principal) || principal.getDirectoryDn() == null) {
+            throw new AccessDeniedException("Scheduled reports are made by a person the directory holds");
+        }
+        String refusal = ownerRefusal(principal.getDirectoryDn());
+        if (refusal != null) {
+            throw new AccessDeniedException("You cannot schedule a report: " + refusal);
+        }
+        String owner = AuditContext.actorOf(creator).id();
         String name = request.name() == null ? "" : request.name().trim();
         if (name.isEmpty() || name.length() > 120) {
             throw new IllegalArgumentException("Give the report a name of up to 120 characters");
@@ -131,7 +153,7 @@ public class ScheduledReports {
             throw new IllegalArgumentException("You have " + properties.getMaxReportsPerUser() + " scheduled reports; delete one first");
         }
         ScheduledReport report = reports.save(new ScheduledReport(
-                owner, name, query, format, recipients, frequency, dayOfWeek, dayOfMonth, hour, Instant.now(clock)));
+                owner, principal.getDirectoryDn(), name, query, format, recipients, frequency, dayOfWeek, dayOfMonth, hour, Instant.now(clock)));
         audit.record(AuditRecord.of(AuditRecord.Category.CONFIGURATION, "report.created")
                 .severity(AuditRecord.Severity.NOTICE)
                 .target("scheduled-report", String.valueOf(report.getId()), name)
@@ -195,6 +217,20 @@ public class ScheduledReports {
         CertificateFilters.Parsed parsed;
         long rows = 0;
         try {
+            // On whose authority, and to whom: checked at every run, not just when it was
+            // scheduled. Its owner still an administrator in the live directory, and every
+            // recipient still inside the domains reports may go to.
+            requireRecipientDomains();
+            String refusal = ownerRefusal(report.getOwnerDn());
+            if (refusal != null) {
+                throw new IllegalStateException("Not sent: " + refusal);
+            }
+            for (String recipient : report.getRecipients()) {
+                if (!allowedDomain(recipient)) {
+                    throw new IllegalStateException("Not sent: " + recipient
+                            + " is outside cert-alert.exports.report-recipient-domains");
+                }
+            }
             parsed = CertificateFilters.parse(report.getQuery());
             long matching = inventory.count(parsed.filter());
             long limit = Math.min(matching, properties.getReportMaxRows());
@@ -247,6 +283,30 @@ public class ScheduledReports {
         }
     }
 
+    /** Reports go nowhere until the domains they may go to are named. */
+    private void requireRecipientDomains() {
+        List<String> domains = properties.getReportRecipientDomains();
+        if (domains == null || domains.stream().allMatch(d -> d == null || d.isBlank())) {
+            throw new IllegalArgumentException("Scheduled reports are off until cert-alert.exports.report-recipient-domains "
+                    + "names the domains they may be sent to");
+        }
+    }
+
+    /** Why this person may not (or no longer) send the inventory out, or null where they may. */
+    private String ownerRefusal(String dn) {
+        if (dn == null) {
+            return "it has no owner in the directory";
+        }
+        DirectoryStanding.Standing owner = standing.of(dn, java.time.Duration.ZERO);
+        if (!owner.active()) {
+            return "its owner's directory entry: " + owner.reason();
+        }
+        if (!owner.roles().contains(DirectoryPrincipalResolver.ROLE_ADMIN)) {
+            return "its owner is no longer an administrator in the directory";
+        }
+        return null;
+    }
+
     private List<String> recipients(List<String> given) {
         Set<String> addresses = new LinkedHashSet<>();
         for (String value : given == null ? List.<String>of() : given) {
@@ -274,7 +334,7 @@ public class ScheduledReports {
     private boolean allowedDomain(String address) {
         List<String> domains = properties.getReportRecipientDomains();
         if (domains == null || domains.isEmpty()) {
-            return true;
+            return false;
         }
         String domain = address.substring(address.lastIndexOf('@') + 1);
         for (String allowed : domains) {

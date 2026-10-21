@@ -48,7 +48,7 @@ import org.springframework.web.context.WebApplicationContext;
 /**
  * The certificate inventory: filtered the same way for the list, the export and a saved view;
  * exported as CSV and Excel with formulas neutralised and the export audited; saved views kept
- * per person; one contact added to many servers; and a scheduled report emailed with its file.
+ * per person; and one contact added to many servers. Scheduled reports: ScheduledReportTest.
  */
 @SpringBootTest
 @ActiveProfiles("test")
@@ -266,44 +266,6 @@ class InventoryExportTest {
                         .content("{\"serverIds\":[" + weakServer + "],\"email\":\"me@example.gov\"}"))
                 .andExpect(jsonPath("$.added").value(0))
                 .andExpect(jsonPath("$.refused[0]").value(weakServer));
-    }
-
-    @Test
-    void aScheduledReportIsEmailedWithItsFileOnSchedule() throws Exception {
-        mockMvc.perform(post(ScheduledReportController.PATH).with(reader("r")).with(csrf())
-                        .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"x\",\"recipients\":[\"a@example.gov\"]}"))
-                .andExpect(status().isForbidden());
-        properties.setReportRecipientDomains(List.of("example.gov"));
-        mockMvc.perform(post(ScheduledReportController.PATH).with(admin()).with(csrf())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Weekly weak\",\"query\":\"hashAlgorithm=SHA-1\",\"format\":\"xlsx\","
-                                + "\"recipients\":[\"pki@elsewhere.example\"],\"frequency\":\"WEEKLY\",\"dayOfWeek\":1,\"hourUtc\":6}"))
-                .andExpect(status().isBadRequest());
-        String created = mockMvc.perform(post(ScheduledReportController.PATH).with(admin()).with(csrf())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"name\":\"Weekly weak\",\"query\":\"hashAlgorithm=SHA-1\",\"format\":\"xlsx\","
-                                + "\"recipients\":[\"pki@example.gov, ops@example.gov\"],\"frequency\":\"WEEKLY\",\"dayOfWeek\":1,\"hourUtc\":6}"))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.recipients.length()").value(2))
-                .andReturn().getResponse().getContentAsString();
-        Long id = Long.valueOf(created.replaceAll(".*\"id\":(\\d+).*", "$1"));
-        assertThat(reports.runDue()).as("not due until Monday 06:00").isZero();
-
-        jdbc.update("UPDATE scheduled_report SET next_run_at = ? WHERE id = ?",
-                java.sql.Timestamp.from(Instant.now().minusSeconds(60)), id);
-        long head = audit.headSeq();
-        assertThat(reports.runDue()).isEqualTo(1);
-
-        OutboundEmail email = outbox.findAll().stream()
-                .filter(message -> message.getKind() == OutboundEmail.Kind.REPORT)
-                .reduce((first, second) -> second).orElseThrow();
-        assertThat(email.getRecipients()).containsExactly("pki@example.gov", "ops@example.gov");
-        assertThat(email.getSubject()).contains("Weekly weak", "1 certificate");
-        assertThat(email.getAttachmentName()).endsWith(".xlsx");
-        assertThat(unzip(email.getAttachment()).get("xl/worksheets/sheet1.xml")).contains("legacy01").doesNotContain("web03");
-        assertThat(reports.find(id).getNextRunAt()).isAfter(Instant.now());
-        assertThat(reports.find(id).getLastRows()).isEqualTo(1);
-        assertThat(audit.after(head, 100)).extracting(StoredEvent::action).contains("report.sent");
     }
 
     @Test
