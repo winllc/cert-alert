@@ -91,6 +91,50 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "429": { $ref: "#/components/responses/TooManyRequests" }
 
+  /api/v1/certificates/export:
+    get:
+      tags: [Certificates]
+      operationId: exportCertificates
+      summary: The certificates, as a CSV or Excel file
+      description: |
+        The same filters and order as the list, without the paging, up to
+        `cert-alert.exports.max-rows` (200,000; `X-CertAlert-Truncated: true` when there were
+        more). Streamed. Text that a spreadsheet would read as a formula (starting with
+        `=`, `+`, `-`, `@`, tab or CR) is written with a leading apostrophe. Audited as
+        `inventory.exported`.
+      x-required-scope: certificates:read
+      security:
+        - apiToken: [certificates:read]
+      parameters:
+        - name: format
+          in: query
+          schema: { type: string, enum: [csv, xlsx], default: csv }
+        - $ref: "#/components/parameters/q"
+        - $ref: "#/components/parameters/status"
+        - $ref: "#/components/parameters/ownerType"
+        - $ref: "#/components/parameters/expiresWithinDays"
+        - $ref: "#/components/parameters/expiresFrom"
+        - $ref: "#/components/parameters/expiresTo"
+        - $ref: "#/components/parameters/issuer"
+        - $ref: "#/components/parameters/keyAlgorithm"
+        - $ref: "#/components/parameters/keySizeMin"
+        - $ref: "#/components/parameters/keySizeMax"
+        - $ref: "#/components/parameters/hashAlgorithm"
+        - $ref: "#/components/parameters/revocation"
+        - $ref: "#/components/parameters/risk"
+        - $ref: "#/components/parameters/projectId"
+        - { name: sort, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: The file
+          headers:
+            Content-Disposition:
+              schema: { type: string, example: 'attachment; filename="certalert-certificates-20261021-142233.csv"' }
+          content:
+            text/csv: { schema: { type: string } }
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet: { schema: { type: string, format: binary } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
   /api/v1/certificates/{id}:
     get:
       tags: [Certificates]

@@ -148,6 +148,10 @@ data:
   {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_BANNER_HEIGHT" "value" $v.banner.height) }}
   {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_WARNING_THRESHOLD_DAYS" "value" $v.thresholds.warningDays) }}
   {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_CRITICAL_THRESHOLD_DAYS" "value" $v.thresholds.criticalDays) }}
+  # Inventory exports and scheduled reports.
+  CERT_ALERT_EXPORTS_MAX_ROWS: {{ $v.exports.maxRows | toString | quote }}
+  CERT_ALERT_EXPORTS_REPORT_MAX_ROWS: {{ $v.exports.reportMaxRows | toString | quote }}
+  CERT_ALERT_EXPORTS_REPORT_RECIPIENT_DOMAINS: {{ join "," $v.exports.reportRecipientDomains | quote }}
   # The public API and webhooks; the webhooks' secret key is in a Secret.
   CERT_ALERT_API_TOKENS_ENABLED: {{ $v.api.tokensEnabled | quote }}
   CERT_ALERT_API_REQUESTS_PER_MINUTE: {{ $v.api.requestsPerMinute | toString | quote }}

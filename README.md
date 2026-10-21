@@ -2557,6 +2557,57 @@ is `never` and a stack trace tells an attacker more than it tells the reader.
 from the security filter chain - which reaches no exception handler at all - comes
 out as the same page rather than the Whitelabel one.
 
+## Exports, saved views and scheduled reports
+
+**Certificates** (`/certificates`, in the bar for everybody signed in) lists every certificate
+the directory publishes, with who holds it, and filters it by text (subject, issuer, serial,
+fingerprint, names, owner), state, holder (people or servers), expiry window, issuer, key
+algorithm, key size, hash algorithm, revocation, and - where licensed - risky names. The
+same filters, as one query string, drive the table, the API's
+[`/api/v1/certificates`](#the-api), the exports, saved views and scheduled reports, so each
+of them is exactly what is on screen.
+
+**Export CSV / Export Excel** download the filtered inventory, without the paging: one row per
+certificate with its holder, DN, points of contact, subject, issuer, serial, fingerprint,
+validity, days left, state, key, signature and hash algorithms, names, use, revocation and risk
+flags (`GET /api/v1/certificates/export?format=csv|xlsx&...`).
+
+- Streamed from a database cursor, so a large export does not sit in memory; capped at
+  `cert-alert.exports.max-rows` (200,000), with `X-CertAlert-Truncated: true` when it was.
+- **Formula injection guard.** Any text cell that starts with `=`, `+`, `-`, `@`, a tab or a
+  carriage return is written with a leading apostrophe, in CSV and in Excel: a certificate's
+  subject or a contact's address is somebody else's text, and opening an export must not run
+  it. Numbers and dates are typed cells and written as they are.
+- CSV is UTF-8 with a byte-order mark (so Excel reads it as UTF-8), RFC 4180 quoting, times
+  in ISO-8601 UTC. The workbook has a frozen header row, real date cells (UTC), and an
+  **About** sheet saying when, by whom and with which filters it was exported; with the
+  classification banner on, the marking is on the About sheet and in every printed page's
+  header and footer.
+- Audited as `inventory.exported`, with the format, the filters and the row count, before a
+  byte is sent.
+
+**Saved views** keep the current filters under a name, for the person who saved them only
+(`/api/v1/saved-views`). Saving under a name already used replaces it. Only a filter is ever
+kept: every key and value is checked when it is saved. Auditors, who change nothing, still keep
+views of their own.
+
+**Bulk owner assignment.** Tick server certificates in the table and "Add to selected" adds one
+point of contact to all their servers at once (`POST /api/v1/servers/contacts/bulk`), server by
+server under the usual rule (see [Who may edit them](#who-may-edit-them)): a server the person
+may not manage is reported as refused and left alone. Each addition is audited as one would be.
+
+**Scheduled reports** (administrators; auditors can see them) email the current filters'
+export as CSV or Excel, daily, weekly (Monday) or monthly (the 1st) at an hour in UTC, to up to
+20 addresses (`/api/v1/admin/reports`). Every five minutes each replica looks for reports that
+are due, under the same database lock (ShedLock) every scheduled job takes, so one replica sends
+each report once; the email goes through the mail outbox (sent after the commit, retried while
+the mail server is down). A report holds at most `cert-alert.exports.report-max-rows` (50,000)
+rows and 15 MB, and the email says when it was cut. Created, deleted and every send are audited
+(`report.created`, `report.deleted`, `report.sent` with recipients and count). A report sends
+the inventory to whatever addresses are typed, so hold it to your own domains with
+`cert-alert.exports.report-recipient-domains` (`example.gov`, or `*.mil`). Needs a mail server
+(`spring.mail.host`).
+
 ## Public API, tokens and webhooks
 
 Other systems read CertAlert through a versioned REST API, and CertAlert tells them what
@@ -3257,6 +3308,15 @@ class SlackAlertNotifier implements AlertNotifier {
 Read these before upgrading. They apply to the compose bundle, the Helm chart and a plain
 `java -jar` alike.
 
+### Certificates page, exports, saved views and scheduled reports are new
+
+A **Certificates** item joins the bar for everybody: the inventory by certificate, with
+crypto filters, CSV and Excel export, saved views and bulk point-of-contact assignment.
+Exports are audited (`inventory.exported`). Scheduled reports are off until an administrator
+creates one; before anybody does, consider `cert-alert.exports.report-recipient-domains`
+(Helm `exports.reportRecipientDomains`, bundle `CERT_ALERT_EXPORTS_REPORT_RECIPIENT_DOMAINS`)
+so the inventory can only be mailed inside your own domains.
+
 ### API tokens, the OpenAPI document and webhooks are new
 
 Nothing changes for an existing installation until an administrator creates an API token or
@@ -3290,7 +3350,8 @@ of running alongside it.
 
 Flyway adds `shedlock` (V21), `job_run` (V22), `spring_session` and
 `spring_session_attributes` (V23), `saml_authn_request` (V24), the license state,
-`ens_license_*` (V25), and `api_token`, `webhook_endpoint` and `webhook_delivery` (V26), on
+`ens_license_*` (V25), `api_token`, `webhook_endpoint` and `webhook_delivery` (V26), and
+`saved_view`, `scheduled_report` and three attachment columns on `outbound_email` (V27), on
 the first start. Nothing to do; the database user already owns the schema.
 
 ### The license is kept in the database

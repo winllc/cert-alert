@@ -15,7 +15,8 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
             "com.winllc.certalert.repository",
             "com.winllc.certalert.api",
             "com.winllc.certalert.webhook",
-            "com.winllc.certalert.inventory"
+            "com.winllc.certalert.inventory",
+            "com.winllc.certalert.export"
         },
         repositoryFactoryBeanClass = DataTablesRepositoryFactoryBean.class)
 public class DataTablesConfig {}

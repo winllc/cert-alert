@@ -201,6 +201,14 @@ The chart refuses to render `x509.source=header` without a proxy secret and a CA
 
 A release without audit logging ignores these variables.
 
+### Exports and scheduled reports
+
+| Value | Default | Environment |
+|---|---|---|
+| `exports.maxRows` | `200000` | `CERT_ALERT_EXPORTS_MAX_ROWS` |
+| `exports.reportMaxRows` | `50000` | `CERT_ALERT_EXPORTS_REPORT_MAX_ROWS` |
+| `exports.reportRecipientDomains` | `[]` | `CERT_ALERT_EXPORTS_REPORT_RECIPIENT_DOMAINS` (`example.gov`, `*.mil`) |
+
 ### Public API and webhooks
 
 API tokens and webhooks are created on **Admin > Integrations**; these values bound them.

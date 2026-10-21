@@ -184,6 +184,12 @@ public class ViewController {
         return "admin";
     }
 
+    /** The certificate inventory: every certificate, filtered, saved and exported. */
+    @GetMapping("/certificates")
+    public String certificates() {
+        return "certificates";
+    }
+
     /** API tokens and webhooks: administrators manage them, auditors read them (SecurityConfig). */
     @GetMapping("/admin/integrations")
     public String integrations() {

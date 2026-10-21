@@ -47,3 +47,5 @@ api:
 webhooks:
   allowedHosts: ["hooks.slack.com", "*.webhook.office.com", "10.20.0.0/16"]
   blockPrivateNetworks: false
+exports:
+  reportRecipientDomains: ["example.gov", "*.mil"]

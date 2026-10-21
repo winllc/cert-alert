@@ -399,7 +399,8 @@ public class MailOutbox {
         JavaMailSender sender = mailSender.orElseThrow();
         MimeMessage mime = sender.createMimeMessage();
         boolean alternative = message.getHtmlBody() != null;
-        MimeMessageHelper helper = new MimeMessageHelper(mime, alternative, "UTF-8");
+        boolean attached = message.getAttachment() != null;
+        MimeMessageHelper helper = new MimeMessageHelper(mime, alternative || attached, "UTF-8");
         helper.setFrom(message.getSender());
         helper.setTo(message.getRecipients().toArray(String[]::new));
         helper.setSubject(message.getSubject());
@@ -408,6 +409,10 @@ public class MailOutbox {
             helper.setText(message.getTextBody(), message.getHtmlBody());
         } else {
             helper.setText(message.getTextBody());
+        }
+        if (attached) {
+            helper.addAttachment(message.getAttachmentName(),
+                    new org.springframework.core.io.ByteArrayResource(message.getAttachment()), message.getAttachmentType());
         }
         sender.send(mime);
     }

@@ -596,6 +596,18 @@ logFormat: json
 javaOpts: "-XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError"
 
 # ---------------------------------------------------------------------------------------
+# Inventory exports and scheduled reports (Certificates page)
+# ---------------------------------------------------------------------------------------
+exports:
+  # CERT_ALERT_EXPORTS_MAX_ROWS: the most rows one download holds.
+  maxRows: 200000
+  # CERT_ALERT_EXPORTS_REPORT_MAX_ROWS: the most rows a scheduled report's file holds.
+  reportMaxRows: 50000
+  # CERT_ALERT_EXPORTS_REPORT_RECIPIENT_DOMAINS: domains a scheduled report may be emailed
+  # to (example.gov, or *.mil). Empty: any address.
+  reportRecipientDomains: []
+
+# ---------------------------------------------------------------------------------------
 # Public API and webhooks - managed on Admin > Integrations (see the README's "Public API,
 # tokens and webhooks")
 # ---------------------------------------------------------------------------------------

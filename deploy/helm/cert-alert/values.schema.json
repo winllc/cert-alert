@@ -1074,6 +1074,26 @@
     "javaOpts": {
       "type": "string"
     },
+    "exports": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxRows": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "reportMaxRows": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "reportRecipientDomains": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
     "api": {
       "type": "object",
       "additionalProperties": false,

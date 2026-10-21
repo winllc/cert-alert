@@ -596,6 +596,16 @@ cert-alert:
       to: []
       subject-prefix: "[cert-alert] "
 
+  # Inventory exports (Certificates > Export) and scheduled reports. See the README's
+  # "Exports, saved views and scheduled reports".
+  exports:
+    max-rows: 200000
+    report-max-rows: 50000
+    max-reports-per-user: 20
+    # Domains a scheduled report may be sent to (example.gov, or *.mil). Empty: any address.
+    report-recipient-domains: []
+    report-poll-interval: 5m
+
   # The public API (/api/v1/**, documented at /api/v1/openapi.yaml) for a client holding an
   # API token. Administrators create tokens on Admin > Integrations; each has scopes, an
   # optional expiry, and never more than its creator's roles. See the README's "Public API".

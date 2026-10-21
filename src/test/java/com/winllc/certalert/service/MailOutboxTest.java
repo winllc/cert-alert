@@ -152,6 +152,28 @@ class MailOutboxTest {
                 .satisfies(notification -> assertThat(notification.getEmailedAt()).isNotNull());
     }
 
+    /** A scheduled report's file goes as an attachment, alongside the text. */
+    @Test
+    void anAttachmentIsSentWithTheMessage() throws Exception {
+        byte[] file = "Owner type,Owner\r\nSERVER,web01\r\n".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        Long id = outbox.queue(new OutboundEmail(OutboundEmail.Kind.REPORT, "cert-alert@example.gov",
+                        List.of("pki-team@example.gov"), "Weekly report", "Attached.", null, null, null, Instant.now())
+                .attach("certalert-certificates.csv", "text/csv", file), false);
+
+        assertThat(outbox.deliver(List.of(id)).sent()).isEqualTo(1);
+        jakarta.mail.internet.MimeMultipart multipart =
+                (jakarta.mail.internet.MimeMultipart) mailSender.sent.getFirst().getContent();
+        boolean attached = false;
+        for (int i = 0; i < multipart.getCount(); i++) {
+            jakarta.mail.BodyPart part = multipart.getBodyPart(i);
+            if ("certalert-certificates.csv".equals(part.getFileName())) {
+                attached = true;
+                assertThat(part.getInputStream().readAllBytes()).isEqualTo(file);
+            }
+        }
+        assertThat(attached).as("the file is attached").isTrue();
+    }
+
     /** Two replicas reaching one message at once: one claims it and sends it; the other moves on. */
     @Test
     void aMessageIsClaimedByOneSenderOnly() {

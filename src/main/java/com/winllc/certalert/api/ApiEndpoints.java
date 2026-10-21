@@ -24,6 +24,7 @@ public final class ApiEndpoints {
     public static final List<Rule> RULES = List.of(
             // The certificate inventory, servers and projects, and summaries over them.
             get("/api/v1/certificates", ApiScope.CERTIFICATES_READ),
+            get("/api/v1/certificates/export", ApiScope.CERTIFICATES_READ),
             get("/api/v1/certificates/*", ApiScope.CERTIFICATES_READ),
             get("/api/v1/summary/expiry", ApiScope.CERTIFICATES_READ),
             get("/api/v1/servers", ApiScope.CERTIFICATES_READ),

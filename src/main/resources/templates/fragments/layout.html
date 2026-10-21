@@ -167,6 +167,14 @@
                         <span class="nav-link-title">Servers</span>
                     </a>
                 </li>
+                <li class="nav-item" th:classappend="${active == 'certificates'} ? 'active'">
+                    <a class="nav-link" th:href="@{/certificates}">
+                        <span class="nav-link-icon d-md-none d-lg-inline-block">
+                            <svg class="icon"><use href="#icon-certificate"></use></svg>
+                        </span>
+                        <span class="nav-link-title">Certificates</span>
+                    </a>
+                </li>
                 <!--/* Projects and metrics are licensed features; what the license does not
                        include is left off the bar rather than offered and refused. */-->
                 <li class="nav-item" th:classappend="${active == 'projects'} ? 'active'"
