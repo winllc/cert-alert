@@ -207,7 +207,7 @@ A release without audit logging ignores these variables.
 |---|---|---|
 | `exports.maxRows` | `200000` | `CERT_ALERT_EXPORTS_MAX_ROWS` |
 | `exports.reportMaxRows` | `50000` | `CERT_ALERT_EXPORTS_REPORT_MAX_ROWS` |
-| `exports.reportRecipientDomains` | `[]` | `CERT_ALERT_EXPORTS_REPORT_RECIPIENT_DOMAINS` (`example.gov`, `*.mil`) |
+| `exports.reportRecipientDomains` | `[]` | `CERT_ALERT_EXPORTS_REPORT_RECIPIENT_DOMAINS` (`example.gov`, `*.mil`); required before any scheduled report |
 
 ### Public API and webhooks
 
@@ -217,7 +217,7 @@ API tokens and webhooks are created on **Admin > Integrations**; these values bo
 |---|---|---|
 | `api.tokensEnabled` | `true` | `CERT_ALERT_API_TOKENS_ENABLED` |
 | `api.requestsPerMinute` | `300` | `CERT_ALERT_API_REQUESTS_PER_MINUTE` (per token, per replica) |
-| `api.maxLifetime` | `""` | `CERT_ALERT_API_MAX_LIFETIME`, e.g. `365d` |
+| `api.maxLifetime` | `""` (the application's `365d`) | `CERT_ALERT_API_MAX_LIFETIME`; `0` removes the limit |
 | `webhooks.enabled` | `true` | `CERT_ALERT_WEBHOOKS_ENABLED` |
 | `webhooks.allowedHosts` | `[]` | `CERT_ALERT_WEBHOOKS_ALLOWED_HOSTS` (names, `*.suffix`, CIDRs) |
 | `webhooks.blockPrivateNetworks` | `false` | `CERT_ALERT_WEBHOOKS_BLOCK_PRIVATE_NETWORKS` |

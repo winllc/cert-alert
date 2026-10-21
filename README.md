@@ -2590,8 +2590,9 @@ flags (`GET /api/v1/certificates/export?format=csv|xlsx&...`).
 
 - Streamed from a database cursor, so a large export does not sit in memory; capped at
   `cert-alert.exports.max-rows` (200,000), with `X-CertAlert-Truncated: true` when it was.
-- **Formula injection guard.** Any text cell that starts with `=`, `+`, `-`, `@`, a tab or a
-  carriage return is written with a leading apostrophe, in CSV and in Excel: a certificate's
+- **Formula injection guard.** Any text cell that starts with a tab or a carriage return, or
+  whose first character after any white space is `=`, `+`, `-` or `@`, is written with a
+  leading apostrophe, in CSV and in Excel: a certificate's
   subject or a contact's address is somebody else's text, and opening an export must not run
   it. Numbers and dates are typed cells and written as they are.
 - CSV is UTF-8 with a byte-order mark (so Excel reads it as UTF-8), RFC 4180 quoting, times
@@ -2616,12 +2617,17 @@ may not manage is reported as refused and left alone. Each addition is audited a
 export as CSV or Excel, daily, weekly (Monday) or monthly (the 1st) at an hour in UTC, to up to
 20 addresses (`/api/v1/admin/reports`). Every five minutes each replica looks for reports that
 are due, under the same database lock (ShedLock) every scheduled job takes, so one replica sends
-each report once; the email goes through the mail outbox (sent after the commit, retried while
+each report once. **Every run checks again** that the report's owner is still an administrator
+in the live directory - entry present, not disabled or locked, administrator by
+`admin-identifiers` or a directory group (an IdP group does not count) - and that every
+recipient is inside the allowed domains; a run that fails a check sends nothing and says why
+on the page and in the audit trail. Otherwise the email the email goes through the mail outbox (sent after the commit, retried while
 the mail server is down). A report holds at most `cert-alert.exports.report-max-rows` (50,000)
 rows and 15 MB, and the email says when it was cut. Created, deleted and every send are audited
 (`report.created`, `report.deleted`, `report.sent` with recipients and count). A report sends
-the inventory to whatever addresses are typed, so hold it to your own domains with
-`cert-alert.exports.report-recipient-domains` (`example.gov`, or `*.mil`). Needs a mail server
+the inventory to the addresses typed, so **`cert-alert.exports.report-recipient-domains` is
+required** (`example.gov`, or `*.mil`): until it names your own domains nothing can be
+scheduled or sent. Needs a mail server
 (`spring.mail.host`).
 
 ## Public API, tokens and webhooks
@@ -2672,17 +2678,23 @@ curl -H "Authorization: Bearer cat_…" \
   covered by a token's scopes answers 403 (`WWW-Authenticate: Bearer error="insufficient_scope"`).
   No token, whatever its scopes, can create or revoke tokens, configure webhooks, read a
   person's notifications or use the tables' DataTables endpoints: those stay with people.
-- **Never more than its creator.** A scope needs a role (reads need a signed-in user;
-  `jobs:read` an auditor or administrator; the rest an administrator), checked when the token
-  is created and again every time it is used: for a creator who signs in with a certificate
-  or a directory password, their roles are worked out again from the directory and
-  `admin-identifiers`/`groups` (cached for `cert-alert.api.creator-roles-cache-for`, a
-  minute); for any creator, their next sign-in narrows the token to the roles they then
-  hold - never widens it. A token whose creator no longer holds any role its scopes need
-  answers 401.
-- **Refused** (401, `error="invalid_token"`) when unknown, revoked, past its expiry, or off
-  (`cert-alert.api.tokens-enabled: false`). Set `cert-alert.api.max-lifetime` (e.g. `365d`)
-  to require every new token to expire within it.
+- **Never more than its creator, now.** A token is made by a person the directory holds, and
+  a scope needs a role (reads need a signed-in user; `jobs:read` an auditor or administrator;
+  the rest an administrator). Only the roles **the directory** gives count - the DN or uid in
+  `admin-identifiers`/`auditor-identifiers`, or a directory group in `groups` - never a single
+  sign-on provider's groups: nothing could take such a role back from a token, so an
+  administrator by IdP group alone can make read-only tokens only. On **every use** the
+  creator's entry is read from the live directory (not the cached copy): an entry that is
+  gone, disabled or locked (`nsAccountLock`, AD `userAccountControl` ACCOUNTDISABLE or
+  `lockoutTime`, `pwdAccountLockedTime`), or a directory that cannot be read, refuses the
+  token (401); otherwise it does no more than the roles the directory gives the creator today.
+  A good answer is reused for at most `cert-alert.api.creator-roles-cache-for` (a minute); a
+  refusal never is. The creator's next sign-in narrows their tokens too, never widens them.
+- **A year at most.** `cert-alert.api.max-lifetime` (default `365d`) is the expiry of a token
+  created without one, the most that may be asked for, and the age at which any token stops
+  working; `0` removes it.
+- **Refused** (401, `error="invalid_token"`) when unknown, revoked, past its expiry, out-ranked,
+  or off (`cert-alert.api.tokens-enabled: false`).
 - **Rate-limited** per token, per replica: `cert-alert.api.requests-per-minute` (300); beyond
   it, 429 with `Retry-After`.
 - **No session, no CSRF.** A request with `Authorization: Bearer` on `/api/v1/**` goes through
@@ -2691,7 +2703,9 @@ curl -H "Authorization: Bearer cat_…" \
   carries that header. The same endpoints called with a session cookie still need the CSRF
   token.
 - **Audited**: `api.token-created`, `api.token-revoked`, `api.token-refused` (a real token
-  that is revoked, expired or out-ranked; at most once a minute per token), `api.request` for
+  that is revoked, expired, out-ranked or whose creator is gone, disabled or locked - at most
+  once a minute per token; and a value that is no token at all - at most once a minute per
+  client address, so guessing cannot flood the trail), `api.request` for
   every request that changes something, and `api.token-used` once per token per
   `cert-alert.api.use-audit-interval` (an hour) for its reads. The actor is
   `api-token:<id>`, named "*<token name>* (API token of *<creator>*)".
@@ -2726,20 +2740,29 @@ days).
 **Where it may go.** https only; no credentials in the URL. Before saving, and again at every
 send, the host is resolved and every address it resolves to is checked: never loopback,
 link-local (169.254.0.0/16 and fe80::/10, so never a cloud metadata service), the other
-metadata addresses (fd00:ec2::254, 100.100.100.200), unspecified, multicast or broadcast, nor
-an IPv6 address carrying one of those (IPv4-mapped, IPv4-compatible, 6to4, NAT64). The post
+metadata addresses (fd00:ec2::254, 100.100.100.200, Azure's 168.63.129.16), unspecified,
+multicast or broadcast, nor an IPv6 address carrying one of those (IPv4-compatible, 6to4,
+NAT64 - whose embedded IPv4 address is held to the private-network rule too); and never
+Teredo (2001::/32), the local-use NAT64 prefix (64:ff9b:1::/48) or an IPv4-mapped address
+arriving as IPv6. The post
 then goes to the address that was checked - the connection is not made by a second lookup -
 with TLS SNI and certificate hostname verification against the URL's host and the JVM's trust
 store. So a name that pointed somewhere harmless when it was saved and at the metadata
 service now (DNS rebinding) is refused at the send. Narrow it further with
 `cert-alert.webhooks.allowed-hosts` (names, `*.suffix`, CIDR ranges) and
 `cert-alert.webhooks.block-private-networks: true`. Webhooks connect directly: an outbound
-HTTP proxy is not used.
+HTTP proxy is not used. A watchdog closes the connection at `cert-alert.webhooks.delivery-timeout`
+(30 seconds) whatever it is waiting on - a handshake, a body the receiver does not read, an
+answer a byte at a time - so one receiver cannot hold the sender or its lock.
 
-**Secrets at rest.** The signing secret has to be kept to sign with. Set
+**The URL is a secret too.** A Slack or Teams webhook URL is its own credential, so only
+administrators see a webhook's whole URL; auditors, and the audit trail, see its scheme and
+host (`https://hooks.slack.com/[redacted]`).
+
+**Secrets at rest.** The signing secret has to be kept to sign with, and the URL to send to. Set
 `cert-alert.webhooks.secret-key` (Helm: `webhooks.secretKey`/`webhooks.existingSecret`;
 bundle: `CERT_ALERT_WEBHOOKS_SECRET_KEY`) to a base64 AES key (`openssl rand -base64 32`) and
-it is stored AES-GCM encrypted; without one it is stored as is and a warning is logged at
+both are stored AES-GCM encrypted; without one they are stored as they are and a warning is logged at
 startup. Changing the key makes the stored secrets unreadable: press "New secret" on each
 webhook afterwards.
 
@@ -3342,16 +3365,23 @@ new element.
 
 A **Certificates** item joins the bar for everybody: the inventory by certificate, with
 crypto filters, CSV and Excel export, saved views and bulk point-of-contact assignment.
-Exports are audited (`inventory.exported`). Scheduled reports are off until an administrator
-creates one; before anybody does, consider `cert-alert.exports.report-recipient-domains`
-(Helm `exports.reportRecipientDomains`, bundle `CERT_ALERT_EXPORTS_REPORT_RECIPIENT_DOMAINS`)
-so the inventory can only be mailed inside your own domains.
+Exports are audited (`inventory.exported`). Scheduled reports cannot be created until
+`cert-alert.exports.report-recipient-domains` (Helm `exports.reportRecipientDomains`, bundle
+`CERT_ALERT_EXPORTS_REPORT_RECIPIENT_DOMAINS`) names the domains the inventory may be mailed
+to.
 
 ### API tokens, the OpenAPI document and webhooks are new
 
 Nothing changes for an existing installation until an administrator creates an API token or
 a webhook on **Admin > Integrations** (a new item in the bar for administrators and auditors).
 What to know before anybody does:
+
+- An API token is checked against its creator's live directory entry on every use, so the
+  service account must be able to read people's entries and the lock attributes
+  (`nsAccountLock`, `userAccountControl`, `lockoutTime`, `pwdAccountLockedTime`, and
+  `memberOf` where groups grant roles). Tokens last at most a year by default
+  (`cert-alert.api.max-lifetime`), and roles from an identity provider's groups do not count
+  for them: give token creators their administrator role in the directory.
 
 - `/api/v1/**` now also accepts `Authorization: Bearer cat_…`. Such a request goes through a
   filter chain of its own (no session, no CSRF); everything else on `/api/v1/**` - the pages -
@@ -3381,8 +3411,8 @@ of running alongside it.
 Flyway adds `shedlock` (V21), `job_run` (V22), `spring_session` and
 `spring_session_attributes` (V23), `saml_authn_request` (V24), the license state,
 `ens_license_*` (V25), `api_token`, `webhook_endpoint` and `webhook_delivery` (V26), and
-`saved_view`, `scheduled_report` and three attachment columns on `outbound_email` (V27), on
-the first start. Nothing to do; the database user already owns the schema.
+`saved_view`, `scheduled_report` and three attachment columns on `outbound_email` (V27), and
+a wider, encryptable webhook URL and a report owner's DN (V28), on the first start. Nothing to do; the database user already owns the schema.
 
 ### The license is kept in the database
 
