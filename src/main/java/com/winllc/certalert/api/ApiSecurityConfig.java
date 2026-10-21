@@ -169,6 +169,9 @@ public class ApiSecurityConfig {
                 case REVOKED -> "This API token has been revoked";
                 case EXPIRED -> "This API token has expired";
                 case CREATOR_ROLE_GONE -> "The person who created this API token no longer holds a role its scopes need";
+                case CREATOR_GONE -> "The person who created this API token is no longer in the directory";
+                case CREATOR_DISABLED -> "The account of the person who created this API token is disabled or locked";
+                case DIRECTORY_UNAVAILABLE -> "The directory cannot be read to check this API token's creator; try again";
                 case DISABLED -> "API tokens are turned off on this installation";
                 case UNKNOWN -> "A valid API token is required";
             };

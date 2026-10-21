@@ -4,9 +4,9 @@ import com.winllc.certalert.audit.AuditContext;
 import com.winllc.certalert.audit.AuditFormat;
 import com.winllc.certalert.audit.AuditLog;
 import com.winllc.certalert.audit.AuditRecord;
-import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.security.DirectoryPrincipal;
 import com.winllc.certalert.security.DirectoryPrincipalResolver;
+import com.winllc.certalert.security.DirectoryStanding;
 import com.winllc.certalert.service.ResourceNotFoundException;
 import java.security.SecureRandom;
 import java.time.Clock;
@@ -21,9 +21,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import javax.naming.InvalidNameException;
-import javax.naming.ldap.LdapName;
-import javax.naming.ldap.Rdn;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.event.EventListener;
@@ -41,12 +38,15 @@ import org.springframework.transaction.annotation.Transactional;
  * nowhere else: only its SHA-256 is kept, it is never logged, and it is never put in the
  * session. A value that looks like one is redacted wherever it reaches the audit trail.
  *
- * <p><b>Never more than its creator.</b> An administrator creates a token, choosing its scopes
- * from those their own roles allow. The token keeps those roles as its ceiling and loses
- * whatever its creator loses: their roles are worked out again from the directory as the
- * token is used (for a creator who signs in with a certificate or a directory password, whose
- * roles the directory decides), and the ceiling is narrowed whenever they sign in again (for
- * any creator, a single sign-on one included, whose provider's groups are only known then).
+ * <p><b>Never more than its creator, now.</b> An administrator creates a token, choosing its
+ * scopes from those their roles allow - counting only the roles the directory itself gives
+ * them (DN or uid in {@code admin-identifiers}, or a mapped directory group), never a single
+ * sign-on provider's groups, which nothing could take back from a token. On every use the
+ * creator's entry is read from the live directory (see {@link DirectoryStanding}): a creator
+ * whose entry is gone, disabled or locked, or a directory that cannot be read, refuses the
+ * token; otherwise it does no more than the roles the directory gives the creator today, and
+ * no more than they held when they made it. Their next sign-in narrows it further, never
+ * widens it. A token lives at most {@code cert-alert.api.max-lifetime} (365 days by default).
  *
  * <p><b>Audited.</b> Creating and revoking one, a refusal of a real token (revoked, expired,
  * its creator's role gone), each request that changes something, and its reads summarised to
@@ -69,24 +69,24 @@ public class ApiTokens {
 
     private final ApiTokenRepository tokens;
     private final AuditLog audit;
-    private final DirectoryPrincipalResolver resolver;
+    private final DirectoryStanding standing;
     private final ApiProperties properties;
     private final Clock clock;
 
-    private final Map<Long, CachedRoles> creatorRoles = new ConcurrentHashMap<>();
     private final Map<Long, Instant> usesAudited = new ConcurrentHashMap<>();
+    private final Map<String, Instant> unknownsAudited = new ConcurrentHashMap<>();
     private final Map<Long, Instant> refusalsAudited = new ConcurrentHashMap<>();
     private final Map<String, Instant> signInsSeen = new ConcurrentHashMap<>();
 
     public ApiTokens(
             ApiTokenRepository tokens,
             AuditLog audit,
-            DirectoryPrincipalResolver resolver,
+            DirectoryStanding standing,
             ApiProperties properties,
             Clock clock) {
         this.tokens = tokens;
         this.audit = audit;
-        this.resolver = resolver;
+        this.standing = standing;
         this.properties = properties;
         this.clock = clock;
     }
@@ -96,7 +96,7 @@ public class ApiTokens {
 
     /** Why a token was refused, for the response and the audit trail. */
     public enum Refusal {
-        UNKNOWN, REVOKED, EXPIRED, CREATOR_ROLE_GONE, DISABLED
+        UNKNOWN, REVOKED, EXPIRED, CREATOR_ROLE_GONE, CREATOR_GONE, CREATOR_DISABLED, DIRECTORY_UNAVAILABLE, DISABLED
     }
 
     /** What a bearer value turned out to be. */
@@ -125,36 +125,52 @@ public class ApiTokens {
         if (scopes == null || scopes.isEmpty()) {
             throw new IllegalArgumentException("Give the token at least one scope");
         }
-        Set<ApiScope.Role> roles = rolesOf(creator);
-        if (!roles.contains(ApiScope.Role.ADMIN)) {
+        if (!rolesOf(creator).contains(ApiScope.Role.ADMIN)) {
             throw new org.springframework.security.access.AccessDeniedException(
                     "API tokens are an administrator's to create");
         }
+        // A token acts for a person the directory holds, so it can be held to what the
+        // directory says of them for as long as it lives.
+        if (!(creator.getPrincipal() instanceof DirectoryPrincipal principal) || principal.getDirectoryDn() == null) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "API tokens are created by a person the directory holds");
+        }
+        DirectoryStanding.Standing now0 = standing.of(principal.getDirectoryDn(), Duration.ZERO);
+        if (!now0.active()) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Your directory entry cannot vouch for a token: " + now0.reason());
+        }
+        // Never more than the signed-in roles, nor than what the directory alone grants: a
+        // role that comes only from a single sign-on provider's group gives a token nothing,
+        // because nothing could take it back from the token when the group does.
+        Set<ApiScope.Role> roles = rolesOf(creator);
+        roles.retainAll(rolesFrom(now0.roles()));
         for (ApiScope scope : scopes) {
             if (!scope.allowedFor(roles)) {
                 throw new org.springframework.security.access.AccessDeniedException(
-                        "Your roles do not allow a token with the " + scope.id() + " scope");
+                        "The roles the directory gives you do not allow a token with the " + scope.id()
+                                + " scope (roles from a single sign-on provider's groups do not count for tokens)");
             }
         }
         Instant now = Instant.now(clock);
         if (expiresAt != null && !expiresAt.isAfter(now)) {
             throw new IllegalArgumentException("A token's expiry has to be in the future");
         }
-        Duration max = properties.getMaxLifetime();
-        if (max != null && (expiresAt == null || expiresAt.isAfter(now.plus(max)))) {
-            throw new IllegalArgumentException(
-                    "Tokens on this installation expire within " + max.toDays() + " days (cert-alert.api.max-lifetime)");
+        Duration max = maxLifetime();
+        if (max != null) {
+            if (expiresAt == null) {
+                expiresAt = now.plus(max);
+            } else if (expiresAt.isAfter(now.plus(max))) {
+                throw new IllegalArgumentException(
+                        "Tokens on this installation expire within " + max.toDays() + " days (cert-alert.api.max-lifetime)");
+            }
         }
 
         byte[] random = new byte[32];
         RANDOM.nextBytes(random);
         String secret = PREFIX + Base64.getUrlEncoder().withoutPadding().encodeToString(random);
-        String dn = null;
-        String method = null;
-        if (creator.getPrincipal() instanceof DirectoryPrincipal principal) {
-            dn = principal.getDirectoryDn();
-            method = principal.getMethod().name();
-        }
+        String dn = principal.getDirectoryDn();
+        String method = principal.getMethod().name();
         AuditRecord.Actor actor = AuditContext.actorOf(creator);
         ApiToken token = tokens.save(new ApiToken(
                 label,
@@ -181,7 +197,6 @@ public class ApiTokens {
         ApiToken token = tokens.findById(id).orElseThrow(() -> new ResourceNotFoundException("No API token " + id));
         if (!token.isRevoked()) {
             token.revoke(revokedBy, Instant.now(clock));
-            creatorRoles.remove(id);
             audit.record(AuditRecord.of(AuditRecord.Category.CONFIGURATION, "api.token-revoked")
                     .severity(AuditRecord.Severity.NOTICE)
                     .target("api-token", String.valueOf(token.getId()), token.getName())
@@ -206,22 +221,41 @@ public class ApiTokens {
         if (!properties.isTokensEnabled()) {
             return Outcome.refused(Refusal.DISABLED);
         }
+        Instant now = Instant.now(clock);
         if (bearer == null || !bearer.startsWith(PREFIX) || bearer.length() > 200) {
-            return Outcome.refused(Refusal.UNKNOWN);
+            return unknown(from, now);
         }
         Optional<ApiToken> found = tokens.findByTokenHash(AuditFormat.sha256Hex(bearer));
         if (found.isEmpty()) {
-            return Outcome.refused(Refusal.UNKNOWN);
+            return unknown(from, now);
         }
         ApiToken token = found.get();
-        Instant now = Instant.now(clock);
         if (token.isRevoked()) {
-            return refuse(token, Refusal.REVOKED, now);
+            return refuse(token, Refusal.REVOKED, now, null);
         }
-        if (token.isExpired(now)) {
-            return refuse(token, Refusal.EXPIRED, now);
+        Duration max = maxLifetime();
+        if (token.isExpired(now) || (max != null && !now.isBefore(token.getCreatedAt().plus(max)))) {
+            return refuse(token, Refusal.EXPIRED, now, null);
         }
-        Set<ApiScope.Role> ceiling = ceilingOf(token, now);
+        // Where the creator stands now, in the live directory: gone, disabled or locked, or
+        // unreadable, and the token does nothing.
+        DirectoryStanding.Standing creator = standing.of(token.getCreatorDn(), properties.getCreatorRolesCacheFor());
+        switch (creator.state()) {
+            case GONE -> {
+                return refuse(token, Refusal.CREATOR_GONE, now, creator.reason());
+            }
+            case DISABLED -> {
+                return refuse(token, Refusal.CREATOR_DISABLED, now, creator.reason());
+            }
+            case UNREACHABLE -> {
+                return refuse(token, Refusal.DIRECTORY_UNAVAILABLE, now, creator.reason());
+            }
+            case ACTIVE -> {
+                // carry on
+            }
+        }
+        Set<ApiScope.Role> ceiling = token.getCreatorRoles();
+        ceiling.retainAll(rolesFrom(creator.roles()));
         Set<ApiScope> effective = EnumSet.noneOf(ApiScope.class);
         for (ApiScope scope : ApiScope.expand(token.getScopes())) {
             if (scope.allowedFor(ceiling)) {
@@ -229,7 +263,7 @@ public class ApiTokens {
             }
         }
         if (effective.isEmpty()) {
-            return refuse(token, Refusal.CREATOR_ROLE_GONE, now);
+            return refuse(token, Refusal.CREATOR_ROLE_GONE, now, "the creator no longer holds a role its scopes need");
         }
         if (token.getLastUsedAt() == null || token.getLastUsedAt().plus(LAST_USED_RESOLUTION).isBefore(now)) {
             token.used(now, from == null || from.length() > 64 ? null : from);
@@ -313,14 +347,41 @@ public class ApiTokens {
             Set<ApiScope.Role> before = token.getCreatorRoles();
             token.narrowCreatorRoles(roles);
             if (!before.equals(token.getCreatorRoles())) {
-                creatorRoles.remove(token.getId());
                 log.info("API token {} now allows no more than its creator's roles: {}",
                         token.getId(), ApiScope.Role.format(token.getCreatorRoles()));
             }
         }
     }
 
-    private Outcome refuse(ApiToken token, Refusal refusal, Instant now) {
+    /** The maximum lifetime, where one applies: zero or negative means none. */
+    private Duration maxLifetime() {
+        Duration max = properties.getMaxLifetime();
+        return max == null || max.isZero() || max.isNegative() ? null : max;
+    }
+
+    /**
+     * A bearer value that is no token at all: refused, and recorded - at most once a minute
+     * for each client address, so somebody guessing cannot fill the audit trail.
+     */
+    private Outcome unknown(String from, Instant now) {
+        String key = from == null ? "" : from;
+        Instant last = unknownsAudited.get(key);
+        if (last == null || !last.plus(REFUSAL_AUDIT_INTERVAL).isAfter(now)) {
+            if (unknownsAudited.size() > 10_000) {
+                unknownsAudited.clear();
+            }
+            unknownsAudited.put(key, now);
+            audit.recordQuietly(AuditRecord.of(AuditRecord.Category.AUTHENTICATION, "api.token-refused")
+                    .outcome(AuditRecord.Outcome.DENIED)
+                    .severity(AuditRecord.Severity.WARNING)
+                    .actor(AuditRecord.Actor.anonymous("api-token"))
+                    .reason("unknown")
+                    .detail("from", key));
+        }
+        return Outcome.refused(Refusal.UNKNOWN);
+    }
+
+    private Outcome refuse(ApiToken token, Refusal refusal, Instant now, String why) {
         Instant last = refusalsAudited.get(token.getId());
         if (last == null || !last.plus(REFUSAL_AUDIT_INTERVAL).isAfter(now)) {
             refusalsAudited.put(token.getId(), now);
@@ -330,62 +391,10 @@ public class ApiTokens {
                     .actor(new AuditRecord.Actor(
                             AuditRecord.ActorType.SERVICE, "api-token:" + token.getId(), token.getName(), List.of()))
                     .target("api-token", String.valueOf(token.getId()), token.getName())
-                    .reason(refusal.name().toLowerCase(Locale.ROOT).replace('_', '-')));
+                    .reason(refusal.name().toLowerCase(Locale.ROOT).replace('_', '-'))
+                    .detail("why", why));
         }
         return Outcome.refused(refusal);
-    }
-
-    /**
-     * The most a token may do now: the roles recorded for its creator, and - where the
-     * directory decides that creator's roles - no more than it says they hold today.
-     */
-    private Set<ApiScope.Role> ceilingOf(ApiToken token, Instant now) {
-        Set<ApiScope.Role> ceiling = token.getCreatorRoles();
-        if (!directoryDecides(token)) {
-            return ceiling;
-        }
-        CachedRoles cached = creatorRoles.get(token.getId());
-        Set<ApiScope.Role> current;
-        if (cached != null && cached.until().isAfter(now)) {
-            current = cached.roles();
-        } else {
-            current = currentDirectoryRoles(token);
-            creatorRoles.put(token.getId(), new CachedRoles(current, now.plus(properties.getCreatorRolesCacheFor())));
-        }
-        ceiling.retainAll(current);
-        return ceiling;
-    }
-
-    /** A certificate or a directory password: the directory and the configuration say what they are. */
-    private static boolean directoryDecides(ApiToken token) {
-        return token.getCreatorDn() != null
-                && ("X509".equals(token.getCreatorMethod()) || "LDAP".equals(token.getCreatorMethod()));
-    }
-
-    private Set<ApiScope.Role> currentDirectoryRoles(ApiToken token) {
-        DirectoryPrincipal.AuthenticationMethod method =
-                DirectoryPrincipal.AuthenticationMethod.valueOf(token.getCreatorMethod());
-        Optional<DirectoryUser> user = resolver.findByDn(token.getCreatorDn());
-        DirectoryPrincipal principal = user.isPresent()
-                ? resolver.principalFor(user.get(), method)
-                : resolver.unknownPrincipal(token.getCreatedBy(), token.getCreatorDn(), uidOf(token.getCreatorDn()), method);
-        return rolesOf(principal.getAuthorities());
-    }
-
-    /** The uid a DN leads with, which is how an entry the cache does not hold is still named. */
-    private static List<String> uidOf(String dn) {
-        try {
-            List<Rdn> rdns = new LdapName(dn).getRdns();
-            if (!rdns.isEmpty()) {
-                Rdn leaf = rdns.getLast();
-                if ("uid".equalsIgnoreCase(leaf.getType())) {
-                    return List.of(String.valueOf(leaf.getValue()));
-                }
-            }
-        } catch (InvalidNameException | RuntimeException e) {
-            // no uid to offer
-        }
-        return List.of();
     }
 
     static Set<ApiScope.Role> rolesOf(Authentication authentication) {
@@ -407,5 +416,17 @@ public class ApiTokens {
         return roles;
     }
 
-    private record CachedRoles(Set<ApiScope.Role> roles, Instant until) {}
+    private static Set<ApiScope.Role> rolesFrom(Set<String> roleNames) {
+        Set<ApiScope.Role> roles = EnumSet.noneOf(ApiScope.Role.class);
+        for (String name : roleNames) {
+            if (DirectoryPrincipalResolver.ROLE_ADMIN.equals(name)) {
+                roles.add(ApiScope.Role.ADMIN);
+            } else if (DirectoryPrincipalResolver.ROLE_AUDITOR.equals(name)) {
+                roles.add(ApiScope.Role.AUDITOR);
+            } else if (DirectoryPrincipalResolver.ROLE_USER.equals(name)) {
+                roles.add(ApiScope.Role.USER);
+            }
+        }
+        return roles;
+    }
 }

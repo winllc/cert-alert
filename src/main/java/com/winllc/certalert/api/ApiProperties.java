@@ -22,10 +22,11 @@ public class ApiProperties {
     private int requestsPerMinute = 300;
 
     /**
-     * The longest a token may be created for. Unset allows a token without an expiry; set,
-     * every token must have one, no later than this from its creation.
+     * The longest a token lives. A token created without an expiry gets this one; one asked
+     * for longer is refused; and a token older than this stops working, whatever expiry it
+     * was given. 0 removes the limit.
      */
-    private Duration maxLifetime;
+    private Duration maxLifetime = Duration.ofDays(365);
 
     /**
      * How often one token's use is written to the audit trail. Every request a token makes
@@ -35,8 +36,10 @@ public class ApiProperties {
     private Duration useAuditInterval = Duration.ofHours(1);
 
     /**
-     * How long a creator's roles, worked out again from the directory as a token is used,
-     * are remembered. A change of role takes up to this long to reach their tokens.
+     * How long a creator's standing in the directory - read live as a token is used - may be
+     * reused, and only while it is good: a deleted, disabled or locked entry, or a directory
+     * that cannot be read, is read again on the next request. A change of role takes up to
+     * this long to reach their tokens.
      */
     private Duration creatorRolesCacheFor = Duration.ofMinutes(1);
 

@@ -17,6 +17,11 @@ import com.winllc.certalert.audit.AuditStore;
 import com.winllc.certalert.audit.StoredEvent;
 import com.winllc.certalert.security.DirectoryPrincipal;
 import com.winllc.certalert.security.DirectoryPrincipalResolver;
+import com.winllc.certalert.support.EmbeddedDirectory;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import java.io.ByteArrayOutputStream;
 import java.io.ObjectOutputStream;
 import java.sql.Timestamp;
@@ -51,12 +56,41 @@ import org.springframework.web.context.WebApplicationContext;
 /**
  * The public API's tokens, end to end through the real filter chains: created by an
  * administrator and shown once; scopes enforced endpoint by endpoint; revoked, expired and
- * out-ranked tokens refused; no session and no CSRF for a token, and CSRF still required of
- * a session; and the token never in a log, the audit trail or the session.
+ * out-ranked tokens refused; the creator checked in the live directory on every use - gone,
+ * disabled, locked or demoted, the token stops - and a single sign-on provider's groups
+ * granting a token nothing; no session and no CSRF for a token, and CSRF still required of a
+ * session; and the token never in a log, the audit trail or the session.
  */
-@SpringBootTest
+@SpringBootTest(properties = {
+    "cert-alert.security.groups.admin[0]=cn=pki-admins,ou=groups,dc=example,dc=test",
+    // Read the creator's entry on every request, so a change shows at once.
+    "cert-alert.api.creator-roles-cache-for=0s"
+})
 @ActiveProfiles("test")
 class ApiTokenTest {
+
+    private static EmbeddedDirectory directory;
+
+    private static final String ADMIN_GROUP = "cn=pki-admins,ou=groups," + EmbeddedDirectory.BASE_DN;
+
+    @BeforeAll
+    static void startDirectory() {
+        directory = new EmbeddedDirectory();
+        directory.addUser("admin", "Ada Admin", "ada@example.gov");
+        directory.addUser("bob", "Bob Reader", "bob@example.gov");
+    }
+
+    @AfterAll
+    static void stopDirectory() {
+        directory.close();
+    }
+
+    @DynamicPropertySource
+    static void directoryProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.ldap.urls", () -> directory.url());
+        registry.add("spring.ldap.base", () -> EmbeddedDirectory.BASE_DN);
+    }
+
 
     @Autowired
     private WebApplicationContext context;
@@ -93,8 +127,26 @@ class ApiTokenTest {
         logs.stop();
     }
 
+    /** The configured administrator (admin-identifiers: [admin]), signed in with a password. */
     private static RequestPostProcessor admin() {
-        return SecurityMockMvcRequestPostProcessors.user("root").roles("USER", "ADMIN");
+        return authentication(signedIn("uid=admin," + EmbeddedDirectory.PEOPLE_DN, DirectoryPrincipal.AuthenticationMethod.LDAP));
+    }
+
+    /** A person in the directory, signed in as an administrator by whatever route. */
+    private static Authentication signedIn(String dn, DirectoryPrincipal.AuthenticationMethod method) {
+        List<SimpleGrantedAuthority> roles = List.of(
+                new SimpleGrantedAuthority(DirectoryPrincipalResolver.ROLE_USER),
+                new SimpleGrantedAuthority(DirectoryPrincipalResolver.ROLE_ADMIN));
+        DirectoryPrincipal principal = new DirectoryPrincipal(
+                dn.substring(4, dn.indexOf(',')), null, null, dn, method, roles);
+        return new UsernamePasswordAuthenticationToken(principal, null, roles);
+    }
+
+    /** A person who is an administrator by a directory group. */
+    private static String groupAdmin(String uid) {
+        String dn = directory.addUser(uid, uid + " Person", uid + "@example.gov");
+        directory.modify(dn, "memberOf", ADMIN_GROUP);
+        return dn;
     }
 
     private String create(String scopes) throws Exception {
@@ -248,52 +300,153 @@ class ApiTokenTest {
 
     @Test
     void aTokenLosesWhatItsCreatorLosesAtTheirNextSignIn() throws Exception {
-        Authentication creator = new UsernamePasswordAuthenticationToken("dana", null, List.of(
-                new SimpleGrantedAuthority(DirectoryPrincipalResolver.ROLE_USER),
-                new SimpleGrantedAuthority(DirectoryPrincipalResolver.ROLE_ADMIN)));
-        String runner = create("jobs:run", authentication(creator), null);
-        String reader = create("certificates:read", authentication(creator), null);
+        String dn = groupAdmin("dana");
+        Authentication dana = signedIn(dn, DirectoryPrincipal.AuthenticationMethod.LDAP);
+        String runner = create("jobs:run", authentication(dana), null);
+        String reader = create("certificates:read", authentication(dana), null);
         mockMvc.perform(get("/api/v1/jobs").header("Authorization", bearer(runner))).andExpect(status().isOk());
 
-        // Dana signs in again, no longer an administrator.
-        events.publishEvent(new AuthenticationSuccessEvent(new UsernamePasswordAuthenticationToken("dana", null,
-                List.of(new SimpleGrantedAuthority(DirectoryPrincipalResolver.ROLE_USER)))));
-
+        // Dana signs in again, no longer an administrator: her tokens are narrowed at once.
+        events.publishEvent(new AuthenticationSuccessEvent(new UsernamePasswordAuthenticationToken(
+                dana.getPrincipal(), null, List.of(new SimpleGrantedAuthority(DirectoryPrincipalResolver.ROLE_USER)))));
         mockMvc.perform(get("/api/v1/jobs").header("Authorization", bearer(runner)))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("no longer holds")));
-        mockMvc.perform(get("/api/v1/certificates").header("Authorization", bearer(reader)))
-                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/certificates").header("Authorization", bearer(reader))).andExpect(status().isOk());
 
         // Signing in as an administrator again does not give the token back what it lost.
-        events.publishEvent(new AuthenticationSuccessEvent(creator));
-        mockMvc.perform(get("/api/v1/jobs").header("Authorization", bearer(runner)))
-                .andExpect(status().isUnauthorized());
+        events.publishEvent(new AuthenticationSuccessEvent(dana));
+        mockMvc.perform(get("/api/v1/jobs").header("Authorization", bearer(runner))).andExpect(status().isUnauthorized());
     }
 
     @Test
-    void aDirectoryCreatorsRolesAreWorkedOutAgainAsTheTokenIsUsed() throws Exception {
-        // Bob held the administrator role when he made the tokens - by a group, say - but the
-        // directory and the configuration (admin-identifiers: [admin]) say he is a reader now.
-        Authentication bob = signedIn("uid=bob,ou=people,dc=example,dc=gov");
-        String bobs = create("jobs:read", authentication(bob), null);
-        mockMvc.perform(get("/api/v1/jobs").header("Authorization", bearer(bobs)))
-                .andExpect(status().isUnauthorized());
+    void aCreatorTakenOutOfTheAdministratorsGroupTakesTheirTokensWithThem() throws Exception {
+        String dn = groupAdmin("gary");
+        Authentication gary = signedIn(dn, DirectoryPrincipal.AuthenticationMethod.X509);
+        String runner = create("jobs:run", authentication(gary), null);
+        String reader = create("certificates:read", authentication(gary), null);
+        mockMvc.perform(get("/api/v1/jobs").header("Authorization", bearer(runner))).andExpect(status().isOk());
 
-        // The configured administrator's token keeps working.
-        Authentication admin = signedIn("uid=admin,ou=people,dc=example,dc=gov");
-        String admins = create("jobs:read", authentication(admin), null);
-        mockMvc.perform(get("/api/v1/jobs").header("Authorization", bearer(admins)))
-                .andExpect(status().isOk());
+        // Out of the group in the directory - and not signed in since.
+        directory.modify(dn, "memberOf");
+        mockMvc.perform(get("/api/v1/jobs").header("Authorization", bearer(runner)))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/v1/certificates").header("Authorization", bearer(reader))).andExpect(status().isOk());
     }
 
-    private static Authentication signedIn(String dn) {
-        List<SimpleGrantedAuthority> roles = List.of(
-                new SimpleGrantedAuthority(DirectoryPrincipalResolver.ROLE_USER),
-                new SimpleGrantedAuthority(DirectoryPrincipalResolver.ROLE_ADMIN));
-        DirectoryPrincipal principal = new DirectoryPrincipal(
-                dn.substring(4, dn.indexOf(',')), null, null, dn, DirectoryPrincipal.AuthenticationMethod.LDAP, roles);
-        return new UsernamePasswordAuthenticationToken(principal, null, roles);
+    @Test
+    void aDeletedCreatorsTokensStop() throws Exception {
+        String dn = groupAdmin("dora");
+        String token = create("certificates:read", authentication(signedIn(dn, DirectoryPrincipal.AuthenticationMethod.LDAP)), null);
+        mockMvc.perform(get("/api/v1/certificates").header("Authorization", bearer(token))).andExpect(status().isOk());
+
+        long head = audit.headSeq();
+        directory.delete(dn);
+        mockMvc.perform(get("/api/v1/certificates").header("Authorization", bearer(token)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.detail").value("The person who created this API token is no longer in the directory"));
+        assertThat(audit.after(head, 100)).filteredOn(event -> event.action().equals("api.token-refused"))
+                .singleElement().satisfies(event -> assertThat(event.line()).contains("creator-gone"));
+    }
+
+    @Test
+    void aDisabledOrLockedCreatorsTokensStopAndStartAgainWhenTheAccountDoes() throws Exception {
+        String dn = groupAdmin("lena");
+        String token = create("certificates:read", authentication(signedIn(dn, DirectoryPrincipal.AuthenticationMethod.LDAP)), null);
+        for (String[] lock : new String[][] {
+            {"nsAccountLock", "true"}, {"userAccountControl", "514"}, {"lockoutTime", "133420000000000000"},
+            {"pwdAccountLockedTime", "000001010000Z"}
+        }) {
+            directory.modify(dn, lock[0], lock[1]);
+            mockMvc.perform(get("/api/v1/certificates").header("Authorization", bearer(token)))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("disabled or locked")));
+            directory.modify(dn, lock[0]);
+            // A refusal is never remembered: unlocked, it works on the next request.
+            mockMvc.perform(get("/api/v1/certificates").header("Authorization", bearer(token)))
+                    .andExpect(status().isOk());
+        }
+        directory.modify(dn, "userAccountControl", "512");
+        mockMvc.perform(get("/api/v1/certificates").header("Authorization", bearer(token))).andExpect(status().isOk());
+        directory.modify(dn, "lockoutTime", "0");
+        mockMvc.perform(get("/api/v1/certificates").header("Authorization", bearer(token))).andExpect(status().isOk());
+    }
+
+    @Test
+    void aSingleSignOnProvidersGroupsGiveATokenNothing() throws Exception {
+        // Bob is an administrator by his identity provider's group, and a reader in the directory.
+        Authentication bob = signedIn("uid=bob," + EmbeddedDirectory.PEOPLE_DN, DirectoryPrincipal.AuthenticationMethod.OIDC);
+        mockMvc.perform(post(ApiTokenAdminController.PATH).with(authentication(bob)).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"x\",\"scopes\":[\"jobs:run\"]}"))
+                .andExpect(status().isForbidden());
+        String reader = create("certificates:read", authentication(bob), null);
+        mockMvc.perform(get("/api/v1/certificates").header("Authorization", bearer(reader))).andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/jobs").header("Authorization", bearer(reader))).andExpect(status().isForbidden());
+
+        // The configured administrator, arriving by single sign-on, is one by the directory too.
+        String admins = create("jobs:run",
+                authentication(signedIn("uid=admin," + EmbeddedDirectory.PEOPLE_DN, DirectoryPrincipal.AuthenticationMethod.SAML)), null);
+        mockMvc.perform(get("/api/v1/jobs").header("Authorization", bearer(admins))).andExpect(status().isOk());
+    }
+
+    @Test
+    void onlyAPersonTheDirectoryHoldsCreatesAToken() throws Exception {
+        mockMvc.perform(post(ApiTokenAdminController.PATH).with(SecurityMockMvcRequestPostProcessors.user("root").roles("USER", "ADMIN"))
+                        .with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"x\",\"scopes\":[\"certificates:read\"]}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post(ApiTokenAdminController.PATH)
+                        .with(authentication(signedIn("uid=nobody," + EmbeddedDirectory.PEOPLE_DN, DirectoryPrincipal.AuthenticationMethod.LDAP)))
+                        .with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"x\",\"scopes\":[\"certificates:read\"]}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void aTokenLivesAYearAtMost() throws Exception {
+        String body = mockMvc.perform(post(ApiTokenAdminController.PATH).with(admin()).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"no expiry\",\"scopes\":[\"certificates:read\"]}"))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        Instant expires = Instant.parse(body.replaceAll(".*\"expiresAt\":\"([^\"]+)\".*", "$1"));
+        assertThat(expires).isBetween(Instant.now().plus(java.time.Duration.ofDays(364)), Instant.now().plus(java.time.Duration.ofDays(366)));
+        mockMvc.perform(post(ApiTokenAdminController.PATH).with(admin()).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"x\",\"scopes\":[\"certificates:read\"],\"expiresAt\":\""
+                                + Instant.now().plus(java.time.Duration.ofDays(400)) + "\"}"))
+                .andExpect(status().isBadRequest());
+
+        // Made a year and a day ago, with an expiry nobody would allow now: refused all the same.
+        String old = create("certificates:read");
+        jdbc.update("UPDATE api_token SET created_at = ?, expires_at = NULL WHERE id = ?",
+                Timestamp.from(Instant.now().minus(java.time.Duration.ofDays(366))), idOf(old));
+        mockMvc.perform(get("/api/v1/certificates").header("Authorization", bearer(old)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.detail").value("This API token has expired"));
+    }
+
+    @Test
+    void guessesAreAuditedOncePerAddressAMinute() throws Exception {
+        long head = audit.headSeq();
+        for (int i = 0; i < 5; i++) {
+            mockMvc.perform(get("/api/v1/certificates").with(from("198.51.100.7"))
+                            .header("Authorization", bearer("cat_guess-" + i + "-aaaaaaaaaaaaaaaaaaaaaaaaaaaa")))
+                    .andExpect(status().isUnauthorized());
+        }
+        mockMvc.perform(get("/api/v1/certificates").with(from("198.51.100.8"))
+                        .header("Authorization", bearer("not-even-a-token")))
+                .andExpect(status().isUnauthorized());
+        List<StoredEvent> refused = audit.after(head, 100).stream()
+                .filter(event -> event.action().equals("api.token-refused")).toList();
+        assertThat(refused).hasSize(2);
+        assertThat(refused).extracting(StoredEvent::line).allMatch(line -> line.contains("\"reason\":\"unknown\""));
+        assertThat(refused).extracting(StoredEvent::line).noneMatch(line -> line.contains("cat_guess"));
+    }
+
+    private static RequestPostProcessor from(String address) {
+        return request -> {
+            request.setRemoteAddr(address);
+            return request;
+        };
     }
 
     @Test
@@ -338,7 +491,7 @@ class ApiTokenTest {
         assertThat(audit.after(head, 1000)).filteredOn(event -> event.action().equals("api.request"))
                 .singleElement()
                 .satisfies(event -> assertThat(event.line())
-                        .contains("\"type\":\"service\"", "api-token:", "API token of root", "/api/v1/revocation/check"));
+                        .contains("\"type\":\"service\"", "api-token:", "API token of admin", "/api/v1/revocation/check"));
     }
 
     private Long idOf(String secret) {
