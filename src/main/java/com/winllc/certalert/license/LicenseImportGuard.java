@@ -20,9 +20,18 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * the volume, it is right only if the volume really is gone; if it simply was not mounted (a
  * chart scaled straight to several replicas, say), starting would quietly unbind the license.
  *
- * <p>So: where the database holds no installation id, the volume holds none either, and the
- * database is one this release upgraded rather than created, startup stops and says why -
- * unless {@code cert-alert.license.allow-new-installation-id} says a new id is what is wanted.
+ * <p>So: where the database holds no installation id and the volume holds none either,
+ * startup stops and says why if
+ * <ul>
+ *   <li>the database is one this release upgraded rather than created, or
+ *   <li>{@code ENS_LICENSE_EXPECT_INSTALLATION_ID=true} says the deployment did not mount the
+ *       license volume - which the chart sets whenever it leaves the volume out. That covers an
+ *       existing installation whose database is new (rebuilt, or never had one) going straight
+ *       to several replicas: there the migration history looks fresh, and a pod without the
+ *       file could otherwise win the race to insert a new id.
+ * </ul>
+ * {@code cert-alert.license.allow-new-installation-id} overrides this only while the database
+ * holds no license state at all, and is logged as an error on every start while it is set.
  */
 final class LicenseImportGuard {
 
@@ -43,8 +52,37 @@ final class LicenseImportGuard {
     private LicenseImportGuard() {}
 
     static void check(JdbcTemplate jdbc, String product, Path stateDir, boolean allowNewId) {
-        if (allowNewId || hasInstallationId(jdbc, product) || Files.exists(stateDir.resolve("installation-id"))) {
+        check(jdbc, product, stateDir, allowNewId, false);
+    }
+
+    /**
+     * @param expectInstallationId the deployment says it did not mount the license volume, so an
+     *     id must already be in the database ({@code ENS_LICENSE_EXPECT_INSTALLATION_ID})
+     */
+    static void check(JdbcTemplate jdbc, String product, Path stateDir, boolean allowNewId,
+            boolean expectInstallationId) {
+        boolean anyState = hasLicenseState(jdbc, product);
+        if (allowNewId) {
+            if (anyState) {
+                log.error("cert-alert.license.allow-new-installation-id is set, and ignored: the database already "
+                        + "holds license state for {}. Unset it.", product);
+            } else {
+                log.error("cert-alert.license.allow-new-installation-id is set: a new installation id may be made "
+                        + "for {}, and a license bound to an earlier one stops matching. Unset it once this "
+                        + "installation has started.", product);
+                return;
+            }
+        }
+        if (hasInstallationId(jdbc, product) || Files.exists(stateDir.resolve("installation-id"))) {
             return;
+        }
+        if (expectInstallationId) {
+            throw new IllegalStateException("ENS_LICENSE_EXPECT_INSTALLATION_ID is set - the license volume is not "
+                    + "mounted here - and the database holds no installation id for " + product + ". Starting "
+                    + "now would make up a new one, which this installation's license is not bound to. Start it "
+                    + "once with the license volume mounted (in Helm, replicaCount 1) so the id is imported; for a "
+                    + "new installation, start with one replica first, or set "
+                    + "CERT_ALERT_LICENSE_ALLOW_NEW_INSTALLATION_ID=true for that start.");
         }
         if (!upgraded(jdbc)) {
             return;
@@ -56,6 +94,18 @@ final class LicenseImportGuard {
                 + "Helm, upgrade with replicaCount 1 first - so the id is imported. If the volume is really "
                 + "gone, set CERT_ALERT_LICENSE_ALLOW_NEW_INSTALLATION_ID=true and re-bind the license on the "
                 + "ENS portal.");
+    }
+
+    /** Any license state for this product: an id, a license, a revision. */
+    private static boolean hasLicenseState(JdbcTemplate jdbc, String product) {
+        for (String table : new String[] {"ens_license_installation", "ens_license_file", "ens_license_revision"}) {
+            Integer count = jdbc.queryForObject(
+                    "SELECT COUNT(*) FROM " + table + " WHERE product = ?", Integer.class, product);
+            if (count != null && count > 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean hasInstallationId(JdbcTemplate jdbc, String product) {

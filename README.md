@@ -3136,7 +3136,13 @@ import above; then set `persistence.license.imported: true` and scale - the char
 than one replica without it (or a ReadWriteMany volume). The application refuses to start an
 upgraded installation whose installation id is neither in the database nor on a mounted
 volume; if the volume is really gone, set `CERT_ALERT_LICENSE_ALLOW_NEW_INSTALLATION_ID=true`
-and re-bind the license on the ENS portal. Above one replica the license volume is mounted only if it is
+and re-bind the license on the ENS portal. Where the chart leaves the license volume out (more
+than one replica, not ReadWriteMany) it also sets `ENS_LICENSE_EXPECT_INSTALLATION_ID=true`,
+and the application then refuses to make up an id even on a database that looks new - an
+existing installation whose database was rebuilt. The override counts only while the database
+holds no license state, and is logged as an error on every start while it is set; a new
+installation started straight with several replicas needs it once (Helm:
+`license.allowNewInstallationId`), or starts with one replica first. Above one replica the license volume is mounted only if it is
 ReadWriteMany and `persistence.license.readWriteMany: true` says so. See
 [High availability](#high-availability).
 

@@ -140,6 +140,16 @@ spec:
                   key: {{ $ref.key }}
             {{- end }}
             {{- end }}
+            {{- if and $v.persistence.license.enabled (not (include "cert-alert.licenseVolumeMounted" .)) }}
+            # The license volume is left out here, so the installation id must already be in
+            # the database: the application refuses to make up a new one (LicenseImportGuard).
+            - name: ENS_LICENSE_EXPECT_INSTALLATION_ID
+              value: "true"
+            {{- end }}
+            {{- if $v.license.allowNewInstallationId }}
+            - name: CERT_ALERT_LICENSE_ALLOW_NEW_INSTALLATION_ID
+              value: "true"
+            {{- end }}
             {{- if include "cert-alert.licenseSupplied" . }}
             # The supplied license, installed if none is (or if it is a newer revision of the
             # one that is) - into the database, whichever replica checks first.

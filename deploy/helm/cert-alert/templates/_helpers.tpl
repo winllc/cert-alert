@@ -239,7 +239,7 @@ not set at all. Takes (dict "root" $ "inline" <value> "existing" <secret name>
 {{- if gt (int .Values.replicaCount) 1 -}}
 {{- $license := .Values.persistence.license -}}
 {{- if and (not (include "cert-alert.licenseVolumeMounted" .)) (not $license.imported) -}}
-{{- fail "replicaCount above 1 does not mount the license volume (unless it is ReadWriteMany), so an installation upgraded from a release that kept its installation id there could not import it and would get a new one. Upgrade with replicaCount 1 first, then set persistence.license.imported=true and scale up. A new installation: set it as well." -}}
+{{- fail "replicaCount above 1 does not mount the license volume (unless it is ReadWriteMany), so an installation upgraded from a release that kept its installation id there could not import it and would get a new one. Upgrade with replicaCount 1 first, then set persistence.license.imported=true and scale up. A new installation: start it with replicaCount 1 first too." -}}
 {{- end -}}
 {{- if and $license.readWriteMany (not $license.existingClaim) (not (has "ReadWriteMany" $license.accessModes)) -}}
 {{- fail "persistence.license.readWriteMany=true, but the chart's license volume is not ReadWriteMany: set persistence.license.accessModes to [ReadWriteMany] (a new claim - the access mode of an existing one cannot change)." -}}

@@ -46,6 +46,7 @@ class LicenseImportGuardTest {
         jdbc.update("UPDATE \"flyway_schema_history\" SET \"installed_on\" = ? WHERE \"version\" = '20'",
                 originallyInstalled);
         jdbc.update("DELETE FROM ens_license_installation WHERE product = ?", PRODUCT);
+        jdbc.update("DELETE FROM ens_license_revision WHERE product = ?", PRODUCT);
     }
 
     @Test
@@ -72,5 +73,33 @@ class LicenseImportGuardTest {
     void aFreshDatabaseGoesAhead() {
         restore();
         assertThatCode(() -> LicenseImportGuard.check(jdbc, PRODUCT, volume, false)).doesNotThrowAnyException();
+    }
+
+    /**
+     * An existing installation on a database that is new (rebuilt, or never had one), scaled
+     * straight to several replicas: the migration history looks fresh, but the chart says it
+     * left the license volume out.
+     */
+    @Test
+    void aFreshDatabaseWithoutTheVolumeWhereOneIsExpectedIsRefused() {
+        restore();
+        assertThatThrownBy(() -> LicenseImportGuard.check(jdbc, PRODUCT, volume, false, true))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("ENS_LICENSE_EXPECT_INSTALLATION_ID");
+        // With the id there, or saying a new one is wanted on an empty database, it goes ahead.
+        assertThatCode(() -> LicenseImportGuard.check(jdbc, PRODUCT, volume, true, true)).doesNotThrowAnyException();
+        jdbc.update("INSERT INTO ens_license_installation (product, installation_id) VALUES (?, ?)", PRODUCT, "abc");
+        assertThatCode(() -> LicenseImportGuard.check(jdbc, PRODUCT, volume, false, true)).doesNotThrowAnyException();
+    }
+
+    /** Saying a new id is wanted counts only while the database holds no license state at all. */
+    @Test
+    void theOverrideIsIgnoredOnceThereIsLicenseState() {
+        jdbc.update("INSERT INTO ens_license_revision (product, license_id, revision) VALUES (?, ?, ?)",
+                PRODUCT, "lic_x", 3);
+        assertThatThrownBy(() -> LicenseImportGuard.check(jdbc, PRODUCT, volume, true, false))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> LicenseImportGuard.check(jdbc, PRODUCT, volume, true, true))
+                .isInstanceOf(IllegalStateException.class);
     }
 }

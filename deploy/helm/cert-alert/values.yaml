@@ -678,6 +678,13 @@ license:
   existingSecret: ""
   existingSecretKey: license.lic
   file: ""
+  # CERT_ALERT_LICENSE_ALLOW_NEW_INSTALLATION_ID. Lets the application make up a new
+  # installation id where it would otherwise refuse - the license volume not mounted, or an
+  # upgraded installation whose id is nowhere - but only while the database holds no license
+  # state; logged as an error while set. For a new installation started straight with several
+  # replicas, or one whose license volume is really gone (re-bind the license on the portal).
+  # Unset it afterwards.
+  allowNewInstallationId: false
   # The init container's image. Empty uses the application image (it has a shell).
   initImage:
     repository: ""

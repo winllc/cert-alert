@@ -207,6 +207,7 @@ A release without audit logging ignores these variables.
 | `persistence.license.enabled` | `true` | PVC at `/var/lib/ens`. `false` uses an `emptyDir`: the license and id go with the pod |
 | `persistence.license.size` / `.storageClass` / `.accessModes` | `100Mi` / `""` / `[ReadWriteOnce]` | `storageClass: "-"` means `""` (no dynamic provisioning) |
 | `persistence.license.existingClaim` | `""` | A PVC of your own, kept across uninstalls |
+| `license.allowNewInstallationId` | `false` | Lets a new installation id be made where the application would refuse (volume not mounted, upgraded installation with no id anywhere), only while the database holds no license state; logged as an error while set |
 | `persistence.license.imported` | `false` | Says the license state is already in the database (started once with one replica since upgrading, or new); required above one replica unless `readWriteMany` |
 | `persistence.license.readWriteMany` | `false` | Says the license volume is ReadWriteMany, so it stays mounted above one replica (only needed to import from it while scaled up) |
 | `license.existingSecret` / `.existingSecretKey` | `""` / `license.lic` | A Secret holding the license |

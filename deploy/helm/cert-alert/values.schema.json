@@ -1239,6 +1239,9 @@
               ]
             }
           }
+        },
+        "allowNewInstallationId": {
+          "type": "boolean"
         }
       }
     },
