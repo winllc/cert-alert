@@ -11,8 +11,10 @@
 # Writes to $OUT_DIR (default dist/release-<version>):
 #
 #   cert-alert-<version>.tar.gz     unpacks to cert-alert-<version>/: README.md, VERSION,
-#                                   install.sh, upgrade.sh, docker-compose.yml, env.template,
-#                                   license/README.txt, images/cert-alert-images-<version>.tar
+#                                   install.sh, upgrade.sh, container-engine.sh,
+#                                   docker-compose.yml, docker-compose.no-ports.yml,
+#                                   env.template, license/README.txt,
+#                                   images/cert-alert-images-<version>.tar
 #   sbom-<image>.spdx.json          SPDX SBOM per image, when syft is installed ($SYFT names
 #                                   it; REQUIRE_SBOM=true makes its absence an error, as in CI)
 #   cert-alert-<version>.tgz        the Helm chart (deploy/helm/cert-alert) packaged at this
@@ -24,7 +26,8 @@
 set -euo pipefail
 
 PRODUCT=cert-alert
-POSTGRES_IMAGE=${POSTGRES_IMAGE:-postgres:17.11-alpine}
+# Fully qualified, like every image the compose file names: Podman has no default registry.
+POSTGRES_IMAGE=${POSTGRES_IMAGE:-docker.io/library/postgres:17.11-alpine}
 REQUIRE_SBOM=${REQUIRE_SBOM:-false}
 SYFT=${SYFT:-syft}
 REQUIRE_CHART=${REQUIRE_CHART:-false}
@@ -63,6 +66,15 @@ done
     || echo "release-bundle: warning: $APP_IMAGE is not tagged with the version $VERSION" >&2
 
 ALL_IMAGES=("${APP_IMAGES[@]}" "$POSTGRES_IMAGE")
+# registry/name[:tag]: the first component names a registry (has a dot or a port, or is
+# localhost), or Podman would have to guess one.
+for ref in "${ALL_IMAGES[@]}"; do
+    first=${ref%%/*}
+    case "$ref" in */*) ;; *) first="" ;; esac
+    case "$first" in *.*|*:*|localhost) ;;
+        *) die "image $ref is not fully qualified (registry/name:tag), which Podman needs" ;;
+    esac
+done
 
 for ref in "${APP_IMAGES[@]}"; do
     docker image inspect "$ref" > /dev/null 2>&1 \
@@ -86,11 +98,14 @@ printf '%s\n' "$VERSION" > "$STAGE/VERSION"
 sed "s|@VERSION@|$VERSION|g" "$TEMPLATE_DIR/README.md" > "$STAGE/README.md"
 sed -e "s|@CERT_ALERT_IMAGE@|$APP_IMAGE|g" -e "s|@POSTGRES_IMAGE@|$POSTGRES_IMAGE|g" \
     "$TEMPLATE_DIR/docker-compose.yml" > "$STAGE/docker-compose.yml"
+cp "$TEMPLATE_DIR/docker-compose.no-ports.yml" "$STAGE/docker-compose.no-ports.yml"
 cp "$TEMPLATE_DIR/env.template" "$STAGE/env.template"
 cp "$TEMPLATE_DIR/license/README.txt" "$STAGE/license/README.txt"
+cp "$TEMPLATE_DIR/container-engine.sh" "$STAGE/container-engine.sh"
 install -m 0755 "$TEMPLATE_DIR/install.sh" "$STAGE/install.sh"
 install -m 0755 "$TEMPLATE_DIR/upgrade.sh" "$STAGE/upgrade.sh"
 chmod 0644 "$STAGE/VERSION" "$STAGE/README.md" "$STAGE/docker-compose.yml" \
+    "$STAGE/docker-compose.no-ports.yml" "$STAGE/container-engine.sh" \
     "$STAGE/env.template" "$STAGE/license/README.txt"
 
 if grep -q '@[A-Z_]*@' "$STAGE/docker-compose.yml" "$STAGE/README.md"; then
@@ -104,6 +119,9 @@ mkdir -p "$CHECK"
 cp "$STAGE/docker-compose.yml" "$CHECK/"
 sed 's/^CERT_ALERT_DB_PASSWORD=$/CERT_ALERT_DB_PASSWORD=validate-only/' "$STAGE/env.template" > "$CHECK/.env"
 (cd "$CHECK" && docker compose config --quiet) || die "docker-compose.yml does not validate"
+cp "$STAGE/docker-compose.no-ports.yml" "$CHECK/"
+(cd "$CHECK" && docker compose -f docker-compose.yml -f docker-compose.no-ports.yml config --quiet) \
+    || die "docker-compose.yml with docker-compose.no-ports.yml does not validate"
 compose_images=$(cd "$CHECK" && docker compose config --images | sort -u)
 expected=$(printf '%s\n' "$APP_IMAGE" "$POSTGRES_IMAGE" | sort -u)
 [ "$compose_images" = "$expected" ] \
