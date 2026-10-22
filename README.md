@@ -3614,17 +3614,16 @@ and uploaded to `s3://<bucket>/cert-alert/<version>/`:
 plus `s3://<bucket>/cert-alert/latest.txt` holding the newest final version. The job summary
 lists the files and sizes, and says whether it was signed and where it went - or why not.
 
-**The GitHub Release.** Once the `image` job has succeeded on a tag, the `github-release` job
-attaches these files to the tag's GitHub Release, `cert-alert-<version>.tar.gz` first. Make the release on
-GitHub (Releases > Draft a new release, with a new `vX.Y.Z` tag) and CI adds the files to it; push a
-tag without a release and CI creates one with generated notes (a pre-release for a `-suffix` tag).
-Either way the notes start with a short "Deployment package" section naming the file to download:
-GitHub adds its own "Source code" archives to every release and they can't be removed. The job needs
-no configuration; the repository is public, so the release files are public downloads.
+**Releases are delivered from the S3 bucket**, not from GitHub Releases: nothing is attached to a
+GitHub Release, whose own "Source code" archives are not an installable package. On a release tag the
+`image` job first checks that `RELEASE_S3_BUCKET` and the AWS credentials below are set, and fails
+before anything is built or published if they aren't. Customers get the files from the bucket, for
+example through a presigned link (`aws s3 presign`, valid for up to 7 days) or a download site in front
+of it.
 
-**Configuring it** (Settings → Secrets and variables → Actions). With none of these set the
-workflow still builds the bundle and keeps it as an artifact; signing and upload are each
-skipped and the summary says so.
+**Configuring it** (Settings → Secrets and variables → Actions). Without the GPG key signing is
+skipped and the summary says so; a release tag needs the bucket and its credentials (a pull
+request never uploads).
 
 | Name | Kind | |
 |---|---|---|
