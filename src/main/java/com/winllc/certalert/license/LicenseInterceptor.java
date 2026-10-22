@@ -23,8 +23,8 @@ import org.springframework.web.util.pattern.PathPatternParser;
  *       the page saying the application is not licensed (anyone else); a script gets 403
  *       {@code license_required}. Sign-in and sign-out, static assets, health, the error
  *       page and the license screen itself are excluded where this is registered.
- *   <li><b>Read-only</b>: GET, HEAD and OPTIONS work - and the search tables, which read by
- *       POST; anything else gets 403 {@code license_read_only}.
+ *   <li><b>Read-only</b>: GET, HEAD and OPTIONS work - and the search tables and the
+ *       inventory export, which read by POST; anything else gets 403 {@code license_read_only}.
  *   <li><b>{@link RequiresFeature}</b>: 403 {@code feature_not_licensed} unless the license
  *       lists the feature (in read-only mode, reading what a listed feature gathered still
  *       works).
@@ -43,9 +43,13 @@ public class LicenseInterceptor implements HandlerInterceptor {
 
     private static final Set<String> SAFE = Set.of("GET", "HEAD", "OPTIONS");
 
-    /** POSTs that only read: DataTables sends its paging and filters as a body. */
+    /**
+     * POSTs that only read: DataTables sends its paging and filters as a body, and the
+     * inventory export is a POST because it is audited.
+     */
     private static final List<PathPattern> READING_POSTS = List.of(
-            PathPatternParser.defaultInstance.parse("/api/v1/datatables/**"));
+            PathPatternParser.defaultInstance.parse("/api/v1/datatables/**"),
+            PathPatternParser.defaultInstance.parse("/api/v1/certificates/export"));
 
     private final Licensing licensing;
 

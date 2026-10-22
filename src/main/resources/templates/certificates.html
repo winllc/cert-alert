@@ -16,8 +16,8 @@
             <div class="container-xl">
                 <div class="card mb-3">
                     <div class="card-body border-bottom">
-                        <!--/* The same query string drives the table, the export links and a saved
-                               view, so an export is exactly what is on screen, without the paging. */-->
+                        <!--/* The same filters drive the table, the export and a saved view, so an
+                               export is exactly what is on screen, without the paging. */-->
                         <form id="certificate-filters" class="row g-3 align-items-end" aria-label="Certificate filters">
                             <div class="col-12 col-md-4">
                                 <label class="form-label" for="f-q">Search</label>
@@ -111,14 +111,22 @@
                             <div class="col-12 d-flex flex-wrap gap-2">
                                 <button type="submit" class="btn btn-primary">Apply filters</button>
                                 <button type="reset" class="btn">Clear</button>
-                                <a class="btn ms-md-auto" id="export-csv" href="#" download>
+                                <button type="submit" class="btn ms-md-auto" id="export-csv"
+                                        form="certificate-export" name="format" value="csv">
                                     <svg class="icon me-1" aria-hidden="true"><use href="#icon-download"></use></svg>Export CSV
-                                </a>
-                                <a class="btn" id="export-xlsx" href="#" download>
+                                </button>
+                                <button type="submit" class="btn" id="export-xlsx"
+                                        form="certificate-export" name="format" value="xlsx">
                                     <svg class="icon me-1" aria-hidden="true"><use href="#icon-download"></use></svg>Export Excel
-                                </a>
+                                </button>
                             </div>
                         </form>
+                        <!--/* The export buttons above submit this form rather than the filters': a POST
+                               with the CSRF token, because every export is audited. Its fields - the
+                               filters and the order, as they stand - are filled in as it is sent
+                               (certificates.js); the button pressed adds the format. The file comes back
+                               as an attachment, so the page stays where it is. */-->
+                        <form id="certificate-export" method="post" th:action="@{/api/v1/certificates/export}"></form>
                     </div>
 
                     <!--/* Saved views: the filters above, kept under a name, for this person. */-->

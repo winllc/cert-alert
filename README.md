@@ -1367,9 +1367,11 @@ Content-Type: application/problem+json
 ```
 
 By method rather than by a list of paths, so an endpoint added next month is refused
-without anybody remembering to add it. Two things are exempt, and both write nothing: the
-search tables' `/api/v1/datatables/**` endpoints, which are `POST`s only because that is
-how DataTables sends its paging and filters; and **Dry run**, which builds every message
+without anybody remembering to add it. Three things are exempt, and none of them changes
+anything: the search tables' `/api/v1/datatables/**` endpoints, which are `POST`s only
+because that is how DataTables sends its paging and filters; the certificate export, a
+`POST` only because it is audited (its `inventory.exported` record is all it writes); and
+**Dry run**, which builds every message
 the round-up would send, reports what would have gone out, and saves none of it. The real
 round-up beside it stays refused, so whether that endpoint is allowed depends on
 `dryRun=true` being on the request rather than on its path. The rehearsal is an
@@ -2586,7 +2588,15 @@ of them is exactly what is on screen.
 **Export CSV / Export Excel** download the filtered inventory, without the paging: one row per
 certificate with its holder, DN, points of contact, subject, issuer, serial, fingerprint,
 validity, days left, state, key, signature and hash algorithms, names, use, revocation and risk
-flags (`GET /api/v1/certificates/export?format=csv|xlsx&...`).
+flags (`POST /api/v1/certificates/export` with `format=csv|xlsx` and the filters, in the
+query string or a form body).
+
+- **A `POST`, because it is audited.** Each export is recorded as `inventory.exported`, so the
+  page's buttons submit a form carrying the CSRF token: another site cannot make a signed-in
+  browser export, nor leave that in the trail. In a read-only license, and in the demo, it
+  still works - it changes nothing but the audit trail. The response is always a file: a
+  fixed type for the format (`text/csv` or the Excel type), `Content-Disposition: attachment`
+  and `X-Content-Type-Options: nosniff`.
 
 - Streamed from a database cursor, so a large export does not sit in memory; capped at
   `cert-alert.exports.max-rows` (200,000), with `X-CertAlert-Truncated: true` when it was.
@@ -2651,7 +2661,7 @@ The read paths an integration usually wants:
 |--------|------|-------|------|
 | `GET` | `/api/v1/certificates` | `certificates:read` | Every certificate with its owner, filtered and paged (`?status=EXPIRING_SOON&expiresWithinDays=30&issuer=DigiCert&keyAlgorithm=RSA&keySizeMax=2047&hashAlgorithm=SHA-1&ownerType=SERVER&q=web&page=0&size=100&sort=notAfter,asc`) |
 | `GET` | `/api/v1/certificates/{id}` | `certificates:read` | One certificate |
-| `GET` | `/api/v1/certificates/export?format=csv\|xlsx` | `certificates:read` | The same, as a file (see [Exports](#exports-saved-views-and-scheduled-reports)) |
+| `POST` | `/api/v1/certificates/export?format=csv\|xlsx` | `certificates:read` | The same, as a file (see [Exports](#exports-saved-views-and-scheduled-reports)); a `POST` because it is audited |
 | `GET` | `/api/v1/summary/expiry` | `certificates:read` | Counts by state, expiring within 7/30/60/90 days, revoked, by owner type; takes the same filters |
 | `GET` | `/api/v1/servers`, `/api/v1/servers/{id}` | `certificates:read` | Servers, `?q=&certificateStatus=` |
 | `GET` | `/api/v1/people`, `/api/v1/people/{id}` | `people:read` | People, `?q=&certificateStatus=` |

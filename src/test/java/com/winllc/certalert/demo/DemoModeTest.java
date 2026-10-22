@@ -254,6 +254,12 @@ class DemoModeTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(table("occurredAt")))
                 .andExpect(status().isOk());
+        // The inventory export is a POST because it is audited; it changes nothing either.
+        mockMvc.perform(post("/api/v1/certificates/export")
+                        .session(reader)
+                        .with(csrf())
+                        .param("format", "csv"))
+                .andExpect(status().isOk());
     }
 
     // --- nothing changeable, for anybody --------------------------------------------------

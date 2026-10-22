@@ -27,10 +27,16 @@ import org.springframework.stereotype.Service;
 @Service
 public class CertificateExport {
 
+    /** A CSV export's media type. A constant, so a download's type never depends on the request. */
+    public static final String CSV_CONTENT_TYPE = "text/csv;charset=UTF-8";
+
+    /** An Excel export's media type. */
+    public static final String XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+
     /** What a file can be. */
     public enum Format {
-        CSV("text/csv;charset=UTF-8", "csv"),
-        XLSX("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx");
+        CSV(CSV_CONTENT_TYPE, "csv"),
+        XLSX(XLSX_CONTENT_TYPE, "xlsx");
 
         private final String contentType;
         private final String extension;

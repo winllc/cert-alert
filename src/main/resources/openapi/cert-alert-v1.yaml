@@ -92,7 +92,7 @@ paths:
         "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /api/v1/certificates/export:
-    get:
+    post:
       tags: [Certificates]
       operationId: exportCertificates
       summary: The certificates, as a CSV or Excel file
@@ -101,7 +101,9 @@ paths:
         `cert-alert.exports.max-rows` (200,000; `X-CertAlert-Truncated: true` when there were
         more). Streamed. Text that a spreadsheet would read as a formula (starting with
         `=`, `+`, `-`, `@`, tab or CR) is written with a leading apostrophe. Audited as
-        `inventory.exported`.
+        `inventory.exported` - which is why it is a `POST`, though it changes nothing else.
+        The parameters may be sent in the query string, as below, or as an
+        `application/x-www-form-urlencoded` body.
       x-required-scope: certificates:read
       security:
         - apiToken: [certificates:read]

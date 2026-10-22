@@ -159,6 +159,9 @@ class LicenseModesTest {
             mockMvc.perform(post("/api/v1/datatables/users").with(reader()).with(csrf())
                             .contentType(MediaType.APPLICATION_JSON).content(DATATABLES_BODY))
                     .andExpect(status().isOk());
+            // So does the inventory export, a POST only because it is audited.
+            mockMvc.perform(post("/api/v1/certificates/export").param("format", "csv").with(reader()).with(csrf()))
+                    .andExpect(status().isOk());
             // A listed feature's data stays visible.
             mockMvc.perform(get("/api/v1/metrics").with(reader()))
                     .andExpect(status().isOk());

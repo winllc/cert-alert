@@ -194,6 +194,10 @@ class ApiTokenTest {
                 .andExpect(jsonPath("$.expiringWithinDays.30").isNumber());
         mockMvc.perform(get("/api/v1/servers").header("Authorization", bearer(token)))
                 .andExpect(status().isOk());
+        // The export is a POST (it is audited); a token needs no CSRF token for it either.
+        mockMvc.perform(post("/api/v1/certificates/export").param("format", "csv").header("Authorization", bearer(token)))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Disposition", org.hamcrest.Matchers.startsWith("attachment;")));
     }
 
     @Test

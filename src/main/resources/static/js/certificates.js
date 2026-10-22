@@ -2,9 +2,9 @@
  * Certificates: the inventory, filtered, paged, saved and exported.
  *
  * The filter form is read into one query string, which is everything: the table asks
- * /api/v1/certificates with it, the export links carry it to /api/v1/certificates/export, a
- * saved view keeps it, and a scheduled report runs it. Every request carries the CSRF token
- * (set up in directory-table.js).
+ * /api/v1/certificates with it, the export posts it to /api/v1/certificates/export, a saved
+ * view keeps it, and a scheduled report runs it. Every request carries the CSRF token (set up
+ * in directory-table.js; the export form carries its own).
  */
 (function (window, $) {
     'use strict';
@@ -22,22 +22,29 @@
         return CertAlert.escapeHtml(value === null || value === undefined ? '' : String(value));
     }
 
-    /** The form as a query string: only what is set, in the form's order. */
-    function filterQuery() {
-        var parts = [];
+    /** The filters and the order as name and value pairs: only what is set, in the form's order. */
+    function filterPairs() {
+        var pairs = [];
         $('#certificate-filters').find('input, select').each(function () {
             if (!this.name || (this.type === 'checkbox' && !this.checked)) {
                 return;
             }
             var value = $(this).val();
             if (value !== null && value !== '') {
-                parts.push(encodeURIComponent(this.name) + '=' + encodeURIComponent(value));
+                pairs.push([this.name, value]);
             }
         });
         if (sort !== 'notAfter,asc') {
-            parts.push('sort=' + encodeURIComponent(sort));
+            pairs.push(['sort', sort]);
         }
-        return parts.join('&');
+        return pairs;
+    }
+
+    /** The form as a query string. */
+    function filterQuery() {
+        return filterPairs().map(function (pair) {
+            return encodeURIComponent(pair[0]) + '=' + encodeURIComponent(pair[1]);
+        }).join('&');
     }
 
     /** Puts a stored query string back into the form. */
@@ -69,10 +76,16 @@
         showSort();
     }
 
-    function exportLinks() {
-        var query = filterQuery();
-        $('#export-csv').attr('href', API + '/export?format=csv' + (query ? '&' + query : ''));
-        $('#export-xlsx').attr('href', API + '/export?format=xlsx' + (query ? '&' + query : ''));
+    /**
+     * The export form's fields, as it is sent: the filters and the order as they stand. Its
+     * CSRF token stays; the button pressed adds the format.
+     */
+    function fillExport() {
+        var form = $('#certificate-export');
+        form.find('input.export-field').remove();
+        filterPairs().forEach(function (pair) {
+            $('<input type="hidden" class="export-field">').attr('name', pair[0]).val(pair[1]).appendTo(form);
+        });
     }
 
     function showSort() {
@@ -91,7 +104,6 @@
 
     function load() {
         var query = filterQuery();
-        exportLinks();
         $('#certificate-count').text('Loading…');
         $.getJSON(API + '?page=' + page + '&size=' + PAGE_SIZE + (query ? '&' + query : ''))
             .done(function (result) {
@@ -203,6 +215,7 @@
                 load();
             }, 0);
         });
+        $('#certificate-export').on('submit', fillExport);
         $('#certificates-prev').on('click', function () {
             if (page > 0) {
                 page--;

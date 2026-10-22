@@ -10,7 +10,7 @@ import java.io.IOException;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
-import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -19,8 +19,13 @@ import org.springframework.web.bind.annotation.RestController;
  * what is exported is what was on screen, without the paging. Anyone signed in, as the
  * inventory is; with a token, {@code certificates:read}.
  *
- * <p>Recorded as {@code inventory.exported}, with the format, the filters and how many rows
- * match, before a byte is sent.
+ * <p>A POST, because it writes: it is recorded as {@code inventory.exported}, with the format,
+ * the filters and how many rows match, before a byte is sent. From the page it is a form post
+ * carrying the CSRF token, so another site cannot make a signed-in browser export (and leave
+ * that in the audit trail); with a token, the filters go in the query string or a form body.
+ *
+ * <p>The response is always a file: its type is a constant for the format, set before the
+ * body, never HTML whatever the filters say; {@code attachment}, and not to be sniffed.
  */
 @RestController
 public class CertificateExportController {
@@ -40,7 +45,7 @@ public class CertificateExportController {
         this.audit = audit;
     }
 
-    @GetMapping(PATH)
+    @PostMapping(PATH)
     public void download(
             CertificateFilter filter,
             @RequestParam(defaultValue = "csv") String format,
@@ -58,7 +63,12 @@ public class CertificateExportController {
                 .detail("matching", matching));
 
         response.setStatus(HttpStatus.OK.value());
-        response.setContentType(chosen.contentType());
+        if (chosen == CertificateExport.Format.XLSX) {
+            response.setContentType(CertificateExport.XLSX_CONTENT_TYPE);
+        } else {
+            response.setContentType(CertificateExport.CSV_CONTENT_TYPE);
+        }
+        response.setHeader("X-Content-Type-Options", "nosniff");
         response.setHeader("Content-Disposition", "attachment; filename=\"" + export.fileName(chosen) + "\"");
         response.setHeader("Cache-Control", "no-store");
         if (matching > limit) {

@@ -158,12 +158,15 @@ class InventoryExportTest {
     @Test
     void aCsvExportHonoursTheFiltersNeutralisesFormulasAndIsAudited() throws Exception {
         long head = audit.headSeq();
-        byte[] body = mockMvc.perform(get("/api/v1/certificates/export").param("format", "csv")
-                        .param("ownerType", "SERVER").param("sort", "notAfter,desc").with(reader("r")))
+        // As the page sends it: a form post, the filters and the order as fields, with the CSRF token.
+        byte[] body = mockMvc.perform(post("/api/v1/certificates/export").with(csrf())
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .content("format=csv&ownerType=SERVER&sort=notAfter%2Cdesc").with(reader("r")))
                 .andExpect(status().isOk())
                 .andExpect(header().string("Content-Type", org.hamcrest.Matchers.startsWith("text/csv")))
                 .andExpect(header().string("Content-Disposition", org.hamcrest.Matchers.matchesPattern(
                         "attachment; filename=\"certalert-certificates-\\d{8}-\\d{6}\\.csv\"")))
+                .andExpect(header().stringValues("X-Content-Type-Options", "nosniff"))
                 .andReturn().getResponse().getContentAsByteArray();
         String csv = new String(body, StandardCharsets.UTF_8);
         assertThat(csv).startsWith("﻿Owner type,Owner,");
@@ -181,10 +184,12 @@ class InventoryExportTest {
 
     @Test
     void anExcelExportIsAWorkbookWithItsFiltersAndNoFormulas() throws Exception {
-        byte[] body = mockMvc.perform(get("/api/v1/certificates/export").param("format", "xlsx")
-                        .param("hashAlgorithm", "SHA-1").with(reader("r")))
+        byte[] body = mockMvc.perform(post("/api/v1/certificates/export").param("format", "xlsx")
+                        .param("hashAlgorithm", "SHA-1").with(reader("r")).with(csrf()))
                 .andExpect(status().isOk())
-                .andExpect(header().string("Content-Type", CertificateExport.Format.XLSX.contentType()))
+                .andExpect(header().string("Content-Type", CertificateExport.XLSX_CONTENT_TYPE))
+                .andExpect(header().string("Content-Disposition", org.hamcrest.Matchers.endsWith(".xlsx\"")))
+                .andExpect(header().stringValues("X-Content-Type-Options", "nosniff"))
                 .andReturn().getResponse().getContentAsByteArray();
         Map<String, String> parts = unzip(body);
         assertThat(parts).containsKeys("[Content_Types].xml", "xl/workbook.xml", "xl/styles.xml",
@@ -201,10 +206,28 @@ class InventoryExportTest {
         assertThat(parts.get("xl/worksheets/sheet2.xml")).contains("Filters", "hashAlgorithm=[SHA-1]");
     }
 
+    /**
+     * Every export is audited, so it is a POST that needs the CSRF token: another site cannot
+     * make a signed-in browser export, nor put that in the trail. Refused, nothing is recorded.
+     */
+    @Test
+    void anExportWithoutTheCsrfTokenIsRefusedAndNotRecorded() throws Exception {
+        long head = audit.headSeq();
+        mockMvc.perform(post("/api/v1/certificates/export").param("format", "csv").with(reader("r")))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/v1/certificates/export").param("format", "csv").with(reader("r")).with(csrf().useInvalidToken()))
+                .andExpect(status().isForbidden());
+        // Nor is there an export by GET, which a link or an image on another site could make.
+        mockMvc.perform(get("/api/v1/certificates/export").param("format", "csv").with(reader("r")))
+                .andExpect(result -> assertThat(result.getResponse().getStatus()).isBetween(400, 499))
+                .andExpect(result -> assertThat(result.getResponse().getHeader("Content-Disposition")).isNull());
+        assertThat(audit.after(head, 100)).noneMatch(event -> event.action().equals("inventory.exported"));
+    }
+
     @Test
     void anExportStopsAtTheLimitAndSaysSo() throws Exception {
         properties.setMaxRows(1);
-        String csv = mockMvc.perform(get("/api/v1/certificates/export").with(reader("r")))
+        String csv = mockMvc.perform(post("/api/v1/certificates/export").with(reader("r")).with(csrf()))
                 .andExpect(header().string("X-CertAlert-Truncated", "true"))
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
         assertThat(csv.lines()).hasSize(2);
@@ -274,6 +297,11 @@ class InventoryExportTest {
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         assertThat(page).contains("id=\"certificate-filters\"", "id=\"export-xlsx\"", "id=\"saved-views\"")
+                // The export is a form post carrying the CSRF token; its buttons are buttons.
+                .containsPattern("<form id=\"certificate-export\" method=\"post\" action=\"/api/v1/certificates/export\">"
+                        + "\\s*<input type=\"hidden\" name=\"_csrf\" value=\"[^\"]+\"")
+                .containsPattern("<button type=\"submit\" class=\"btn[^\"]*\" id=\"export-csv\"\\s+form=\"certificate-export\" "
+                        + "name=\"format\" value=\"csv\">")
                 // Scheduled reports are for administrators and auditors.
                 .doesNotContain("id=\"reports-card\"");
         assertThat(mockMvc.perform(get("/certificates").with(admin())).andReturn().getResponse().getContentAsString())
