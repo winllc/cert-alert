@@ -175,8 +175,8 @@ want email, your SMTP server. The install guide covers both in full:
 <https://winllc.github.io/ens-apps-documentation/cert-alert/install/>
 
 - **The release package** - `cert-alert-<version>.tar.gz`, signed and checksummed (see
-  [Releases](#releases)). Docker Compose with the images inside, so it installs on a host with
-  no internet access: unpack, `./install.sh`, fill in `.env`, `./install.sh` again. Upgrades
+  [Releases](#releases)). Docker Compose or Podman (podman-compose), with the images inside,
+  so it installs on a host with no internet access: unpack, `./install.sh`, fill in `.env`, `./install.sh` again. Upgrades
   with `./upgrade.sh --from <previous release directory>`. Its `README.md` (from
   [`deploy/release/`](deploy/release/README.md)) has the details.
 - **The Helm chart** - [`deploy/helm/cert-alert`](deploy/helm/cert-alert/README.md), published
@@ -809,18 +809,27 @@ The ENS platform baseline, the same in every ENS product:
   `Secure` cookie follow the browser's request, and the audit trail records the client's
   address rather than the proxy's. Only with a proxy in front that sets those headers itself.
   The Helm chart sets it whenever its ingress or an edge or reencrypt Route terminates TLS.
-- **The release bundle** listens on `127.0.0.1` by default (`CERT_ALERT_BIND_ADDRESS`), for
-  a TLS-terminating reverse proxy in front; to publish it to other hosts directly, turn TLS
-  on and set `CERT_ALERT_BIND_ADDRESS=0.0.0.0`. With TLS off on any other address,
-  `install.sh` refuses to start it unless `.env` sets `CERT_ALERT_ALLOW_PLAIN_HTTP=true`, and
-  warns every time it does. See `deploy/release/README.md`, "Listening, and TLS".
+- **The release bundle** publishes on every interface (`0.0.0.0`) by default
+  (`CERT_ALERT_BIND_ADDRESS`, `CERT_ALERT_PORT`). With TLS off on any address but
+  `127.0.0.1`, `install.sh` warns every time that it is reachable over plain HTTP: turn TLS
+  on, or set `CERT_ALERT_BIND_ADDRESS=127.0.0.1` behind a TLS-terminating reverse proxy. See
+  `deploy/release/README.md`, "Listening, and TLS".
 - **PostgreSQL**: reach a database outside the bundle's internal network over TLS, with
   `sslmode=verify-full` in the JDBC URL (the chart's `database.params`).
 
 ### Upgrading: listening address, TLS suites and idle timeout
 
-- **Release bundle.** Earlier bundles published on `0.0.0.0` and only warned about plain
-  HTTP. An upgrade keeps that: when the copied `.env` predates this release, `install.sh`
+- **Release bundle, Docker or Podman.** New installs listen on `0.0.0.0` again, and
+  `install.sh` warns about plain HTTP rather than refusing it; `CERT_ALERT_ALLOW_PLAIN_HTTP`
+  is no longer read. An upgrade keeps the address and port in `.env`: an install on
+  `127.0.0.1` stays there (when the copied `.env` leaves `CERT_ALERT_BIND_ADDRESS` unset and
+  was written for the bundle that defaulted to `127.0.0.1`, `install.sh` writes
+  `CERT_ALERT_BIND_ADDRESS=127.0.0.1` into it). The scripts run on Docker or Podman
+  (`--engine`, or `CONTAINER_ENGINE` in `.env`, which a first install now records); an
+  existing `.env` without it gets Docker whenever its daemon answers, so Docker installs
+  upgrade as before.
+- **Release bundle (the release before).** Earlier bundles published on `0.0.0.0` and only
+  warned about plain HTTP. An upgrade keeps that: when the copied `.env` predates this release, `install.sh`
   (and so `upgrade.sh`) adds `CERT_ALERT_BIND_ADDRESS=0.0.0.0` if it is not set, and
   `CERT_ALERT_ALLOW_PLAIN_HTTP=true` if TLS is off on an address other than `127.0.0.1`,
   under a comment saying why. Nothing else in `.env` changes. Move to a proxy on `127.0.0.1`
@@ -3678,9 +3687,11 @@ docker-compose.yml       the application, a PostgreSQL and a stand-in directory
 docker-compose.ports.yml opt-in overlay that publishes them on the host
 docker/389ds/            389 Directory Server carrying the IC FSD schema and a changelog
 deploy/release/          what goes in a customer release bundle: production compose,
-                         env.template, install.sh, upgrade.sh and the customer README
+                         env.template, install.sh, upgrade.sh, container-engine.sh
+                         (Docker or Podman) and the customer README
 deploy/helm/cert-alert/  the Helm chart, its README and the example values in ci/
-scripts/                 the dummy directory generator, and release-bundle.sh
+scripts/                 the dummy directory generator, release-bundle.sh, and
+                         check-release-bundle.sh (shellcheck and compose config, CI)
 src/main/java/com/enssolutions/license/   the ENS portal's license verifier, copied unchanged
 src/main/java/com/winllc/certalert/
 ├── alert/       notifier SPI, dispatcher, log and email channels

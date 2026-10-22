@@ -182,6 +182,35 @@ jobs:
             echo "::endgroup::"
           done
 
+  release-bundle:
+    # The customer bundle's files (deploy/release), without building anything: shellcheck on
+    # its scripts, and its compose files rendered by docker compose and by podman-compose in
+    # every combination its README documents. The image job below installs the built bundle.
+    runs-on: ubuntu-latest
+
+    env:
+      PODMAN_COMPOSE_VERSION: 1.6.0
+      SHELLCHECK_VERSION: 0.11.0.1
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install podman-compose and shellcheck
+        run: |
+          python3 -m venv "$RUNNER_TEMP/tools"
+          "$RUNNER_TEMP/tools/bin/pip" install -q "podman-compose==$PODMAN_COMPOSE_VERSION" \
+            "shellcheck-py==$SHELLCHECK_VERSION"
+          echo "$RUNNER_TEMP/tools/bin" >> "$GITHUB_PATH"
+
+      - name: Check the bundle
+        env:
+          REQUIRE_ENGINES: docker podman
+        run: |
+          docker compose version
+          podman version
+          podman-compose version
+          scripts/check-release-bundle.sh
+
   image:
     # Builds the container image on every push, scans it, and publishes what it just proved
     # starts and passes the scan. Nothing is published from a pull request: a fork's token
@@ -392,6 +421,36 @@ jobs:
           fi
           docker tag cert-alert:ci "$IMAGE_NAME:$VERSION"
           scripts/release-bundle.sh "$VERSION" "$IMAGE_NAME:$VERSION"
+
+      - name: Install the bundle with Podman
+        # The bundle as a customer unpacks it, installed and upgraded with rootful Podman and
+        # podman-compose (systemd runs Podman's health checks), from the images it ships. No
+        # directory here, so LDAP reports DOWN, which the liveness check ignores. Checks the
+        # default publishes the UI on 0.0.0.0:8080 of the host.
+        if: steps.release.outputs.enabled == 'true'
+        timeout-minutes: 15
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          OUT_DIR: ${{ steps.release.outputs.out_dir }}
+          PODMAN_COMPOSE_VERSION: 1.6.0
+        run: |
+          python3 -m venv "$RUNNER_TEMP/podman-compose"
+          "$RUNNER_TEMP/podman-compose/bin/pip" install -q "podman-compose==$PODMAN_COMPOSE_VERSION"
+          as_root() { sudo env "PATH=$RUNNER_TEMP/podman-compose/bin:$PATH" "$@"; }
+          dir="$RUNNER_TEMP/podman-smoke"
+          mkdir -p "$dir"
+          tar -xzf "$OUT_DIR/$PRODUCT_ID-$VERSION.tar.gz" -C "$dir"
+          cd "$dir/$PRODUCT_ID-$VERSION"
+          as_root ./install.sh --engine podman
+          sudo grep -qx 'CONTAINER_ENGINE=podman' .env
+          sudo sed -i -e 's|^CERT_ALERT_LDAP_URL=.*|CERT_ALERT_LDAP_URL=ldap://127.0.0.1:1|' \
+            -e 's|=CHANGE_ME$|=ci|' .env
+          as_root ./install.sh
+          curl -fsS http://127.0.0.1:8080/livez
+          ss -ltnH 'sport = :8080' | tee /dev/stderr | grep -q '0\.0\.0\.0:8080'
+          as_root ./upgrade.sh
+          curl -fsS http://127.0.0.1:8080/livez
+          as_root podman-compose down -v
 
       - name: Publish the Helm chart
         # Releases only: a pull request's 0.0.0-pr<n> chart is packaged above and kept as an

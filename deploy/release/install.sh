@@ -4,6 +4,9 @@
 #   ./install.sh                       first install; run again after editing .env
 #   ./install.sh --upgrade [--from DIR] [--no-backup]
 #                                      the same as ./upgrade.sh
+#   --engine docker|podman             which container engine (or CONTAINER_ENGINE=...);
+#                                      by default the one in .env, else Docker if its
+#                                      daemon answers, else Podman
 #
 # Safe to run again. It never overwrites an .env, or a license already installed in the
 # application's license volume.
@@ -12,6 +15,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 VERSION=$(cat VERSION)
 PRODUCT=cert-alert
+# shellcheck source-path=SCRIPTDIR source=container-engine.sh
+. ./container-engine.sh
 
 MODE=install
 FROM=""
@@ -22,7 +27,9 @@ while [ $# -gt 0 ]; do
         --from) [ $# -ge 2 ] || { echo "--from needs a directory" >&2; exit 2; }; FROM=$2; shift ;;
         --from=*) FROM=${1#--from=} ;;
         --no-backup) BACKUP=false ;;
-        -h|--help) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --engine) [ $# -ge 2 ] || { echo "--engine needs docker or podman" >&2; exit 2; }; CONTAINER_ENGINE=$2; shift ;;
+        --engine=*) CONTAINER_ENGINE=${1#--engine=} ;;
+        -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "unknown argument: $1 (try --help)" >&2; exit 2 ;;
     esac
     shift
@@ -39,21 +46,13 @@ env_value() {
     printf '%s' "$v"
 }
 
-check_prerequisites() {
-    command -v docker > /dev/null 2>&1 || die "docker is not installed, or not on PATH."
-    docker compose version > /dev/null 2>&1 \
-        || die "the Docker Compose plugin (docker compose, v2) is needed."
-    docker info > /dev/null 2>&1 \
-        || die "cannot talk to the Docker daemon - is it running, and may this user use it?"
-}
-
 load_images() {
     local f ref all_present=true
     # images/IMAGES lists what the archive holds; skip the slow load when all are here.
     if [ -f images/IMAGES ]; then
         while read -r ref; do
             [ -n "$ref" ] || continue
-            docker image inspect "$ref" > /dev/null 2>&1 || all_present=false
+            engine image inspect "$ref" > /dev/null 2>&1 || all_present=false
         done < images/IMAGES
         if [ "$all_present" = true ]; then
             say "Images already loaded: $(tr '\n' ' ' < images/IMAGES)"
@@ -63,13 +62,13 @@ load_images() {
     for f in images/*.tar; do
         [ -e "$f" ] || { say "No images/ in this bundle - they will be pulled from the registry."; return 0; }
         say "Loading images from $f (this takes a minute) ..."
-        docker load -i "$f"
+        engine load -i "$f"
     done
 }
 
 make_directories() {
     # tls and email-templates are mounted read-only into the application, and created here
-    # so Docker does not create them as root-owned directories the first time it starts.
+    # so the engine does not create them as root-owned directories the first time it starts.
     # license is where a license file can be put for this script to install.
     mkdir -p license tls email-templates
 }
@@ -84,7 +83,9 @@ create_env() {
     local pw tmp
     pw=$(random_password)
     tmp=$(mktemp .env.XXXXXX)
-    sed "s/^CERT_ALERT_DB_PASSWORD=\$/CERT_ALERT_DB_PASSWORD=${pw}/" .env > "$tmp"
+    # The engine chosen now, so that an upgrade on a host with both uses the same one.
+    sed -e "s/^CERT_ALERT_DB_PASSWORD=\$/CERT_ALERT_DB_PASSWORD=${pw}/" \
+        -e "s/^#[[:space:]]*CONTAINER_ENGINE=.*/CONTAINER_ENGINE=${ENGINE}/" .env > "$tmp"
     chmod 600 "$tmp"
     mv "$tmp" .env
 }
@@ -92,7 +93,8 @@ create_env() {
 explain_next_steps() {
     cat <<EOF
 
-Created $(pwd)/.env from env.template, with a random database password.
+Created $(pwd)/.env from env.template, with a random database password, for $ENGINE
+(CONTAINER_ENGINE in .env).
 
 Before cert-alert can start, edit .env and set at least:
 
@@ -146,73 +148,69 @@ env_has() {
 }
 
 keep_previous_listen_address() {
-    # Releases before this one published on every interface by default, and only warned
-    # about plain HTTP. This one listens on 127.0.0.1 by default and refuses plain HTTP
-    # anywhere else unless CERT_ALERT_ALLOW_PLAIN_HTTP=true. An .env written for an earlier
-    # release says nothing about either, so the upgrade would leave cert-alert unreachable
-    # or not started; write the old behaviour into it instead, so the upgrade changes
-    # nothing. An .env from this env.template mentions CERT_ALERT_ALLOW_PLAIN_HTTP (commented
-    # out), and is never touched; neither is one this has already been through.
-    grep -qE '^#?[[:space:]]*CERT_ALERT_ALLOW_PLAIN_HTTP=' .env && return 0
-    local bind tls_on=false add_bind=false allow=false
-    [ "$(env_value CERT_ALERT_TLS_ENABLED)" = "true" ] && tls_on=true
-    env_has CERT_ALERT_BIND_ADDRESS || add_bind=true
-    bind=$(env_value CERT_ALERT_BIND_ADDRESS)
-    [ "$add_bind" = false ] || bind=0.0.0.0
-    if [ "$tls_on" = false ]; then
-        case "$bind" in 127.*|localhost|::1|'[::1]') ;; *) allow=true ;; esac
-    fi
+    # New installs listen on every interface (0.0.0.0). An existing .env keeps the address it
+    # already had, so an upgrade never opens a 127.0.0.1-only install to the network:
+    #   - CERT_ALERT_BIND_ADDRESS set in .env: used as it is;
+    #   - not set, in an .env from the release that listened on 127.0.0.1 by default (it
+    #     mentions CERT_ALERT_ALLOW_PLAIN_HTTP, and not CONTAINER_ENGINE): that 127.0.0.1 is
+    #     written into .env;
+    #   - not set, in an .env from an earlier release: those listened on 0.0.0.0, as this one
+    #     does, so nothing changes.
+    env_has CERT_ALERT_BIND_ADDRESS && return 0
+    grep -qE '^#?[[:space:]]*CONTAINER_ENGINE=' .env && return 0
+    grep -qE '^#?[[:space:]]*CERT_ALERT_ALLOW_PLAIN_HTTP=' .env || return 0
     {
-        printf '\n# Added by install.sh %s, so this upgrade changes nothing: earlier releases\n' "$VERSION"
-        printf '# listened on every interface by default and allowed plain HTTP there. New installs\n'
-        printf '# listen on 127.0.0.1 behind a TLS-terminating proxy, or turn TLS on - see the\n'
-        printf '# upgrade notes in the README.\n'
-        [ "$add_bind" = false ] || printf 'CERT_ALERT_BIND_ADDRESS=0.0.0.0\n'
-        if [ "$allow" = true ]; then
-            printf 'CERT_ALERT_ALLOW_PLAIN_HTTP=true\n'
-        else
-            printf '# CERT_ALERT_ALLOW_PLAIN_HTTP=false\n'
-        fi
+        printf '\n# Added by install.sh %s, so this upgrade changes nothing: the release this .env\n' "$VERSION"
+        printf '# was written for listened on 127.0.0.1 by default. New installs listen on 0.0.0.0 -\n'
+        printf '# see the upgrade notes in the README.\n'
+        printf 'CERT_ALERT_BIND_ADDRESS=127.0.0.1\n'
     } >> .env
-    [ "$add_bind" = false ] \
-        || say "Kept the previous listen address: added CERT_ALERT_BIND_ADDRESS=0.0.0.0 to .env."
-    [ "$allow" = false ] \
-        || say "Kept plain HTTP allowed, as before: added CERT_ALERT_ALLOW_PLAIN_HTTP=true to .env (TLS is off)."
+    say "Kept the previous listen address: added CERT_ALERT_BIND_ADDRESS=127.0.0.1 to .env."
+}
+
+# On an upgrade, say so when this install stays on this host only, as it was.
+note_listen_address() {
+    local bind
+    bind=$(env_value CERT_ALERT_BIND_ADDRESS); bind=${bind:-0.0.0.0}
+    case "$bind" in
+        127.*|localhost|::1|'[::1]')
+            say "Note: cert-alert stays on $bind (CERT_ALERT_BIND_ADDRESS in .env), as before. New installs"
+            say "      of this release listen on 0.0.0.0; set CERT_ALERT_BIND_ADDRESS=0.0.0.0 to publish it"
+            say "      to other hosts, with TLS on or a TLS-terminating proxy in front." ;;
+    esac
 }
 
 check_exposure() {
     # Plain HTTP on an interface other hosts reach sends passwords and session cookies across
-    # the network in clear text. Refused unless .env says so in as many words - a lab, or a
-    # firewall in front - and never silent even then.
+    # the network in clear text. Allowed - it is the default, 0.0.0.0 - but never silent.
     [ "$(env_value CERT_ALERT_TLS_ENABLED)" = "true" ] && return 0
     local bind port
-    bind=$(env_value CERT_ALERT_BIND_ADDRESS); bind=${bind:-127.0.0.1}
+    bind=$(env_value CERT_ALERT_BIND_ADDRESS); bind=${bind:-0.0.0.0}
     port=$(env_value CERT_ALERT_PORT); port=${port:-8080}
     case "$bind" in
         127.*|localhost|::1|'[::1]') return 0 ;;
     esac
-    local allowed=false
-    [ "$(env_value CERT_ALERT_ALLOW_PLAIN_HTTP)" = "true" ] && allowed=true
     say "" >&2
-    if [ "$allowed" = true ]; then
-        say "WARNING: TLS is off (CERT_ALERT_TLS_ENABLED is not true) and cert-alert is published on" >&2
-    else
-        say "Refusing to start: TLS is off (CERT_ALERT_TLS_ENABLED is not true) and cert-alert would be published on" >&2
-    fi
-    say "         $bind (CERT_ALERT_BIND_ADDRESS), port $port. Directory passwords and session" >&2
-    say "         cookies would cross the network in clear text. Either:" >&2
+    say "WARNING: cert-alert is reachable over plain HTTP: TLS is off (CERT_ALERT_TLS_ENABLED is not" >&2
+    say "         true) and it is published on $bind (CERT_ALERT_BIND_ADDRESS), port $port. Directory" >&2
+    say "         passwords and session cookies cross the network in clear text. Recommended:" >&2
+    say "           - turn TLS on in the application (CERT_ALERT_TLS_ENABLED=true, keystores in tls/); or" >&2
     say "           - put a TLS-terminating reverse proxy in front and set" >&2
     say "             CERT_ALERT_BIND_ADDRESS=127.0.0.1, SERVER_FORWARD_HEADERS_STRATEGY=framework" >&2
-    say "             and ENS_COOKIE_SECURE=true; or" >&2
-    say "           - turn TLS on in the application (CERT_ALERT_TLS_ENABLED=true, keystores in tls/)." >&2
-    if [ "$allowed" = true ]; then
-        say "         (Allowed only because .env sets CERT_ALERT_ALLOW_PLAIN_HTTP=true.)" >&2
-        say "" >&2
-        return 0
-    fi
-    say "         Or, for a lab or behind a firewall that does it for you, set" >&2
-    say "         CERT_ALERT_ALLOW_PLAIN_HTTP=true in .env to accept the risk." >&2
-    die "plain HTTP on $bind is not allowed without TLS or CERT_ALERT_ALLOW_PLAIN_HTTP=true."
+    say "             and ENS_COOKIE_SECURE=true." >&2
+    say "" >&2
+}
+
+check_port() {
+    # Rootless Podman cannot publish a port below net.ipv4.ip_unprivileged_port_start (1024
+    # unless lowered), and says so only as a failure to start.
+    engine_rootless || return 0
+    local port lowest
+    port=$(env_value CERT_ALERT_PORT); port=${port:-8080}
+    lowest=$(sysctl -n net.ipv4.ip_unprivileged_port_start 2> /dev/null || echo 1024)
+    case "$port" in *[!0-9]*|'') return 0 ;; esac
+    [ "$port" -ge "$lowest" ] \
+        || die "rootless Podman cannot publish port $port (below $lowest): set CERT_ALERT_PORT=8080 or another port from $lowest up in .env, or lower net.ipv4.ip_unprivileged_port_start."
 }
 
 check_license() {
@@ -232,19 +230,22 @@ install_license() {
     # replaces a different license already there: that may be a newer one uploaded on the
     # license screen, and an older revision put back over it is refused.
     [ -f license/license.lic ] || return 0
-    if docker compose exec -T cert-alert cat "$LICENSE_IN_VOLUME" 2> /dev/null | cmp -s - license/license.lic; then
+    local id
+    id=$(service_container cert-alert)
+    [ -n "$id" ] || die "no cert-alert container to copy license/license.lic into."
+    if engine exec "$id" cat "$LICENSE_IN_VOLUME" 2> /dev/null | cmp -s - license/license.lic; then
         say "License: license/license.lic is already installed."
         return 0
     fi
-    if docker compose exec -T cert-alert test -s "$LICENSE_IN_VOLUME" 2> /dev/null; then
+    if engine exec "$id" test -s "$LICENSE_IN_VOLUME" 2> /dev/null; then
         say "License: a different license is already installed (perhaps uploaded on the license screen); kept it."
         say "         To replace it with license/license.lic, upload that file on the license screen."
         return 0
     fi
-    docker compose cp license/license.lic "cert-alert:$LICENSE_IN_VOLUME" \
+    engine cp license/license.lic "$id:$LICENSE_IN_VOLUME" \
         || die "could not copy license/license.lic into the cert-alert container."
-    # docker cp writes it as root; make it the application's, like an uploaded one.
-    docker compose exec -T -u 0 cert-alert sh -c "chown 185:0 '$LICENSE_IN_VOLUME' && chmod 0664 '$LICENSE_IN_VOLUME'" \
+    # cp writes it as root; make it the application's, like an uploaded one.
+    engine exec -u 0 "$id" sh -c "chown 185:0 '$LICENSE_IN_VOLUME' && chmod 0664 '$LICENSE_IN_VOLUME'" \
         || say "License: could not change the copied file's owner; it is still readable."
     say "License: copied license/license.lic into the license volume ($LICENSE_IN_VOLUME)."
 }
@@ -274,6 +275,11 @@ copy_from_previous() {
         chmod 600 .env
         say "Copied .env from $FROM."
     fi
+    # An override of the operator's own (e.g. docker-compose.no-ports.yml copied to it).
+    if [ -f "$FROM/docker-compose.override.yml" ] && [ ! -e docker-compose.override.yml ]; then
+        cp -p "$FROM/docker-compose.override.yml" docker-compose.override.yml
+        say "Copied docker-compose.override.yml from $FROM."
+    fi
     local d
     for d in license tls email-templates; do
         if [ -d "$FROM/$d" ]; then
@@ -289,8 +295,8 @@ copy_from_previous() {
 backup_database() {
     [ "$BACKUP" = true ] || { say "Skipping the database backup (--no-backup)."; return 0; }
     local id user db file
-    id=$(docker compose ps -q postgres 2> /dev/null || true)
-    if [ -z "$id" ] || [ "$(docker inspect -f '{{.State.Running}}' "$id" 2> /dev/null)" != "true" ]; then
+    id=$(service_container postgres 2> /dev/null || true)
+    if [ -z "$id" ] || [ "$(engine inspect -f '{{.State.Running}}' "$id" 2> /dev/null)" != "true" ]; then
         say "No running database to back up."
         return 0
     fi
@@ -299,23 +305,27 @@ backup_database() {
     mkdir -p backups
     file="backups/${PRODUCT}-before-${VERSION}-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
     say "Backing up the database to $file ..."
-    docker exec "$id" pg_dump -U "$user" -d "$db" | gzip > "$file"
+    engine exec "$id" pg_dump -U "$user" -d "$db" | gzip > "$file"
     chmod 600 "$file"
 }
 
 wait_until_healthy() {
     local id status _
-    id=$(docker compose ps -q cert-alert)
+    id=$(service_container cert-alert)
+    [ -n "$id" ] || die "no cert-alert container was started. See: ${COMPOSE_CMD[*]} logs cert-alert"
     say "Waiting for cert-alert to report healthy ..."
     for _ in $(seq 1 60); do
-        status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$id" 2> /dev/null || echo unknown)
+        # Podman runs health checks from systemd timers; running one here as well means the
+        # status is current without waiting for the next tick.
+        [ "$ENGINE" != podman ] || engine healthcheck run "$id" > /dev/null 2>&1 || true
+        status=$(engine inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$id" 2> /dev/null || echo unknown)
         case "$status" in
             healthy|running)
                 local port scheme=http
                 port=$(env_value CERT_ALERT_PORT); port=${port:-8080}
                 [ "$(env_value CERT_ALERT_TLS_ENABLED)" = "true" ] && scheme=https
                 local url bind host
-                bind=$(env_value CERT_ALERT_BIND_ADDRESS); bind=${bind:-127.0.0.1}
+                bind=$(env_value CERT_ALERT_BIND_ADDRESS); bind=${bind:-0.0.0.0}
                 case "$bind" in
                     0.0.0.0|::|'[::]'|'*') host=$(hostname -f 2> /dev/null || hostname) ;;
                     *) host=$bind ;;
@@ -333,22 +343,22 @@ wait_until_healthy() {
         esac
         sleep 5
     done
-    docker compose logs --tail 50 cert-alert >&2 || true
-    die "cert-alert did not become healthy (status: $status). See: docker compose logs cert-alert"
+    engine logs --tail 50 "$id" >&2 || true
+    die "cert-alert did not become healthy (status: $status). See: ${COMPOSE_CMD[*]} logs cert-alert"
 }
 
 start() {
-    docker compose config --quiet || die "the compose configuration is not valid with this .env."
-    docker compose up -d --remove-orphans
+    compose config --quiet || die "the compose configuration is not valid with this .env."
+    compose up -d --remove-orphans
     install_license
     wait_until_healthy
 }
 
-check_prerequisites
 say "cert-alert $VERSION - $MODE"
 
 if [ "$MODE" = install ]; then
     make_directories
+    select_engine
     if [ ! -f .env ]; then
         load_images
         create_env
@@ -359,20 +369,24 @@ if [ "$MODE" = install ]; then
     keep_previous_listen_address
     check_env
     check_exposure
+    check_port
     check_license
     load_images
     start
 else
     copy_from_previous
     [ -f .env ] || die "no .env here. Pass --from <the previous release's directory>, or copy its .env, license/ and tls/ here. For a first install run ./install.sh."
+    select_engine
     make_directories
     newer_settings
     keep_previous_listen_address
+    note_listen_address
     check_env
     check_exposure
+    check_port
     check_license
     load_images
     backup_database
     start
-    say "Images of the previous release are still on this host; 'docker image prune' removes unused ones."
+    say "Images of the previous release are still on this host; '$ENGINE image prune' removes unused ones."
 fi
