@@ -3614,6 +3614,14 @@ and uploaded to `s3://<bucket>/cert-alert/<version>/`:
 plus `s3://<bucket>/cert-alert/latest.txt` holding the newest final version. The job summary
 lists the files and sizes, and says whether it was signed and where it went - or why not.
 
+**The GitHub Release.** Once the `image` job has succeeded on a tag, the `github-release` job
+attaches these files to the tag's GitHub Release, `cert-alert-<version>.tar.gz` first. Make the release on
+GitHub (Releases > Draft a new release, with a new `vX.Y.Z` tag) and CI adds the files to it; push a
+tag without a release and CI creates one with generated notes (a pre-release for a `-suffix` tag).
+Either way the notes start with a short "Deployment package" section naming the file to download:
+GitHub adds its own "Source code" archives to every release and they can't be removed. The job needs
+no configuration; the repository is public, so the release files are public downloads.
+
 **Configuring it** (Settings → Secrets and variables → Actions). With none of these set the
 workflow still builds the bundle and keeps it as an artifact; signing and upload are each
 skipped and the summary says so.
