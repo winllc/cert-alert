@@ -34,3 +34,6 @@ out/
 
 # Release bundles built by scripts/release-bundle.sh.
 /dist/
+
+# The accessibility scan's Node packages (a11y/package-lock.json pins them)
+a11y/node_modules/

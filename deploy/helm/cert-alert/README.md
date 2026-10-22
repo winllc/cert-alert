@@ -201,6 +201,31 @@ The chart refuses to render `x509.source=header` without a proxy secret and a CA
 
 A release without audit logging ignores these variables.
 
+### Exports and scheduled reports
+
+| Value | Default | Environment |
+|---|---|---|
+| `exports.maxRows` | `200000` | `CERT_ALERT_EXPORTS_MAX_ROWS` |
+| `exports.reportMaxRows` | `50000` | `CERT_ALERT_EXPORTS_REPORT_MAX_ROWS` |
+| `exports.reportRecipientDomains` | `[]` | `CERT_ALERT_EXPORTS_REPORT_RECIPIENT_DOMAINS` (`example.gov`, `*.mil`); required before any scheduled report |
+
+### Public API and webhooks
+
+API tokens and webhooks are created on **Admin > Integrations**; these values bound them.
+
+| Value | Default | Environment |
+|---|---|---|
+| `api.tokensEnabled` | `true` | `CERT_ALERT_API_TOKENS_ENABLED` |
+| `api.requestsPerMinute` | `300` | `CERT_ALERT_API_REQUESTS_PER_MINUTE` (per token, per replica) |
+| `api.maxLifetime` | `""` (the application's `365d`) | `CERT_ALERT_API_MAX_LIFETIME`; `0` removes the limit |
+| `webhooks.enabled` | `true` | `CERT_ALERT_WEBHOOKS_ENABLED` |
+| `webhooks.allowedHosts` | `[]` | `CERT_ALERT_WEBHOOKS_ALLOWED_HOSTS` (names, `*.suffix`, CIDRs) |
+| `webhooks.blockPrivateNetworks` | `false` | `CERT_ALERT_WEBHOOKS_BLOCK_PRIVATE_NETWORKS` |
+| `webhooks.secretKey` | `""` | `CERT_ALERT_WEBHOOKS_SECRET_KEY` (or `existingSecret` + `existingSecretKey`, `webhooks-secret-key`): a base64 AES key the signing secrets are encrypted with |
+
+Webhooks go out on https; with `networkPolicy.enabled`, `networkPolicy.egress.web` has to
+reach the receivers.
+
 ### License and persistence
 
 | Value | Default | Description |

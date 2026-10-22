@@ -17,6 +17,8 @@
     <!-- For an auditor, who may read everything and change nothing: the scripts leave
          alone what would only be refused. -->
     <meta th:if="${isAuditor}" name="cert-alert-read-only" content="true">
+    <!-- How long without a request ends the session, so the page can warn before it does. -->
+    <meta th:if="${idleTimeoutSeconds != null}" name="cert-alert-idle-timeout" th:content="${idleTimeoutSeconds}">
     <!-- Everything is served from the jar rather than a CDN: this runs on networks with no
          route to one. Tabler bundles the Bootstrap it is built on, so it comes first and
          DataTables' Bootstrap 5 integration layers on top. -->
@@ -26,31 +28,22 @@
     <!--/*
       The classification banners, top and bottom.
 
-      Drawn here, in the one fragment every page includes, rather than as elements a page
-      has to remember to put in its body - there is no decorator layout in this project,
-      only named fragments, and a head cannot hold body content. body::before and
-      body::after reach every page from one place, and a page added tomorrow gets them
-      without knowing they exist.
+      Real text in the page (the classificationBanner fragment below, which every page
+      includes first and last in its body) so a screen reader announces the marking like any
+      other text - generated CSS content is skipped by some, and read twice by others. A test
+      (BannerPageTest) holds every page template to including both, so a page added tomorrow
+      cannot forget them. Only the look is here: fixed to each end, and the page padded to
+      clear them.
 
       The bean is resolved outside the style element because Thymeleaf will not evaluate a
-      bean reference inside one, and it is right not to: what is written here is CSS and
-      cannot be escaped on the way in. Which is why the colours and the height are checked
-      against what a colour and a length may look like, and the text arrives already
-      escaped as a CSS string. See BannerProperties.
-
-      content: uses unescaped inlining for the same reason. The value is already a quoted
-      CSS string, and escaped inlining would render its quotes as HTML entities, leaving a
-      declaration the browser discards - a banner that silently does not appear.
+      bean reference inside one. The colours and the height are written into CSS, so they
+      are checked against what a colour and a length may look like (BannerProperties).
 
       Classification banners are a licensed feature: without it they are not drawn.
-
-      Kept terse below because unlike these, a CSS comment is served on every request.
     */-->
     <th:block th:with="banner=${@bannerProperties}">
     <style th:if="${banner.visible and @licensing.shows('classification-banners')}" th:inline="text">
-        body::before,
-        body::after {
-            content: [(${banner.cssText})];
+        .classification-banner {
             position: fixed;
             left: 0;
             right: 0;
@@ -67,8 +60,8 @@
             overflow: hidden;
             white-space: nowrap;
         }
-        body::before { top: 0; }
-        body::after { bottom: 0; }
+        .classification-banner-top { top: 0; }
+        .classification-banner-bottom { bottom: 0; }
         /* Room at both ends, so nothing sits underneath a bar. */
         body {
             padding-top: [[${banner.height}]];
@@ -76,8 +69,7 @@
         }
         /* Fixed means the first page only, on paper. */
         @media print {
-            body::before,
-            body::after { position: static; }
+            .classification-banner { position: static; }
             body { padding-top: 0; padding-bottom: 0; }
         }
     </style>
@@ -85,12 +77,20 @@
 </head>
 <body>
 
+<!--/*
+  A classification bar, as text: a labelled region, so it is announced as the marking
+  rather than as stray words, and once at each end of the page.
+*/-->
+<div th:fragment="classificationBanner(position)" th:if="${@bannerProperties.visible and @licensing.shows('classification-banners')}" th:class="'classification-banner classification-banner-' + ${position}" role="region" th:attr="aria-label=${position == 'top'} ? 'Classification' : 'Classification, end of page'" th:text="${@bannerProperties.text}">UNCLASSIFIED</div>
+
 <!--/* The application shell: brand, navigation, and who is signed in. */-->
 <header th:fragment="navbar(active)" class="navbar navbar-expand-md d-print-none"
         th:with="evaluation=${license != null and license.showEvaluationBanner()},
                  renewal=${isAdmin == true and license != null and license.showRenewalWarning()},
                  readOnly=${license != null and license.mode().name() == 'READ_ONLY'}"
         th:classappend="(${demo} or ${evaluation} or ${renewal} or ${readOnly}) ? 'has-demo-strip'" data-bs-theme="dark">
+    <!--/* The first thing the keyboard reaches: past the bar, to the page itself. */-->
+    <a class="skip-link visually-hidden-focusable" href="#main-content">Skip to main content</a>
     <div class="container-xl">
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar-menu"
                 aria-label="Toggle navigation">
@@ -114,15 +114,19 @@
                    returned, and unreachable at all when one failed. */-->
             <div class="nav-item me-2" id="notification-bell"
                  th:classappend="${active == 'notifications'} ? 'active'">
-                <a class="nav-link px-2" th:href="@{/notifications}" title="Notifications"
-                   aria-label="Notifications">
-                    <svg class="icon"><use href="#icon-bell"></use></svg>
+                <!--/* Named by text, not aria-label, so the name includes the count it shows
+                       (WCAG 2.5.3, label in name). */-->
+                <a class="nav-link px-2" th:href="@{/notifications}" title="Notifications">
+                    <svg class="icon" aria-hidden="true"><use href="#icon-bell"></use></svg>
+                    <span class="visually-hidden">Notifications</span>
                     <span class="badge bg-red text-white d-none" id="notification-count">0</span>
+                    <span class="visually-hidden d-none" id="notification-count-label"> unread</span>
                 </a>
             </div>
             <div class="nav-item dropdown" th:if="${currentUser != null}">
-                <a href="#" class="nav-link d-flex lh-1 p-0 px-2" data-bs-toggle="dropdown" aria-label="Open account menu">
-                    <span class="avatar avatar-sm bg-primary-lt"
+                <a href="#" class="nav-link d-flex lh-1 p-0 px-2" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                    <span class="visually-hidden">Account menu:</span>
+                    <span class="avatar avatar-sm bg-primary-lt" aria-hidden="true"
                           th:text="${#strings.substring(currentUser.displayName, 0, 1)}">A</span>
                     <div class="d-none d-xl-block ps-2">
                         <div th:text="${currentUser.displayName}">Name</div>
@@ -167,6 +171,14 @@
                         <span class="nav-link-title">Servers</span>
                     </a>
                 </li>
+                <li class="nav-item" th:classappend="${active == 'certificates'} ? 'active'">
+                    <a class="nav-link" th:href="@{/certificates}">
+                        <span class="nav-link-icon d-md-none d-lg-inline-block">
+                            <svg class="icon"><use href="#icon-certificate"></use></svg>
+                        </span>
+                        <span class="nav-link-title">Certificates</span>
+                    </a>
+                </li>
                 <!--/* Projects and metrics are licensed features; what the license does not
                        include is left off the bar rather than offered and refused. */-->
                 <li class="nav-item" th:classappend="${active == 'projects'} ? 'active'"
@@ -194,6 +206,15 @@
                             <svg class="icon"><use href="#icon-shield-check"></use></svg>
                         </span>
                         <span class="nav-link-title">Admin</span>
+                    </a>
+                </li>
+                <!--/* API tokens and webhooks: administrators manage them, auditors read them. */-->
+                <li class="nav-item" th:classappend="${active == 'integrations'} ? 'active'" th:if="${canReadAdmin}">
+                    <a class="nav-link" th:href="@{/admin/integrations}">
+                        <span class="nav-link-icon d-md-none d-lg-inline-block">
+                            <svg class="icon"><use href="#icon-key"></use></svg>
+                        </span>
+                        <span class="nav-link-title">Integrations</span>
                     </a>
                 </li>
                 <!--/* Administrators and auditors, whatever the license says: the audit trail. */-->
@@ -248,7 +269,7 @@
         <div class="row g-2 align-items-center">
             <div class="col">
                 <div class="page-pretitle">IC Full Service Directory</div>
-                <h2 class="page-title" th:text="${title}">Title</h2>
+                <h1 class="page-title" th:text="${title}">Title</h1>
                 <div class="text-secondary mt-1" th:text="${subtitle}">Subtitle</div>
             </div>
             <div class="col-auto ms-auto d-print-none">
@@ -256,7 +277,7 @@
                     <!-- Only appears when the changelog connector is enabled and licensed. -->
                     <span id="changelog-status" class="d-none"
                           th:if="${@licensing.isEnabled('changelog-sync')}"></span>
-                    <span id="sync-status" class="text-secondary small"></span>
+                    <span id="sync-status" class="text-secondary small" role="status" aria-live="polite"></span>
                     <button type="button" id="sync-now" class="btn btn-primary"
                             th:if="${isAdmin and @licensing.isEnabled('directory-sync')}">
                         <svg class="icon"><use href="#icon-refresh"></use></svg>
@@ -332,6 +353,7 @@
     <script th:src="@{/js/directory-table.js}"></script>
     <script th:src="@{/js/sync.js}"></script>
     <script th:src="@{/js/notifications.js}"></script>
+    <script th:src="@{/js/session-timeout.js}"></script>
 </div>
 </body>
 </html>

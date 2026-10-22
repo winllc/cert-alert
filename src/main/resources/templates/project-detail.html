@@ -2,12 +2,13 @@
 <html lang="en" xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{fragments/layout :: head(${project.name})}"></head>
 <body>
+<div th:replace="~{fragments/layout :: classificationBanner('top')}"></div>
 <svg th:replace="~{fragments/icons :: sprite}"></svg>
 
 <div class="page">
     <header th:replace="~{fragments/layout :: navbar('projects')}"></header>
 
-    <div class="page-wrapper">
+    <main class="page-wrapper" id="main-content" tabindex="-1">
         <div class="page-header d-print-none">
             <div class="container-xl">
                 <div class="row g-2 align-items-center">
@@ -15,7 +16,7 @@
                         <div class="page-pretitle">
                             <a th:href="@{/projects}" class="text-secondary">Projects</a>
                         </div>
-                        <h2 class="page-title" th:text="${project.name}">Project</h2>
+                        <h1 class="page-title" th:text="${project.name}">Project</h1>
                         <div class="text-secondary mt-1" th:text="${project.description}">Description</div>
                     </div>
                     <div class="col-auto ms-auto">
@@ -41,7 +42,7 @@
                     <div class="col-12 col-lg-6">
                         <div class="card">
                             <div class="card-header">
-                                <h3 class="card-title">People</h3>
+                                <h2 class="card-title">People</h2>
                                 <span class="card-subtitle text-secondary ms-2"
                                       th:text="${#lists.size(members)}">0</span>
                             </div>
@@ -88,7 +89,7 @@
                     <div class="col-12 col-lg-6">
                         <div class="card">
                             <div class="card-header">
-                                <h3 class="card-title">Servers</h3>
+                                <h2 class="card-title">Servers</h2>
                                 <span class="card-subtitle text-secondary ms-2"
                                       th:text="${#lists.size(servers)}">0</span>
                             </div>
@@ -124,10 +125,11 @@
                 </p>
             </div>
         </div>
-    </div>
+    </main>
 </div>
 
 <div th:replace="~{fragments/layout :: scripts}"></div>
 <script th:src="@{/js/project-detail.js}"></script>
+<div th:replace="~{fragments/layout :: classificationBanner('bottom')}"></div>
 </body>
 </html>

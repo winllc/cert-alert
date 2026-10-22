@@ -2,12 +2,13 @@
 <html lang="en" xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{fragments/layout :: head(${server.commonName != null} ? ${server.commonName} : ${server.uid})}"></head>
 <body>
+<div th:replace="~{fragments/layout :: classificationBanner('top')}"></div>
 <svg th:replace="~{fragments/icons :: sprite}"></svg>
 
 <div class="page">
     <header th:replace="~{fragments/layout :: navbar('servers')}"></header>
 
-    <div class="page-wrapper">
+    <main class="page-wrapper" id="main-content" tabindex="-1">
         <div class="page-header d-print-none">
             <div class="container-xl">
                 <div class="row g-2 align-items-center">
@@ -15,8 +16,8 @@
                         <div class="page-pretitle">
                             <a th:href="@{/servers}" class="text-secondary">Servers</a>
                         </div>
-                        <h2 class="page-title"
-                            th:text="${server.commonName != null} ? ${server.commonName} : ${server.uid}">Name</h2>
+                        <h1 class="page-title"
+                            th:text="${server.commonName != null} ? ${server.commonName} : ${server.uid}">Name</h1>
                         <div class="text-secondary mt-1 mono" th:text="${server.dn}">dn</div>
                     </div>
                     <div class="col-auto ms-auto">
@@ -41,7 +42,7 @@
                 <div class="row row-cards">
                     <div class="col-12 col-lg-6">
                         <div class="card">
-                            <div class="card-header"><h3 class="card-title">IC Non-Person Entity</h3></div>
+                            <div class="card-header"><h2 class="card-title">IC Non-Person Entity</h2></div>
                             <div class="card-body cert-detail p-3">
                                 <table>
                                     <tr th:replace="~{fragments/detail :: attribute('Common name', ${server.commonName})}"></tr>
@@ -60,7 +61,7 @@
 
                     <div class="col-12 col-lg-6">
                         <div class="card">
-                            <div class="card-header"><h3 class="card-title">Organization</h3></div>
+                            <div class="card-header"><h2 class="card-title">Organization</h2></div>
                             <div class="card-body cert-detail p-3">
                                 <table>
                                     <tr th:replace="~{fragments/detail :: attribute('Duty organization', ${server.dutyOrganization})}"></tr>
@@ -89,7 +90,7 @@
                 <!--/* The same editor as the expanded row on the servers table: the
                        directory's serverPOC read-only beside the contacts managed here. */-->
                 <div class="card mt-3">
-                    <div class="card-header"><h3 class="card-title">Points of contact</h3></div>
+                    <div class="card-header"><h2 class="card-title">Points of contact</h2></div>
                     <div class="card-body">
                         <div class="contacts contacts-standalone" th:attr="data-server-id=${server.id}">
                             <div class="text-secondary">Loading contacts…</div>
@@ -104,7 +105,7 @@
                        itself rather than sitting there saying nothing. */-->
                 <div class="card mt-3 d-none" id="server-attributes" th:attr="data-server-id=${server.id}">
                     <div class="card-header">
-                        <h3 class="card-title">Directory attributes</h3>
+                        <h2 class="card-title">Directory attributes</h2>
                         <div class="card-actions text-secondary small">
                             Read from this entry; changes are written to the directory
                         </div>
@@ -117,7 +118,7 @@
 
                 <!--/* What this entry is for, which the directory has no way to say. */-->
                 <div class="card mt-3" th:if="${!#lists.isEmpty(projects) and @licensing.shows('projects')}">
-                    <div class="card-header"><h3 class="card-title">Projects</h3></div>
+                    <div class="card-header"><h2 class="card-title">Projects</h2></div>
                     <div class="card-body">
                         <a class="badge bg-green-lt me-1" th:each="project : ${projects}"
                            th:href="@{/projects/{id}(id=${project.id})}" th:text="${project.name}">Project</a>
@@ -131,11 +132,11 @@
                 <div class="card mt-3" id="endpoint-probe" th:if="${mayProbe}"
                      th:attr="data-server-id=${server.id},data-port=${probePort}">
                     <div class="card-header">
-                        <h3 class="card-title">Endpoint</h3>
+                        <h2 class="card-title">Endpoint</h2>
                         <div class="card-actions">
                             <div class="input-group input-group-flat w-auto">
-                                <span class="input-group-text">Port</span>
-                                <input type="number" class="form-control probe-port" min="1" max="65535"
+                                <label class="input-group-text" for="probe-port">Port</label>
+                                <input type="number" class="form-control probe-port" id="probe-port" min="1" max="65535"
                                        th:value="${probePort}" style="width: 7rem">
                                 <button class="btn btn-primary ms-2 probe-run" type="button">
                                     <svg class="icon"><use href="#icon-refresh"></use></svg>
@@ -157,7 +158,7 @@
                 <div th:replace="~{fragments/detail :: audit('SERVER', ${server.id})}"></div>
             </div>
         </div>
-    </div>
+    </main>
 </div>
 
 <div th:replace="~{fragments/layout :: scripts}"></div>
@@ -166,5 +167,6 @@
 <script th:src="@{/js/audit-table.js}"></script>
 <script th:src="@{/js/server-probe.js}"></script>
 <script th:src="@{/js/server-detail.js}"></script>
+<div th:replace="~{fragments/layout :: classificationBanner('bottom')}"></div>
 </body>
 </html>

@@ -255,6 +255,19 @@
         return '<svg class="icon ' + (extraClass || '') + '"><use href="#icon-' + name + '"></use></svg>';
     }
 
+    /** The control that opens a row's certificates: a button, named and stateful for assistive technology. */
+    function expandButton() {
+        return '<button type="button" class="btn btn-ghost-secondary btn-icon btn-sm expand-toggle" '
+            + 'aria-expanded="false" aria-label="Show certificates">'
+            + '<svg class="icon" aria-hidden="true"><use href="#icon-plus"></use></svg></button>';
+    }
+
+    function setExpanded($button, open) {
+        $button.attr('aria-expanded', String(open))
+            .attr('aria-label', open ? 'Hide certificates' : 'Show certificates')
+            .find('use').attr('href', '#icon-' + (open ? 'minus' : 'plus'));
+    }
+
     /** Dates render as plain UTC days: the audience cares about the day, not the second. */
     function formatDate(iso) {
         if (!iso) {
@@ -552,15 +565,18 @@
 
         // Expanding a row fetches the cached certificate detail on demand, so the table
         // itself never has to carry it.
+        // The cell holds a real button, so the keyboard opens a row as the mouse does; its
+        // state is said (aria-expanded) and the button kept, so focus stays where it was.
         $table.on('click', 'td.expand', function () {
             var $cell = $(this);
             var row = table.row($cell.closest('tr'));
+            var $button = $cell.find('button.expand-toggle');
             if (row.child.isShown()) {
                 row.child.hide();
-                $cell.html(icon('plus'));
+                setExpanded($button, false);
                 return;
             }
-            $cell.html(icon('minus'));
+            setExpanded($button, true);
             row.child('<div class="cert-detail text-secondary">Loading…</div>').show();
             $.getJSON(config.detailUrl(row.data()))
                 .done(function (certificates) {
@@ -606,6 +622,7 @@
         },
         text: text,
         icon: icon,
+        expandButton: expandButton,
         formatDate: formatDate,
         expiryCell: expiryCell,
         statusBadge: statusBadge

@@ -328,6 +328,36 @@ public class DirectoryPrincipalResolver {
         return authorities;
     }
 
+    /**
+     * The roles the directory and the configuration alone give the entry at this DN - its
+     * DN and uid against {@code admin-identifiers} and {@code auditor-identifiers}, and the
+     * groups given (read live by the caller) against {@code groups} - with no single
+     * sign-on provider's groups and no cached reads. What a token or a scheduled report is
+     * held to as it acts (see {@link DirectoryStanding}).
+     *
+     * @return {@code ROLE_*} authorities, ROLE_USER always among them
+     */
+    public Set<String> directoryRoles(String dn, Collection<String> uids, Collection<String> groups) {
+        Set<String> identifiers = new LinkedHashSet<>();
+        identifiers.add(normalise(dn));
+        uids.stream().map(DirectoryPrincipalResolver::normalise).forEach(identifiers::add);
+        identifiers.remove("");
+        Set<String> memberOf = new LinkedHashSet<>();
+        groups.stream().map(DirectoryPrincipalResolver::normalise).forEach(memberOf::add);
+        RoleProperties mapping = properties.getGroups();
+        Set<String> roles = new LinkedHashSet<>();
+        roles.add(ROLE_USER);
+        if (intersects(identifiers, roleIdentifiers(properties.getAdminIdentifiers()))
+                || intersects(memberOf, DirectoryGroups.normaliseAll(mapping.getAdmin()))) {
+            roles.add(ROLE_ADMIN);
+        }
+        if (intersects(identifiers, roleIdentifiers(properties.getAuditorIdentifiers()))
+                || intersects(memberOf, DirectoryGroups.normaliseAll(mapping.getAuditor()))) {
+            roles.add(ROLE_AUDITOR);
+        }
+        return roles;
+    }
+
     /** This entry's directory groups, where a directory group grants anything. */
     private Set<String> directoryGroupsOf(String dn) {
         if (!properties.getGroups().anyMapped() || directoryGroups == null) {

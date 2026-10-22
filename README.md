@@ -649,23 +649,39 @@ they fall, rather than being fixed to a viewport that does not exist.
 
 **Every page carries them**, the sign-in page before anyone has signed in and the error
 page after something has gone wrong included: those are still pages showing this
-application's data. That is why they are `body::before` and `body::after`, drawn from the
-`head` fragment, rather than elements each page includes. There is no decorator layout
-here — `fragments/layout.html` is a bag of named fragments — and `head` is the one thing
-all twelve pages share, but a `<head>` cannot hold body content. Drawing them in CSS puts
-them on every page from one place, and leaves nothing for a page added tomorrow to forget.
+application's data. They are **real text** - an element at the top and the bottom of each
+page's body, a region labelled "Classification", so a screen reader announces the marking
+like any other text and it can be selected and copied (they used to be CSS-generated content,
+which some screen readers skip). Every page template includes the
+`classificationBanner` fragment at both ends, and a test (`BannerPageTest`) fails the build
+for a page that does not, so a page added tomorrow cannot forget them. The text is escaped
+like any other text; the colours and the height go into a stylesheet, so they are checked
+against what a colour and a CSS length may look like, and anything else falls back to the
+default. Choose a text and background colour with a contrast of at least 4.5:1.
 
-Everything from configuration ends up in that stylesheet, where nothing can be escaped by
-the template engine — Thymeleaf will not even evaluate a bean reference inside a `<style>`
-element, which is the same instinct. So the colours and the height are checked against
-what a colour and a CSS length may look like, and anything else falls back to the default.
-The text cannot be checked that way, because a marking is whatever the deployment says it
-is, so it is escaped instead: the quote and the backslash so it cannot end the string, and
-the angle brackets as CSS code points so a `</style>` in a properties file cannot end the
-element and put what follows into the page as markup.
+**The same marking goes everywhere the data does:** at the start of every email's subject
+and at the top and bottom of its text and HTML (the round-up, alerts and scheduled reports
+alike), on the About sheet and the printed header and footer of an Excel export.
 
-One trade-off worth knowing: generated content is announced by screen readers but is not
-selectable text, so the marking cannot be copied out of the page.
+## Accessibility
+
+CertAlert targets WCAG 2.1 AA (Section 508). Every page is scanned with axe-core on every
+build (the `a11y` job: `./gradlew a11yTest`, after `npm ci --prefix a11y` and
+`npx --prefix a11y playwright install chromium`; reports in `build/reports/a11y`), and the
+build fails on a serious or critical violation. What the pages offer:
+
+- a "Skip to main content" link first in the tab order, landmarks (banner, navigation,
+  main, the classification regions) and one level-one heading per page;
+- text, badges, field edges and focus rings at WCAG contrast; links in text underlined;
+- every control named and operable from the keyboard - the search tables' rows open with
+  a button that says whether it is open;
+- result counts, job status and form messages announced as status messages;
+- a warning two minutes before the idle timeout ends the session, with "Stay signed in".
+
+The self-audit is [docs/accessibility/wcag-2.1-aa-self-audit.md](docs/accessibility/wcag-2.1-aa-self-audit.md),
+and a draft Accessibility Conformance Report in the ITI VPAT 2.5 Rev 508 format, for ENS
+Solutions to review, is [docs/accessibility/vpat-2.5-rev508-draft.md](docs/accessibility/vpat-2.5-rev508-draft.md).
+Screen-reader testing is the main step still to do.
 
 ## FIPS 140-3
 
@@ -1351,9 +1367,11 @@ Content-Type: application/problem+json
 ```
 
 By method rather than by a list of paths, so an endpoint added next month is refused
-without anybody remembering to add it. Two things are exempt, and both write nothing: the
-search tables' `/api/v1/datatables/**` endpoints, which are `POST`s only because that is
-how DataTables sends its paging and filters; and **Dry run**, which builds every message
+without anybody remembering to add it. Three things are exempt, and none of them changes
+anything: the search tables' `/api/v1/datatables/**` endpoints, which are `POST`s only
+because that is how DataTables sends its paging and filters; the certificate export, a
+`POST` only because it is audited (its `inventory.exported` record is all it writes); and
+**Dry run**, which builds every message
 the round-up would send, reports what would have gone out, and saves none of it. The real
 round-up beside it stays refused, so whether that endpoint is allowed depends on
 `dryRun=true` being on the request rather than on its path. The rehearsal is an
@@ -2557,6 +2575,278 @@ is `never` and a stack trace tells an attacker more than it tells the reader.
 from the security filter chain - which reaches no exception handler at all - comes
 out as the same page rather than the Whitelabel one.
 
+## Exports, saved views and scheduled reports
+
+**Certificates** (`/certificates`, in the bar for everybody signed in) lists every certificate
+the directory publishes, with who holds it, and filters it by text (subject, issuer, serial,
+fingerprint, names, owner), state, holder (people or servers), expiry window, issuer, key
+algorithm, key size, hash algorithm, revocation, and - where licensed - risky names. The
+same filters, as one query string, drive the table, the API's
+[`/api/v1/certificates`](#the-api), the exports, saved views and scheduled reports, so each
+of them is exactly what is on screen.
+
+**Export CSV / Export Excel** download the filtered inventory, without the paging: one row per
+certificate with its holder, DN, points of contact, subject, issuer, serial, fingerprint,
+validity, days left, state, key, signature and hash algorithms, names, use, revocation and risk
+flags (`POST /api/v1/certificates/export` with `format=csv|xlsx` and the filters, in the
+query string or a form body).
+
+- **A `POST`, because it is audited.** Each export is recorded as `inventory.exported`, so the
+  page's buttons submit a form carrying the CSRF token: another site cannot make a signed-in
+  browser export, nor leave that in the trail. In a read-only license, and in the demo, it
+  still works - it changes nothing but the audit trail. The response is always a file: a
+  fixed type for the format (`text/csv` or the Excel type), `Content-Disposition: attachment`
+  and `X-Content-Type-Options: nosniff`.
+
+- Streamed from a database cursor, so a large export does not sit in memory; capped at
+  `cert-alert.exports.max-rows` (200,000), with `X-CertAlert-Truncated: true` when it was.
+- **Formula injection guard.** Any text cell that starts with a tab or a carriage return, or
+  whose first character after any white space is `=`, `+`, `-` or `@`, is written with a
+  leading apostrophe, in CSV and in Excel: a certificate's
+  subject or a contact's address is somebody else's text, and opening an export must not run
+  it. Numbers and dates are typed cells and written as they are.
+- CSV is UTF-8 with a byte-order mark (so Excel reads it as UTF-8), RFC 4180 quoting, times
+  in ISO-8601 UTC. The workbook has a frozen header row, real date cells (UTC), and an
+  **About** sheet saying when, by whom and with which filters it was exported; with the
+  classification banner on, the marking is on the About sheet and in every printed page's
+  header and footer.
+- Audited as `inventory.exported`, with the format, the filters and the row count, before a
+  byte is sent.
+
+**Saved views** keep the current filters under a name, for the person who saved them only
+(`/api/v1/saved-views`). Saving under a name already used replaces it. Only a filter is ever
+kept: every key and value is checked when it is saved. Auditors, who change nothing, still keep
+views of their own.
+
+**Bulk owner assignment.** Tick server certificates in the table and "Add to selected" adds one
+point of contact to all their servers at once (`POST /api/v1/servers/contacts/bulk`), server by
+server under the usual rule (see [Who may edit them](#who-may-edit-them)): a server the person
+may not manage is reported as refused and left alone. Each addition is audited as one would be.
+
+**Scheduled reports** (administrators; auditors can see them) email the current filters'
+export as CSV or Excel, daily, weekly (Monday) or monthly (the 1st) at an hour in UTC, to up to
+20 addresses (`/api/v1/admin/reports`). Every five minutes each replica looks for reports that
+are due, under the same database lock (ShedLock) every scheduled job takes, so one replica sends
+each report once. **Every run checks again** that the report's owner is still an administrator
+in the live directory - entry present, not disabled or locked, administrator by
+`admin-identifiers` or a directory group (an IdP group does not count) - and that every
+recipient is inside the allowed domains; a run that fails a check sends nothing and says why
+on the page and in the audit trail. Otherwise the email the email goes through the mail outbox (sent after the commit, retried while
+the mail server is down). A report holds at most `cert-alert.exports.report-max-rows` (50,000)
+rows and 15 MB, and the email says when it was cut. Created, deleted and every send are audited
+(`report.created`, `report.deleted`, `report.sent` with recipients and count). A report sends
+the inventory to the addresses typed, so **`cert-alert.exports.report-recipient-domains` is
+required** (`example.gov`, or `*.mil`): until it names your own domains nothing can be
+scheduled or sent. Needs a mail server
+(`spring.mail.host`).
+
+## Public API, tokens and webhooks
+
+Other systems read CertAlert through a versioned REST API, and CertAlert tells them what
+happened through signed webhooks. Both are managed on **Admin > Integrations**
+(`/admin/integrations`): administrators create and revoke, auditors can look.
+
+### The API
+
+Everything under `/api/v1/` is the API the pages themselves use, and the same endpoints
+answer an API token. The OpenAPI 3.1 document is served by every installation at
+**`/api/v1/openapi.yaml`** (no sign-in needed; it describes the product, not your data) and
+lives in the source at `src/main/resources/openapi/cert-alert-v1.yaml`. A test
+(`OpenApiDocumentTest`) holds it to the code: every documented operation exists, and every
+endpoint a token may call is documented with the scope the server enforces.
+
+The read paths an integration usually wants:
+
+| Method | Path | Scope | What |
+|--------|------|-------|------|
+| `GET` | `/api/v1/certificates` | `certificates:read` | Every certificate with its owner, filtered and paged (`?status=EXPIRING_SOON&expiresWithinDays=30&issuer=DigiCert&keyAlgorithm=RSA&keySizeMax=2047&hashAlgorithm=SHA-1&ownerType=SERVER&q=web&page=0&size=100&sort=notAfter,asc`) |
+| `GET` | `/api/v1/certificates/{id}` | `certificates:read` | One certificate |
+| `POST` | `/api/v1/certificates/export?format=csv\|xlsx` | `certificates:read` | The same, as a file (see [Exports](#exports-saved-views-and-scheduled-reports)); a `POST` because it is audited |
+| `GET` | `/api/v1/summary/expiry` | `certificates:read` | Counts by state, expiring within 7/30/60/90 days, revoked, by owner type; takes the same filters |
+| `GET` | `/api/v1/servers`, `/api/v1/servers/{id}` | `certificates:read` | Servers, `?q=&certificateStatus=` |
+| `GET` | `/api/v1/people`, `/api/v1/people/{id}` | `people:read` | People, `?q=&certificateStatus=` |
+| `GET` | `/api/v1/jobs`, `/api/v1/jobs/{id}` | `jobs:read` | Job runs |
+| `POST` | `/api/v1/sync`, `/api/v1/revocation/check`, `/api/v1/notifications/digest` ... | `jobs:run` | Start a job: 202 and a run to poll |
+
+Lists answer `{"content":[...],"page":0,"size":100,"totalElements":…,"totalPages":…}`;
+`size` is capped at `cert-alert.api.max-page-size` (500).
+
+### API tokens
+
+```bash
+curl -H "Authorization: Bearer cat_…" \
+  "https://certalert.example.gov/api/v1/certificates?status=EXPIRING_SOON&size=500"
+```
+
+- **Created by an administrator**, with a name, one or more scopes and, optionally, an expiry
+  date. The token (`cat_` and 43 characters) is shown once, in the response to that request;
+  CertAlert keeps only its SHA-256. It is never written to a log, the audit trail (a value
+  that looks like one is redacted) or the session.
+- **Scopes**: `certificates:read`, `people:read`, `jobs:read`, `jobs:run` (implies
+  `jobs:read`), `inventory:write` (points of contact, projects, server attribute values) and
+  `admin` (everything the API offers, pruning and the audit trail included). An endpoint not
+  covered by a token's scopes answers 403 (`WWW-Authenticate: Bearer error="insufficient_scope"`).
+  No token, whatever its scopes, can create or revoke tokens, configure webhooks, read a
+  person's notifications or use the tables' DataTables endpoints: those stay with people.
+- **Never more than its creator, now.** A token is made by a person the directory holds, and
+  a scope needs a role (reads need a signed-in user; `jobs:read` an auditor or administrator;
+  the rest an administrator). Only the roles **the directory** gives count - the DN or uid in
+  `admin-identifiers`/`auditor-identifiers`, or a directory group in `groups` - never a single
+  sign-on provider's groups: nothing could take such a role back from a token, so an
+  administrator by IdP group alone can make read-only tokens only. On **every use** the
+  creator's entry is read from the live directory (not the cached copy), matched by the uid
+  attribute this deployment maps (`cert-alert.ldap.user.uid`): an entry that is gone, disabled
+  or locked, or a directory that cannot be read, refuses the token (401); otherwise it does no
+  more than the roles the directory gives the creator today. Disabled or locked means
+  `nsAccountLock: true`; AD `userAccountControl` with ACCOUNTDISABLE; or one of the lockouts
+  below, which **fail closed**: a lockout counts as lapsed only where a known, non-zero
+  lockout length shows it has.
+  - AD: `msDS-User-Account-Control-Computed` with UF_LOCKOUT (clear means not locked out,
+    whatever `lockoutTime` says). Where that is not computed, a non-zero `lockoutTime` is
+    locked unless the domain's `lockoutDuration` (on the base entry) has passed since; a
+    `lockoutDuration` of 0 or "never" is locked until an administrator unlocks it.
+  - OpenLDAP and 389 password policy: `pwdAccountLockedTime` of `000001010000Z` is locked for
+    good; any other time is locked unless its policy's (`pwdPolicySubentry`)
+    `pwdLockoutDuration` has passed since. A duration of 0, or a policy without one, is locked.
+  - 389 account policy: `accountUnlockTime` in the future, or `19700101000000Z` (an
+    administrator must unlock), is locked.
+  - Where the length cannot be found - no `pwdPolicySubentry` (a policy applied by
+    `olcPPolicyDefault`), a policy entry that is not there, no domain `lockoutDuration` - the
+    account is locked unless `cert-alert.ldap.lockout.assumed-duration` is set (unset by
+    default; set it to the real lockout length, never shorter). A value that does not parse is
+    locked, and a directory that refuses or fails a read of the policy is unreachable: refused.
+  A good answer is reused for at most `cert-alert.api.creator-roles-cache-for` (a minute); a
+  refusal never is. The creator's next sign-in narrows their tokens too, never widens them.
+- **A year at most.** `cert-alert.api.max-lifetime` (default `365d`) is the expiry of a token
+  created without one, the most that may be asked for, and the age at which any token stops
+  working; `0` removes it.
+- **Refused** (401, `error="invalid_token"`) when unknown, revoked, past its expiry, out-ranked,
+  or off (`cert-alert.api.tokens-enabled: false`).
+- **Rate-limited** per token, per replica: `cert-alert.api.requests-per-minute` (300); beyond
+  it, 429 with `Retry-After`.
+- **No session, no CSRF.** A request with `Authorization: Bearer` on `/api/v1/**` goes through
+  a filter chain of its own that keeps no session and reads none (a token with a session
+  cookie is still only the token), and has no CSRF check - nothing a browser sends on its own
+  carries that header. The same endpoints called with a session cookie still need the CSRF
+  token.
+- **Audited**: `api.token-created`, `api.token-revoked`, `api.token-refused` (a real token
+  that is revoked, expired, out-ranked or whose creator is gone, disabled or locked - at most
+  once a minute per token; and a value that is no token at all - at most once a minute per
+  client address, so guessing cannot flood the trail), `api.request` for
+  every request that changes something, and `api.token-used` once per token per
+  `cert-alert.api.use-audit-interval` (an hour) for its reads. The actor is
+  `api-token:<id>`, named "*<token name>* (API token of *<creator>*)".
+
+The SIEM pull API's `ensat_` tokens (see [Getting it into Splunk](#getting-it-into-splunk))
+are separate and unchanged.
+
+### Webhooks
+
+An administrator adds an https URL, picks the events and a format, and is shown the
+endpoint's signing secret (`whsec_…`) once.
+
+| Event | When |
+|-------|------|
+| `certificate.expiring` | A certificate moved into its warning window (the same alert the email channel sends) |
+| `certificate.expired` | A certificate expired |
+| `job.completed`, `job.failed` | Any run of a job - scheduled or by hand - ended |
+| `webhook.test` | "Send a test" on the Integrations page |
+
+Formats: **CertAlert JSON** (`{"id","type","createdAt","summary","data":{…}}`, for an
+integration), **Slack** (an incoming-webhook `text` message) and **Microsoft Teams** (an
+Adaptive Card message for a Teams workflow's "When a webhook request is received").
+
+**Delivery.** An event is written to `webhook_delivery` in the same transaction as whatever
+raised it and posted after the commit, by one replica (claimed in the database, under a
+lock), with a 5-second connect and 10-second read timeout. A 2xx is delivered; anything else -
+a timeout, a 5xx, a redirect (never followed) - is retried after `retry-initial` (1 minute),
+doubling to `retry-max` (1 hour), until it is `give-up-after` (a day) old. The Integrations
+page shows each endpoint's delivery log; delivered and failed rows are kept for `keep` (14
+days).
+
+**A dead receiver holds up nobody else.** Each pass of the sender is bounded: no try starts
+after `cert-alert.webhooks.run-budget` (40 seconds); one endpoint gets at most
+`endpoint-tries-per-run` (10) tries and `endpoint-budget` (20 seconds) of a pass; and a try an
+endpoint does not answer at all (no connection, no TLS handshake, no answer before the timeout or
+the watchdog) puts that endpoint's other waiting deliveries back to the same retry time, in one
+update, and the endpoint is left alone for the rest of the pass - so a blackholed receiver costs
+one try per backoff step, however long its backlog. What a pass does not reach stays waiting,
+unclaimed, for the next one (`poll-interval`, 30 seconds).
+
+**Where it may go.** https only; no credentials in the URL. Before saving, and again at every
+send, the host is resolved and every address it resolves to is checked: never loopback,
+link-local (169.254.0.0/16 and fe80::/10, so never a cloud metadata service), the other
+metadata addresses (fd00:ec2::254, 100.100.100.200, Azure's 168.63.129.16), unspecified,
+multicast or broadcast, nor an IPv6 address carrying one of those (IPv4-compatible, 6to4,
+NAT64 - whose embedded IPv4 address is held to the private-network rule too); and never
+Teredo (2001::/32), the local-use NAT64 prefix (64:ff9b:1::/48), or an IPv4-mapped or
+SIIT IPv4-translated (::ffff:0:0/96) address arriving as IPv6. The post
+then goes to the address that was checked - the connection is not made by a second lookup -
+with TLS SNI and certificate hostname verification against the URL's host and the JVM's trust
+store. So a name that pointed somewhere harmless when it was saved and at the metadata
+service now (DNS rebinding) is refused at the send. Narrow it further with
+`cert-alert.webhooks.allowed-hosts` (names, `*.suffix`, CIDR ranges) and
+`cert-alert.webhooks.block-private-networks: true`. Webhooks connect directly: an outbound
+HTTP proxy is not used. A watchdog closes the connection at `cert-alert.webhooks.delivery-timeout`
+(30 seconds) whatever it is waiting on - a handshake, a body the receiver does not read, an
+answer a byte at a time - so one receiver cannot hold the sender or its lock.
+
+**The URL is a secret too.** A Slack or Teams webhook URL is its own credential, so only
+administrators see a webhook's whole URL; auditors, and the audit trail, see its scheme and
+host (`https://hooks.slack.com/[redacted]`).
+
+**Secrets at rest.** The signing secret has to be kept to sign with, and the URL to send to. Set
+`cert-alert.webhooks.secret-key` (Helm: `webhooks.secretKey`/`webhooks.existingSecret`;
+bundle: `CERT_ALERT_WEBHOOKS_SECRET_KEY`) to a base64 AES key (`openssl rand -base64 32`) and
+both are stored AES-GCM encrypted; without one they are stored as they are and a warning is logged at
+startup. URLs and secrets saved before the key was set are encrypted at the next start (once, under the
+job lock, safe with several replicas). Changing the key makes the stored secrets unreadable:
+press "New secret" and save the URL again on each webhook afterwards. **Give every replica the
+same key.** A replica started without one leaves deliveries to encrypted webhooks for a replica
+that has it (not claimed, no attempt counted) and logs a warning each pass naming those webhooks.
+
+#### Verifying a delivery
+
+Each post carries:
+
+```
+X-CertAlert-Event: certificate.expiring
+X-CertAlert-Delivery: 3f0b9c1e-…        # the event id; the same on every retry - de-duplicate on it
+X-CertAlert-Timestamp: 1792569600
+X-CertAlert-Signature: t=1792569600,v1=5f2c…   # hex HMAC-SHA256 of "<t>.<raw body>" under the secret
+```
+
+Check the HMAC over the raw bytes of the body, compare in constant time, and refuse a
+timestamp more than five minutes from now:
+
+```python
+import hashlib, hmac, time
+
+def verify(secret: str, header: str, body: bytes, tolerance: int = 300) -> bool:
+    parts = dict(p.split("=", 1) for p in header.split(","))
+    t, given = int(parts["t"]), parts["v1"]
+    if abs(time.time() - t) > tolerance:
+        return False
+    expected = hmac.new(secret.encode(), f"{t}.".encode() + body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, given)
+```
+
+```java
+// The same in Java: WebhookSecrets.verify(secret, header, body, Instant.now().getEpochSecond(), 300)
+Mac mac = Mac.getInstance("HmacSHA256");
+mac.init(new SecretKeySpec(secret.getBytes(UTF_8), "HmacSHA256"));
+String expected = HexFormat.of().formatHex(mac.doFinal((t + "." + body).getBytes(UTF_8)));
+boolean ok = MessageDigest.isEqual(expected.getBytes(US_ASCII), given.getBytes(US_ASCII))
+        && Math.abs(Instant.now().getEpochSecond() - t) <= 300;
+```
+
+Answer 2xx quickly and do the work afterwards; a receiver that takes longer than the read
+timeout is retried.
+
+Not built yet: a ServiceNow or Jira connector that opens one ticket per certificate and
+de-duplicates them (a webhook to a ticketing system's inbound REST endpoint, de-duplicating
+on the certificate's fingerprint, covers most of it today).
+
 ## The scheduled jobs
 
 Four on the directory, one that asks the issuing authorities, and one that trims the audit
@@ -3096,6 +3386,60 @@ class SlackAlertNotifier implements AlertNotifier {
 Read these before upgrading. They apply to the compose bundle, the Helm chart and a plain
 `java -jar` alike.
 
+### The classification marking is text, and is on email
+
+With `cert-alert.banner.enabled`, the bars are now elements rather than CSS-generated content
+(they look the same) and the marking is also put on every email: `[<marking>] ` before the
+subject, and a line at the top and bottom of the text and HTML. A mail rule that matched on
+the old subjects needs the prefix allowed for. Nothing changes with the banner off.
+
+### Accessibility changes to the pages
+
+The page title is now the page's `h1` and card titles `h2` (same look); a skip link, `main`
+landmark, darker badge and secondary-text colours and underlined links in text; and an
+idle-timeout warning. Custom CSS that targeted `h2.page-title` or `h3.card-title` needs the
+new element.
+
+### Certificates page, exports, saved views and scheduled reports are new
+
+A **Certificates** item joins the bar for everybody: the inventory by certificate, with
+crypto filters, CSV and Excel export, saved views and bulk point-of-contact assignment.
+Exports are audited (`inventory.exported`). Scheduled reports cannot be created until
+`cert-alert.exports.report-recipient-domains` (Helm `exports.reportRecipientDomains`, bundle
+`CERT_ALERT_EXPORTS_REPORT_RECIPIENT_DOMAINS`) names the domains the inventory may be mailed
+to.
+
+### API tokens, the OpenAPI document and webhooks are new
+
+Nothing changes for an existing installation until an administrator creates an API token or
+a webhook on **Admin > Integrations** (a new item in the bar for administrators and auditors).
+What to know before anybody does:
+
+- An API token is checked against its creator's live directory entry on every use, so the
+  service account must be able to read people's entries and the lock attributes
+  (`nsAccountLock`, `userAccountControl`, `msDS-User-Account-Control-Computed`,
+  `lockoutTime`, `pwdAccountLockedTime`, `pwdPolicySubentry`, `accountUnlockTime`, and
+  `memberOf` where groups grant roles) and the lockout policy (the password policy entries'
+  `pwdLockoutDuration`, AD's domain `lockoutDuration`); a refused read refuses the token. A
+  lockout whose length cannot be found counts as locked unless
+  `cert-alert.ldap.lockout.assumed-duration` is set: on OpenLDAP with `olcPPolicyDefault`
+  (no `pwdPolicySubentry` on entries), a locked-out creator's tokens stay refused until an
+  administrator clears `pwdAccountLockedTime`, or until that setting's length has passed. Tokens last at most a year by default
+  (`cert-alert.api.max-lifetime`), and roles from an identity provider's groups do not count
+  for them: give token creators their administrator role in the directory.
+
+- `/api/v1/**` now also accepts `Authorization: Bearer cat_…`. Such a request goes through a
+  filter chain of its own (no session, no CSRF); everything else on `/api/v1/**` - the pages -
+  is exactly as before, CSRF included. A proxy or WAF in front that strips `Authorization` has
+  to let it through for the API to be used.
+- `/api/v1/openapi.yaml` is served without signing in.
+- Webhooks post from the application's pods to the receivers' https endpoints: with the
+  chart's NetworkPolicy on, `networkPolicy.egress.web` must reach them, and an outbound HTTP
+  proxy is not used. Set `cert-alert.webhooks.secret-key` (Helm `webhooks.secretKey`, bundle
+  `CERT_ALERT_WEBHOOKS_SECRET_KEY`) before creating any, so their secrets are encrypted at rest,
+  and give every replica the same key.
+- Two new audit categories of event: `api.*` and `webhook.*`.
+
 ### Jobs started by hand answer 202, and run one at a time across replicas
 
 `POST /api/v1/sync` and the other job endpoints no longer run the job inside the request: they
@@ -3111,9 +3455,10 @@ of running alongside it.
 ### New tables, migrated on start
 
 Flyway adds `shedlock` (V21), `job_run` (V22), `spring_session` and
-`spring_session_attributes` (V23), `saml_authn_request` (V24) and the license state,
-`ens_license_*` (V25), on the first start. Nothing to do; the database user already owns the
-schema.
+`spring_session_attributes` (V23), `saml_authn_request` (V24), the license state,
+`ens_license_*` (V25), `api_token`, `webhook_endpoint` and `webhook_delivery` (V26), and
+`saved_view`, `scheduled_report` and three attachment columns on `outbound_email` (V27), and
+a wider, encryptable webhook URL and a report owner's DN (V28), on the first start. Nothing to do; the database user already owns the schema.
 
 ### The license is kept in the database
 
@@ -3327,6 +3672,8 @@ output validated by kubeconform against Kubernetes 1.29.
 
 ```
 Dockerfile               three-stage image build
+a11y/                    the axe-core accessibility scan (Playwright), run by ./gradlew a11yTest
+docs/accessibility/      the WCAG 2.1 AA self-audit and the draft VPAT/ACR
 docker-compose.yml       the application, a PostgreSQL and a stand-in directory
 docker-compose.ports.yml opt-in overlay that publishes them on the host
 docker/389ds/            389 Directory Server carrying the IC FSD schema and a changelog
@@ -3337,17 +3684,21 @@ scripts/                 the dummy directory generator, and release-bundle.sh
 src/main/java/com/enssolutions/license/   the ENS portal's license verifier, copied unchanged
 src/main/java/com/winllc/certalert/
 ├── alert/       notifier SPI, dispatcher, log and email channels
+├── api/         API tokens, their filter chain and scopes, the OpenAPI document
 ├── config/      expiry thresholds, clock, DataTables repository factory
 ├── domain/      DirectoryUser, DirectoryServer, CachedCertificate, ServerContact, AuditEvent
+├── inventory/   the certificate inventory: filters, the API's lists and summary
 ├── ldap/        attribute mapping, paged streaming directory client
 ├── license/     ENS license wiring: keys, feature catalog, request gate, the Licensing facade
 ├── repository/  DataTables repositories and the filter specifications
 ├── security/    X.509 and directory-password authentication, roles
 ├── scheduling/  the four cron jobs
 ├── service/     certificate parsing, status evaluation, sync
-└── web/         DataTables endpoints, REST API, page controllers
+├── web/         DataTables endpoints, REST API, page controllers
+└── webhook/     signed outbound webhooks: endpoints, the address guard, the outbox
 src/main/resources/
 ├── db/migration/          Flyway migrations
+├── openapi/               the API's OpenAPI 3.1 document, served at /api/v1/openapi.yaml
 ├── static/{css,js}/       a thin layer over Tabler, and the table wiring
 ├── templates/             Thymeleaf pages, Tabler layout and the icon sprite
 │                          two search pages, two details pages, login
@@ -3364,4 +3715,5 @@ src/main/resources/
 - OCSP on the scheduled job as well as on a single check, once there is a deployment whose
   responder would rather be asked a hundred thousand times than publish a list
 - Certificate chain validation, not just the leaf
-- More alert channels (Slack, PagerDuty, webhooks)
+- More alert channels: PagerDuty, and ServiceNow and Jira connectors that open and de-duplicate tickets
+  (signed webhooks, Slack and Teams are done - see [Public API, tokens and webhooks](#public-api-tokens-and-webhooks))

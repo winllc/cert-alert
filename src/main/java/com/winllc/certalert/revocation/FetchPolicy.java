@@ -58,6 +58,8 @@ public final class FetchPolicy {
     private static final List<AddressRange> METADATA = List.of(
             AddressRange.parse("fd00:ec2::254/128"),
             AddressRange.parse("100.100.100.200/32"),
+            // Azure's WireServer: the host agent's channel, metadata and extensions included.
+            AddressRange.parse("168.63.129.16/32"),
             // "This network": 0.0.0.0 reaches the local host on Linux.
             AddressRange.parse("0.0.0.0/8"));
 
@@ -199,7 +201,7 @@ public final class FetchPolicy {
     }
 
     /** Link-local, metadata, unspecified and multicast: refused whatever is configured. */
-    static boolean isNeverFetched(InetAddress address) {
+    public static boolean isNeverFetched(InetAddress address) {
         if (address.isLinkLocalAddress() || address.isAnyLocalAddress() || address.isMulticastAddress()) {
             return true;
         }

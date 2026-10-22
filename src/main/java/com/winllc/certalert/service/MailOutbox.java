@@ -85,6 +85,7 @@ public class MailOutbox {
     private final TransactionTemplate joining;
     private final TransactionTemplate independent;
     private final JobLocks locks;
+    private final EmailMarking marking;
     private final ReentrantLock sending = new ReentrantLock();
     private final AtomicBoolean nudged = new AtomicBoolean();
     private final ExecutorService background = Executors.newSingleThreadExecutor(runnable -> {
@@ -101,13 +102,15 @@ public class MailOutbox {
             MailOutboxProperties properties,
             PlatformTransactionManager transactions,
             Clock clock,
-            JobLocks locks) {
+            JobLocks locks,
+            EmailMarking marking) {
         this.outbox = outbox;
         this.notifications = notifications;
         this.mailSender = mailSender;
         this.properties = properties;
         this.clock = clock;
         this.locks = locks;
+        this.marking = marking;
         this.joining = new TransactionTemplate(transactions);
         this.independent = new TransactionTemplate(transactions);
         this.independent.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -131,6 +134,12 @@ public class MailOutbox {
      *     its transaction is done, because it has to report what went
      */
     public Long queue(OutboundEmail message, boolean sendAfterCommit) {
+        String classification = marking.marking();
+        if (classification != null) {
+            message.marked(marking.subject(message.getSubject(), classification),
+                    marking.text(message.getTextBody(), classification),
+                    marking.html(message.getHtmlBody(), classification));
+        }
         return joining.execute(status -> {
             if (message.getSupersedeKey() != null) {
                 int replaced = outbox.supersede(
@@ -399,7 +408,8 @@ public class MailOutbox {
         JavaMailSender sender = mailSender.orElseThrow();
         MimeMessage mime = sender.createMimeMessage();
         boolean alternative = message.getHtmlBody() != null;
-        MimeMessageHelper helper = new MimeMessageHelper(mime, alternative, "UTF-8");
+        boolean attached = message.getAttachment() != null;
+        MimeMessageHelper helper = new MimeMessageHelper(mime, alternative || attached, "UTF-8");
         helper.setFrom(message.getSender());
         helper.setTo(message.getRecipients().toArray(String[]::new));
         helper.setSubject(message.getSubject());
@@ -408,6 +418,10 @@ public class MailOutbox {
             helper.setText(message.getTextBody(), message.getHtmlBody());
         } else {
             helper.setText(message.getTextBody());
+        }
+        if (attached) {
+            helper.addAttachment(message.getAttachmentName(),
+                    new org.springframework.core.io.ByteArrayResource(message.getAttachment()), message.getAttachmentType());
         }
         sender.send(mime);
     }

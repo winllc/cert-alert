@@ -30,10 +30,12 @@
             .done(function (result) {
                 var count = result.count || 0;
                 $('#notification-count').text(count).toggleClass('d-none', count === 0);
+                // "Notifications 3 unread" to a screen reader; just "Notifications" with none.
+                $('#notification-count-label').toggleClass('d-none', count === 0);
             })
             .fail(function () {
                 // No answer is not a count of zero, but it is not a number to show either.
-                $('#notification-count').addClass('d-none');
+                $('#notification-count, #notification-count-label').addClass('d-none');
             });
     }
 

@@ -70,6 +70,14 @@ public final class AuditContext {
         if (authentication instanceof AuditTokenAuthentication token) {
             return new AuditRecord.Actor(AuditRecord.ActorType.SERVICE, token.getName(), token.tokenName(), roles);
         }
+        // An API token acts for the administrator who made it, and says so.
+        if (authentication instanceof com.winllc.certalert.api.ApiTokenAuthentication token) {
+            return new AuditRecord.Actor(
+                    AuditRecord.ActorType.SERVICE,
+                    token.getName(),
+                    token.tokenName() + " (API token of " + token.createdBy() + ")",
+                    roles);
+        }
         if (authentication.getPrincipal() instanceof DirectoryPrincipal principal) {
             return new AuditRecord.Actor(
                     AuditRecord.ActorType.USER, principal.getUsername(), principal.getDisplayName(), roles);

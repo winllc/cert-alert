@@ -39,6 +39,9 @@ public final class ReadOnlyRoleFilter extends OncePerRequestFilter {
             PathPatternRequestMatcher.withDefaults().matcher("/api/v1/datatables/**"),
             // Checks the chain and records that it did; changes nothing in it.
             PathPatternRequestMatcher.withDefaults().matcher("/api/v1/admin/audit/verify"),
+            // A person's own saved views of the inventory: a preference, not the data.
+            PathPatternRequestMatcher.withDefaults().matcher("/api/v1/saved-views"),
+            PathPatternRequestMatcher.withDefaults().matcher("/api/v1/saved-views/*"),
             PathPatternRequestMatcher.withDefaults().matcher("/login"),
             PathPatternRequestMatcher.withDefaults().matcher("/logout"),
             PathPatternRequestMatcher.withDefaults().matcher(ConsentFilter.PATH)));

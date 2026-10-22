@@ -6,16 +6,17 @@
 */-->
 <head th:replace="~{fragments/layout :: head('Not licensed')}"></head>
 <body class="d-flex flex-column bg-surface-secondary">
+<div th:replace="~{fragments/layout :: classificationBanner('top')}"></div>
 <svg th:replace="~{fragments/icons :: sprite}"></svg>
 
-<div class="page page-center">
+<main class="page page-center" id="main-content" tabindex="-1">
     <div class="container container-tight py-4">
         <div class="text-center mb-4">
             <img th:src="@{/img/logo.png}" alt="CertAlert" class="logo logo-lg">
         </div>
         <div class="card card-md">
             <div class="card-body text-center">
-                <h2 class="h3 mb-3">This application is not licensed</h2>
+                <h1 class="h3 mb-3">This application is not licensed</h1>
                 <p class="text-secondary">
                     CertAlert needs a license before it can be used. Ask your administrator to
                     install one.
@@ -29,6 +30,7 @@
             </div>
         </div>
     </div>
-</div>
+</main>
+<div th:replace="~{fragments/layout :: classificationBanner('bottom')}"></div>
 </body>
 </html>

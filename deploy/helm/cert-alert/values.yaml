@@ -596,6 +596,46 @@ logFormat: json
 javaOpts: "-XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError"
 
 # ---------------------------------------------------------------------------------------
+# Inventory exports and scheduled reports (Certificates page)
+# ---------------------------------------------------------------------------------------
+exports:
+  # CERT_ALERT_EXPORTS_MAX_ROWS: the most rows one download holds.
+  maxRows: 200000
+  # CERT_ALERT_EXPORTS_REPORT_MAX_ROWS: the most rows a scheduled report's file holds.
+  reportMaxRows: 50000
+  # CERT_ALERT_EXPORTS_REPORT_RECIPIENT_DOMAINS: domains a scheduled report may be emailed
+  # to (example.gov, or *.mil). Required for scheduled reports: empty, none can be made.
+  reportRecipientDomains: []
+
+# ---------------------------------------------------------------------------------------
+# Public API and webhooks - managed on Admin > Integrations (see the README's "Public API,
+# tokens and webhooks")
+# ---------------------------------------------------------------------------------------
+api:
+  # CERT_ALERT_API_TOKENS_ENABLED: false refuses every API token (401) without deleting any.
+  tokensEnabled: true
+  # CERT_ALERT_API_REQUESTS_PER_MINUTE: per token, per replica; 429 beyond it. 0 is no limit.
+  requestsPerMinute: 300
+  # CERT_ALERT_API_MAX_LIFETIME: the longest a token lives (default 365d; "0" removes the
+  # limit). Empty keeps the default.
+  maxLifetime: ""
+webhooks:
+  # CERT_ALERT_WEBHOOKS_ENABLED: false queues and posts nothing.
+  enabled: true
+  # CERT_ALERT_WEBHOOKS_ALLOWED_HOSTS: names, *.suffix or CIDR ranges a webhook may go to.
+  # Empty: any host the address rules allow (never loopback, link-local or metadata).
+  # Webhooks are https (443 by default): networkPolicy.egress.web has to reach them.
+  allowedHosts: []
+  # CERT_ALERT_WEBHOOKS_BLOCK_PRIVATE_NETWORKS: refuse private addresses as well.
+  blockPrivateNetworks: false
+  # CERT_ALERT_WEBHOOKS_SECRET_KEY: a base64 AES key (openssl rand -base64 32) the signing
+  # secrets are encrypted with in the database. Inline, or from a Secret of your own.
+  # Unset, they are stored unencrypted (a warning is logged).
+  secretKey: ""
+  existingSecret: ""
+  existingSecretKey: webhooks-secret-key
+
+# ---------------------------------------------------------------------------------------
 # Audit logging (ens-audit/1) - the ENS_AUDIT_* settings shared by every ENS product
 # ---------------------------------------------------------------------------------------
 # The trail is always kept in the database and shown at /admin/audit; these add copies for

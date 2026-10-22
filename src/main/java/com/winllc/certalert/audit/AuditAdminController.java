@@ -242,7 +242,7 @@ public class AuditAdminController {
         if (value == null || value.isEmpty()) {
             return "";
         }
-        String safe = "=+-@\t\r".indexOf(value.charAt(0)) >= 0 ? "'" + value : value;
+        String safe = com.winllc.certalert.export.TableWriter.neutralise(value);
         if (safe.contains(",") || safe.contains("\"") || safe.contains("\n") || safe.contains("\r")) {
             return "\"" + safe.replace("\"", "\"\"") + "\"";
         }

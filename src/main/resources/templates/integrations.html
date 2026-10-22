@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/layout :: head('Integrations')}"></head>
+<body>
+<div th:replace="~{fragments/layout :: classificationBanner('top')}"></div>
+<svg th:replace="~{fragments/icons :: sprite}"></svg>
+
+<div class="page">
+    <header th:replace="~{fragments/layout :: navbar('integrations')}"></header>
+
+    <main class="page-wrapper" id="main-content" tabindex="-1">
+        <div th:replace="~{fragments/layout :: pageheader('Integrations',
+             'API tokens for other systems to read CertAlert, and webhooks for CertAlert to tell them')}"></div>
+
+        <div class="page-body">
+            <div class="container-xl">
+
+                <!--/* API tokens: scoped, shown once, revocable. */-->
+                <section class="card mb-3" id="api-tokens-card" aria-labelledby="api-tokens-title">
+                    <div class="card-header">
+                        <h2 class="card-title" id="api-tokens-title">API tokens</h2>
+                        <div class="card-actions text-secondary small">
+                            <span class="mono">Authorization: Bearer cat_&hellip;</span> &middot;
+                            <a th:href="@{/api/v1/openapi.yaml}">OpenAPI document</a>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table card-table table-vcenter" id="api-tokens">
+                            <caption class="visually-hidden">API tokens</caption>
+                            <thead>
+                            <tr>
+                                <th scope="col">Name</th>
+                                <th scope="col">Token</th>
+                                <th scope="col">Scopes</th>
+                                <th scope="col">Created</th>
+                                <th scope="col">Expires</th>
+                                <th scope="col">Last used</th>
+                                <th scope="col">Status</th>
+                                <th scope="col"><span class="visually-hidden">Actions</span></th>
+                            </tr>
+                            </thead>
+                            <tbody aria-live="polite">
+                            <tr><td colspan="8" class="text-secondary">Loading&hellip;</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="card-body border-top" th:if="${isAdmin}">
+                        <form id="api-token-form" class="row g-3 align-items-end">
+                            <div class="col-12 col-md-4">
+                                <label class="form-label" for="api-token-name">Name</label>
+                                <input type="text" id="api-token-name" class="form-control" maxlength="120"
+                                       placeholder="ServiceNow inventory import" required>
+                            </div>
+                            <div class="col-12 col-md-3">
+                                <label class="form-label" for="api-token-expires">Expires on <span class="text-secondary">(a year from today if left empty)</span></label>
+                                <input type="date" id="api-token-expires" class="form-control">
+                            </div>
+                            <fieldset class="col-12">
+                                <legend class="form-label">Scopes</legend>
+                                <div id="api-token-scopes" class="row g-2"></div>
+                            </fieldset>
+                            <div class="col-12 col-md-auto">
+                                <button type="submit" class="btn btn-primary">
+                                    <svg class="icon me-1" aria-hidden="true"><use href="#icon-key"></use></svg>Create token
+                                </button>
+                            </div>
+                            <div class="col-12">
+                                <span class="text-secondary small" id="api-token-message" role="status"></span>
+                            </div>
+                        </form>
+                        <div class="alert alert-warning mt-3 d-none" id="api-token-created" role="alert">
+                            <div class="mb-2">Copy this token now. It is not shown again, and CertAlert keeps only a hash of it.</div>
+                            <div class="input-group">
+                                <label class="visually-hidden" for="api-token-secret">New API token</label>
+                                <input type="text" class="form-control mono" id="api-token-secret" readonly>
+                                <button type="button" class="btn" id="api-token-copy">Copy</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!--/* Webhooks: signed, retried, logged. */-->
+                <section class="card mb-3" id="webhooks-card" aria-labelledby="webhooks-title">
+                    <div class="card-header">
+                        <h2 class="card-title" id="webhooks-title">Webhooks</h2>
+                        <div class="card-actions text-secondary small">
+                            Signed with HMAC-SHA256 in <span class="mono">X-CertAlert-Signature</span>
+                        </div>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table card-table table-vcenter" id="webhooks">
+                            <caption class="visually-hidden">Webhooks</caption>
+                            <thead>
+                            <tr>
+                                <th scope="col">Name</th>
+                                <th scope="col">URL</th>
+                                <th scope="col">Format</th>
+                                <th scope="col">Events</th>
+                                <th scope="col">Secret</th>
+                                <th scope="col">Status</th>
+                                <th scope="col"><span class="visually-hidden">Actions</span></th>
+                            </tr>
+                            </thead>
+                            <tbody aria-live="polite">
+                            <tr><td colspan="7" class="text-secondary">Loading&hellip;</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="card-body border-top" th:if="${isAdmin}">
+                        <form id="webhook-form" class="row g-3 align-items-end">
+                            <div class="col-12 col-md-3">
+                                <label class="form-label" for="webhook-name">Name</label>
+                                <input type="text" id="webhook-name" class="form-control" maxlength="120"
+                                       placeholder="Ops channel" required>
+                            </div>
+                            <div class="col-12 col-md-5">
+                                <label class="form-label" for="webhook-url">URL <span class="text-secondary">(https)</span></label>
+                                <input type="url" id="webhook-url" class="form-control" maxlength="2000"
+                                       placeholder="https://hooks.example.org/certalert" required>
+                            </div>
+                            <div class="col-12 col-md-2">
+                                <label class="form-label" for="webhook-format">Format</label>
+                                <select id="webhook-format" class="form-select">
+                                    <option value="JSON">CertAlert JSON (signed)</option>
+                                    <option value="SLACK">Slack</option>
+                                    <option value="TEAMS">Microsoft Teams</option>
+                                </select>
+                            </div>
+                            <fieldset class="col-12">
+                                <legend class="form-label">Events</legend>
+                                <div id="webhook-events" class="row g-2"></div>
+                            </fieldset>
+                            <div class="col-12 col-md-auto">
+                                <button type="submit" class="btn btn-primary">Add webhook</button>
+                            </div>
+                            <div class="col-12">
+                                <span class="text-secondary small" id="webhook-message" role="status"></span>
+                            </div>
+                        </form>
+                        <div class="alert alert-warning mt-3 d-none" id="webhook-created" role="alert">
+                            <div class="mb-2">Copy this signing secret now. It is not shown again.</div>
+                            <div class="input-group">
+                                <label class="visually-hidden" for="webhook-secret">Webhook signing secret</label>
+                                <input type="text" class="form-control mono" id="webhook-secret" readonly>
+                                <button type="button" class="btn" id="webhook-copy">Copy</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!--/* One endpoint's deliveries, when one is picked. */-->
+                <section class="card mb-3 d-none" id="webhook-deliveries-card" aria-labelledby="webhook-deliveries-title">
+                    <div class="card-header">
+                        <h2 class="card-title" id="webhook-deliveries-title">Deliveries</h2>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table card-table table-vcenter" id="webhook-deliveries">
+                            <caption class="visually-hidden">Recent deliveries of the selected webhook</caption>
+                            <thead>
+                            <tr>
+                                <th scope="col">Queued</th>
+                                <th scope="col">Event</th>
+                                <th scope="col">State</th>
+                                <th scope="col">Attempts</th>
+                                <th scope="col">Last answer</th>
+                            </tr>
+                            </thead>
+                            <tbody aria-live="polite"></tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </main>
+</div>
+
+<div th:replace="~{fragments/layout :: scripts}"></div>
+<script th:src="@{/js/integrations.js}"></script>
+<div th:replace="~{fragments/layout :: classificationBanner('bottom')}"></div>
+</body>
+</html>

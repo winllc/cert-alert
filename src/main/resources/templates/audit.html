@@ -2,12 +2,13 @@
 <html lang="en" xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{fragments/layout :: head('Audit log')}"></head>
 <body>
+<div th:replace="~{fragments/layout :: classificationBanner('top')}"></div>
 <svg th:replace="~{fragments/icons :: sprite}"></svg>
 
 <div class="page">
     <header th:replace="~{fragments/layout :: navbar('audit')}"></header>
 
-    <div class="page-wrapper">
+    <main class="page-wrapper" id="main-content" tabindex="-1">
         <div th:replace="~{fragments/layout :: pageheader('Audit log',
              'Every audited event, newest first, as a tamper-evident chain (ens-audit/1)')}"></div>
 
@@ -19,7 +20,7 @@
                     <div class="col-12 col-lg-5">
                         <div class="card h-100" id="audit-verify-card">
                             <div class="card-header">
-                                <h3 class="card-title">Integrity</h3>
+                                <h2 class="card-title">Integrity</h2>
                             </div>
                             <div class="card-body">
                                 <p class="text-secondary">
@@ -43,7 +44,7 @@
                     <div class="col-12 col-lg-7">
                         <div class="card h-100">
                             <div class="card-header">
-                                <h3 class="card-title">Delivery</h3>
+                                <h2 class="card-title">Delivery</h2>
                                 <div class="card-actions text-secondary small" id="audit-head"></div>
                             </div>
                             <div class="table-responsive">
@@ -69,7 +70,7 @@
                 <!--/* The log. Filters are query parameters; paging is the server's. */-->
                 <div class="card mb-3">
                     <div class="card-header">
-                        <h3 class="card-title">Events</h3>
+                        <h2 class="card-title">Events</h2>
                         <div class="card-actions btn-list">
                             <a href="#" class="btn btn-sm" id="audit-export-csv">Export CSV</a>
                             <a href="#" class="btn btn-sm" id="audit-export-ndjson">Export NDJSON</a>
@@ -167,7 +168,7 @@
                 <!--/* Pull API tokens, for a SIEM that collects rather than receives. */-->
                 <div class="card mb-3" id="audit-tokens-card">
                     <div class="card-header">
-                        <h3 class="card-title">SIEM API tokens</h3>
+                        <h2 class="card-title">SIEM API tokens</h2>
                         <div class="card-actions text-secondary small">
                             <span class="mono">GET /api/audit/events?after=&lt;seq&gt;</span> with
                             <span class="mono">Authorization: Bearer &lt;token&gt;</span>
@@ -182,7 +183,7 @@
                                 <th>Created</th>
                                 <th>Last used</th>
                                 <th>Status</th>
-                                <th></th>
+                                <th><span class="visually-hidden">Actions</span></th>
                             </tr>
                             </thead>
                             <tbody>
@@ -217,7 +218,7 @@
                 </div>
             </div>
         </div>
-    </div>
+    </main>
 </div>
 
 <!--/* One event in full. */-->
@@ -238,5 +239,6 @@
 
 <div th:replace="~{fragments/layout :: scripts}"></div>
 <script th:src="@{/js/audit-log.js}"></script>
+<div th:replace="~{fragments/layout :: classificationBanner('bottom')}"></div>
 </body>
 </html>

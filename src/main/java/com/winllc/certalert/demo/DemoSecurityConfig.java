@@ -72,7 +72,9 @@ public class DemoSecurityConfig {
 
     /** Served before anybody signs in - the sign-in page itself, and what it is made of. */
     private static final String[] PUBLIC_PATHS = {
-        "/login", ConsentFilter.PATH, "/css/**", "/js/**", "/img/**", "/webjars/**", "/favicon.ico", "/error"
+        "/login", ConsentFilter.PATH, "/css/**", "/js/**", "/img/**", "/webjars/**", "/favicon.ico", "/error",
+        // The API's OpenAPI document: it describes the product, not anybody's data.
+        com.winllc.certalert.api.OpenApiController.PATH
     };
 
     /**
@@ -84,9 +86,14 @@ public class DemoSecurityConfig {
      */
     private static final String DIGEST = "/api/v1/notifications/digest";
 
-    /** Reads that arrive as POSTs, because that is how DataTables asks. */
+    /**
+     * Reads that arrive as POSTs: the search tables, because that is how DataTables asks, and
+     * the inventory export, because it is audited - the audit record of the export is all it
+     * writes, as it is anywhere else.
+     */
     private static final String[] READ_ONLY_POSTS = {
-        "/api/v1/datatables/users", "/api/v1/datatables/servers", "/api/v1/datatables/audit"
+        "/api/v1/datatables/users", "/api/v1/datatables/servers", "/api/v1/datatables/audit",
+        com.winllc.certalert.export.CertificateExportController.PATH
     };
 
     /**
@@ -155,7 +162,7 @@ public class DemoSecurityConfig {
                                         && !licensing.isFullyLicensed()))
                         .requestMatchers("/admin/license", "/admin/license/**")
                         .hasRole("ADMIN")
-                        // The search tables, which ask by POST and write nothing.
+                        // The search tables and the export, which ask by POST and change nothing.
                         .requestMatchers(HttpMethod.POST, READ_ONLY_POSTS)
                         .authenticated()
                         // A rehearsal of the round-up: the other POST that writes nothing.

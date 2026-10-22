@@ -1,0 +1,15 @@
+{
+  "name": "cert-alert-a11y",
+  "private": true,
+  "description": "axe-core scan of CertAlert's pages in Chromium, driven by AccessibilityScanTest (./gradlew a11yTest).",
+  "type": "module",
+  "license": "UNLICENSED",
+  "scripts": {
+    "scan": "node scan.mjs"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "playwright": "1.56.1",
+    "playwright-core": "1.56.1"
+  }
+}

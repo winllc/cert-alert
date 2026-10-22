@@ -71,7 +71,9 @@ public class SecurityConfig {
     private static final String[] PUBLIC_PATHS = {
         // The images among them: the sign-in page carries the logo, and nobody has signed
         // in when it is served. The notice-and-consent banner comes before signing in too.
-        "/login", ConsentFilter.PATH, "/css/**", "/js/**", "/img/**", "/webjars/**", "/favicon.ico", "/error"
+        "/login", ConsentFilter.PATH, "/css/**", "/js/**", "/img/**", "/webjars/**", "/favicon.ico", "/error",
+        // The API's OpenAPI document: it describes the product, not anybody's data.
+        com.winllc.certalert.api.OpenApiController.PATH
     };
 
     /** Administrators, or anyone signed in, depending on how the application is configured. */
@@ -135,9 +137,9 @@ public class SecurityConfig {
                 // for itself, because a table is asked for directly as often as it is
                 // reached through the page it sits on. Auditors read it too; what they may
                 // not do is change anything (ReadOnlyRoleFilter, and the rules below).
-                .requestMatchers(HttpMethod.GET, "/admin", "/api/v1/audit/summary")
+                .requestMatchers(HttpMethod.GET, "/admin", "/api/v1/audit/summary", "/admin/integrations")
                 .hasAnyRole("ADMIN", "AUDITOR")
-                .requestMatchers("/admin", "/api/v1/audit/summary")
+                .requestMatchers("/admin", "/api/v1/audit/summary", "/admin/integrations")
                 .hasRole("ADMIN")
                 // The audit log page: the whole trail, its export, verification, delivery
                 // status and the SIEM tokens. Its API is under /api/v1/admin, below. The SIEM

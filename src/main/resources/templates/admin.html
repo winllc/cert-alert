@@ -2,12 +2,13 @@
 <html lang="en" xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{fragments/layout :: head('Administration')}"></head>
 <body>
+<div th:replace="~{fragments/layout :: classificationBanner('top')}"></div>
 <svg th:replace="~{fragments/icons :: sprite}"></svg>
 
 <div class="page">
     <header th:replace="~{fragments/layout :: navbar('admin')}"></header>
 
-    <div class="page-wrapper">
+    <main class="page-wrapper" id="main-content" tabindex="-1">
         <div th:replace="~{fragments/layout :: pageheader('Administration',
              'Everything that has happened here, across every entry')}"></div>
 
@@ -54,7 +55,7 @@
                        carry, so it is asked for on a schedule. This is the same run, now. */-->
                 <div class="card mb-3" id="revocation-admin" th:if="${@licensing.shows('revocation-checks')}">
                     <div class="card-header">
-                        <h3 class="card-title">Revocation</h3>
+                        <h2 class="card-title">Revocation</h2>
                         <div class="card-actions text-secondary small" id="revocation-status">&ndash;</div>
                     </div>
                     <div class="card-body">
@@ -79,7 +80,7 @@
                        schema. Defined here; filled in on each server's page. */-->
                 <div class="card mb-3" id="server-attribute-admin">
                     <div class="card-header">
-                        <h3 class="card-title">Editable directory attributes</h3>
+                        <h2 class="card-title">Editable directory attributes</h2>
                         <div class="card-actions text-secondary small">
                             Attributes of the server entry, edited on a server's page and written to the directory
                         </div>
@@ -93,7 +94,7 @@
                                 <th>Kind</th>
                                 <th>Values</th>
                                 <th>Choices</th>
-                                <th></th>
+                                <th><span class="visually-hidden">Actions</span></th>
                             </tr>
                             </thead>
                             <tbody id="attribute-definitions">
@@ -153,7 +154,7 @@
                        check, delivery to the SIEM and the SIEM's API tokens. */-->
                 <div class="card" id="audit-log-link">
                     <div class="card-header">
-                        <h3 class="card-title">System audit log</h3>
+                        <h2 class="card-title">System audit log</h2>
                         <div class="card-actions text-secondary small" id="audit-span"></div>
                     </div>
                     <div class="card-body">
@@ -179,10 +180,11 @@
                 </p>
             </div>
         </div>
-    </div>
+    </main>
 </div>
 
 <div th:replace="~{fragments/layout :: scripts}"></div>
 <script th:src="@{/js/admin.js}"></script>
+<div th:replace="~{fragments/layout :: classificationBanner('bottom')}"></div>
 </body>
 </html>

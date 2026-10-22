@@ -3,6 +3,7 @@ package com.winllc.certalert.session;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestBuilders.formLogin;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.winllc.certalert.audit.AuditStore;
@@ -82,6 +83,7 @@ class StoredSessionsTest {
     static void startDirectory() {
         directory = new EmbeddedDirectory();
         directory.addUser("sam", "Sam Stored", "sam@example.gov");
+        directory.addUser("admin", "Ada Admin", "ada@example.gov");
     }
 
     @AfterAll
@@ -145,8 +147,12 @@ class StoredSessionsTest {
     }
 
     private Browser signIn(MockMvc replica) throws Exception {
+        return signIn(replica, "sam");
+    }
+
+    private Browser signIn(MockMvc replica, String uid) throws Exception {
         Browser browser = new Browser();
-        MvcResult login = replica.perform(formLogin().user("sam").password("password")).andReturn();
+        MvcResult login = replica.perform(formLogin().user(uid).password("password")).andReturn();
         browser.remember(login.getResponse());
         assertThat(browser.cookie).as("a SESSION cookie").isNotNull();
         // The first signed-in request is where the session policy takes it on.
@@ -206,6 +212,48 @@ class StoredSessionsTest {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM SPRING_SESSION", Integer.class)).isZero();
         assertThat(expiries(head)).singleElement().satisfies(line -> assertThat(line)
                 .contains("\"reason\":\"idle\""));
+    }
+
+    /**
+     * An API token is shown once, in the response that created it, and kept nowhere else:
+     * not in the stored session (every attribute read back through the JDBC repository and
+     * its allow-list, and serialised again), not in a cookie. A request with the token gets
+     * no session at all.
+     */
+    @Test
+    void anApiTokenIsNeverKeptInTheStoredSession() throws Exception {
+        MockMvc replica = replica();
+        Browser browser = signIn(replica, "admin");
+        MvcResult created = browser.perform(replica, post(com.winllc.certalert.api.ApiTokenAdminController.PATH)
+                .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf())
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"stored session\",\"scopes\":[\"certificates:read\"]}"));
+        assertThat(created.getResponse().getStatus()).isEqualTo(201);
+        String token = created.getResponse().getContentAsString().replaceAll(".*\"secret\":\"([^\"]+)\".*", "$1");
+        assertThat(token).startsWith("cat_");
+
+        // Read back from the database, through the same allow-list every replica uses.
+        Session stored = sessions.findById(browser.sessionId());
+        assertThat(stored).isNotNull();
+        for (String name : stored.getAttributeNames()) {
+            Object value = stored.getAttribute(name);
+            assertThat(String.valueOf(value)).as(name).doesNotContain(token);
+            java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+            try (java.io.ObjectOutputStream out = new java.io.ObjectOutputStream(bytes)) {
+                out.writeObject(value);
+            }
+            assertThat(bytes.toString(java.nio.charset.StandardCharsets.ISO_8859_1)).as(name).doesNotContain(token);
+        }
+        // The raw rows too, attribute bytes and all.
+        List<byte[]> raw = jdbc.queryForList("SELECT ATTRIBUTE_BYTES FROM SPRING_SESSION_ATTRIBUTES", byte[].class);
+        assertThat(raw).noneMatch(bytes -> new String(bytes, java.nio.charset.StandardCharsets.ISO_8859_1).contains(token));
+
+        // A request with the token makes no session.
+        int before = jdbc.queryForObject("SELECT COUNT(*) FROM SPRING_SESSION", Integer.class);
+        MvcResult read = replica.perform(get("/api/v1/certificates").header("Authorization", "Bearer " + token)).andReturn();
+        assertThat(read.getResponse().getStatus()).isEqualTo(200);
+        assertThat(read.getResponse().getCookie("SESSION")).isNull();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM SPRING_SESSION", Integer.class)).isEqualTo(before);
     }
 
     @SuppressWarnings("unchecked")

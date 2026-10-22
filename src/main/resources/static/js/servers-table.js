@@ -197,7 +197,7 @@
             },
             columns: [
                 {data: 'id', orderable: false, searchable: false, className: 'expand',
-                    render: function () { return CertAlert.icon('plus'); }},
+                    render: function () { return CertAlert.expandButton(); }},
                 // The name is the way through to the page about this server.
                 {data: 'commonName', render: function (value, type, row) {
                     if (type !== 'display') { return value; }

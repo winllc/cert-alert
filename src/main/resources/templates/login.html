@@ -2,9 +2,10 @@
 <html lang="en" xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{fragments/layout :: head('Sign in')}"></head>
 <body class="d-flex flex-column bg-surface-secondary">
+<div th:replace="~{fragments/layout :: classificationBanner('top')}"></div>
 <svg th:replace="~{fragments/icons :: sprite}"></svg>
 
-<div class="page page-center">
+<main class="page page-center" id="main-content" tabindex="-1">
     <div class="container container-tight py-4">
         <div class="text-center mb-4">
             <img th:src="@{/img/logo.png}" alt="CertAlert" class="logo logo-lg">
@@ -12,7 +13,7 @@
 
         <div class="card card-md">
             <div class="card-body">
-                <h2 class="h3 text-center mb-3">Sign in</h2>
+                <h1 class="h3 text-center mb-3">Sign in</h1>
 
                 <!--/* The evaluation banner, which every page carries - this one included. */-->
                 <p th:if="${license != null and license.showEvaluationBanner()}" id="license-evaluation"
@@ -85,10 +86,10 @@
                Never rendered anywhere else: the list is empty unless the demo is on. */-->
         <div th:if="${demo}" class="card card-md mt-3 demo-accounts">
             <div class="card-header d-block">
-                <h3 class="card-title mb-1">
+                <h2 class="card-title mb-1">
                     <span class="badge bg-azure-lt me-2">Demo</span>
                     Sign in as any of these
-                </h3>
+                </h2>
                 <p class="text-secondary small mb-0" th:unless="${#lists.isEmpty(demoAccounts)}">
                     Invented people, read out of the directory this demo is showing. Every one
                     of them is read-only &mdash; the roles change what you are shown, never what
@@ -126,7 +127,8 @@
             </div>
         </div>
     </div>
-</div>
+</main>
 <script th:if="${demo}" th:src="@{/js/demo-accounts.js}"></script>
+<div th:replace="~{fragments/layout :: classificationBanner('bottom')}"></div>
 </body>
 </html>

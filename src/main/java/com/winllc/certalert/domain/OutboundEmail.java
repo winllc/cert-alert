@@ -39,7 +39,9 @@ public class OutboundEmail {
         /** A point of contact's round-up of what is expiring. */
         DIGEST,
         /** An alert to the fixed list of operators. */
-        ALERT
+        ALERT,
+        /** A scheduled report: the certificate inventory, attached. */
+        REPORT
     }
 
     /** Where it has got to. */
@@ -110,6 +112,16 @@ public class OutboundEmail {
     @Column(name = "last_error", length = 1000)
     private String lastError;
 
+    @Column(name = "attachment_name", length = 255)
+    private String attachmentName;
+
+    @Column(name = "attachment_type", length = 128)
+    private String attachmentType;
+
+    /** A scheduled report's file; null for everything else. */
+    @Column(name = "attachment")
+    private byte[] attachment;
+
     protected OutboundEmail() {
         // for JPA
     }
@@ -135,6 +147,34 @@ public class OutboundEmail {
         this.notificationId = notificationId;
         this.createdAt = createdAt;
         this.nextAttemptAt = createdAt;
+    }
+
+    /** The same message, carrying the classification marking (see {@code EmailMarking}). */
+    public OutboundEmail marked(String subject, String textBody, String htmlBody) {
+        this.subject = clip(subject, 1000);
+        this.textBody = clip(textBody, MAX_BODY);
+        this.htmlBody = htmlBody == null || htmlBody.length() > MAX_BODY ? null : htmlBody;
+        return this;
+    }
+
+    /** The same message, with a file attached. */
+    public OutboundEmail attach(String name, String type, byte[] content) {
+        this.attachmentName = name;
+        this.attachmentType = type;
+        this.attachment = content;
+        return this;
+    }
+
+    public String getAttachmentName() {
+        return attachmentName;
+    }
+
+    public String getAttachmentType() {
+        return attachmentType;
+    }
+
+    public byte[] getAttachment() {
+        return attachment;
     }
 
     public void sent(Instant when) {

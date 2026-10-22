@@ -14,11 +14,12 @@
 */-->
 <head th:replace="~{fragments/layout :: head('Something went wrong')}"></head>
 <body>
+<div th:replace="~{fragments/layout :: classificationBanner('top')}"></div>
 <svg th:replace="~{fragments/icons :: sprite}"></svg>
 
 <div class="page">
     <header th:replace="~{fragments/layout :: navbar('')}"></header>
-    <div class="page-wrapper">
+    <main class="page-wrapper" id="main-content" tabindex="-1">
         <div class="page-body">
             <div class="container-xl">
                 <div class="empty">
@@ -28,7 +29,7 @@
                     <div class="empty-header" th:if="${status != null and status != 999}"
                          th:text="${status}">500</div>
 
-                    <p class="empty-title" th:switch="${status}">
+                    <h1 class="empty-title" th:switch="${status}">
                         <span th:case="400">That request could not be read</span>
                         <span th:case="401">You are not signed in</span>
                         <span th:case="403">This page is not yours to see</span>
@@ -36,7 +37,7 @@
                         <span th:case="405">That is not something this page does</span>
                         <span th:case="503">The application is not ready yet</span>
                         <span th:case="*">Something went wrong at our end</span>
-                    </p>
+                    </h1>
 
                     <p class="empty-subtitle text-secondary" th:switch="${status}">
                         <span th:case="400">Something about the request was malformed. Going back and
@@ -80,8 +81,9 @@
                 </div>
             </div>
         </div>
-    </div>
+    </main>
 </div>
 <div th:replace="~{fragments/layout :: scripts}"></div>
+<div th:replace="~{fragments/layout :: classificationBanner('bottom')}"></div>
 </body>
 </html>

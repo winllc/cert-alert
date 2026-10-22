@@ -2,16 +2,17 @@
 <html lang="en" xmlns:th="http://www.thymeleaf.org">
 <head th:replace="~{fragments/layout :: head('Not found')}"></head>
 <body>
+<div th:replace="~{fragments/layout :: classificationBanner('top')}"></div>
 <svg th:replace="~{fragments/icons :: sprite}"></svg>
 
 <div class="page">
     <header th:replace="~{fragments/layout :: navbar('')}"></header>
-    <div class="page-wrapper">
+    <main class="page-wrapper" id="main-content" tabindex="-1">
         <div class="page-body">
             <div class="container-xl">
                 <div class="empty">
                     <div class="empty-header">404</div>
-                    <p class="empty-title" th:text="${message} ?: 'No such entry'">No such entry</p>
+                    <h1 class="empty-title" th:text="${message} ?: 'No such entry'">No such entry</h1>
                     <p class="empty-subtitle text-secondary">
                         It may have been pruned after the directory stopped publishing it.
                     </p>
@@ -21,8 +22,9 @@
                 </div>
             </div>
         </div>
-    </div>
+    </main>
 </div>
 <div th:replace="~{fragments/layout :: scripts}"></div>
+<div th:replace="~{fragments/layout :: classificationBanner('bottom')}"></div>
 </body>
 </html>

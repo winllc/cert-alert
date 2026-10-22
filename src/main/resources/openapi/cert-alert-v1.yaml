@@ -1,0 +1,1246 @@
+openapi: 3.1.0
+info:
+  title: CertAlert API
+  version: "1"
+  summary: Certificate inventory, expiry summaries and jobs, for integrations.
+  description: |
+    The public API of CertAlert. Served by every installation at `/api/v1/openapi.yaml`, and
+    kept in the source tree at `src/main/resources/openapi/cert-alert-v1.yaml`; a test holds it
+    to the code (every operation here exists, and every endpoint a token may call is here, with
+    the scope the server enforces).
+
+    **Authentication.** Send an API token as `Authorization: Bearer cat_...`. An administrator
+    creates tokens on the Integrations page (Admin > Integrations), choosing their scopes and,
+    optionally, an expiry; the token is shown once. A token never does more than its creator's
+    roles allow, and stops working when revoked, when it expires, or when its creator no longer
+    holds a role its scopes need. Requests with a token keep no session and need no CSRF token.
+
+    The same endpoints answer a signed-in browser session (cookie plus CSRF token), which is how
+    CertAlert's own pages use them.
+
+    **Errors.** `401` with `WWW-Authenticate: Bearer error="invalid_token"` for a token that is
+    missing, unknown, revoked or expired; `403` with `error="insufficient_scope"` for a scope the
+    token does not hold, or an endpoint tokens may not call; `429` with `Retry-After` when a token
+    is over its rate (`cert-alert.api.requests-per-minute`, per replica). Bodies are RFC 9457
+    problem details.
+
+    **Jobs** answer `202 Accepted` with a run to ask after at `Location` (`/api/v1/jobs/{id}`).
+  license:
+    name: Proprietary - ENS Solutions
+servers:
+  - url: /
+    description: This installation
+security:
+  - apiToken: []
+tags:
+  - name: Certificates
+  - name: Servers
+  - name: People
+  - name: Projects
+  - name: Jobs
+  - name: Administration
+
+paths:
+  /api/v1/certificates:
+    get:
+      tags: [Certificates]
+      operationId: listCertificates
+      summary: Certificates, filtered and paged
+      description: Every certificate the directory publishes, with who holds it. Ordered by expiry unless `sort` says otherwise.
+      x-required-scope: certificates:read
+      security:
+        - apiToken: [certificates:read]
+      parameters:
+        - $ref: "#/components/parameters/q"
+        - $ref: "#/components/parameters/status"
+        - $ref: "#/components/parameters/ownerType"
+        - $ref: "#/components/parameters/expiresWithinDays"
+        - $ref: "#/components/parameters/expiresFrom"
+        - $ref: "#/components/parameters/expiresTo"
+        - $ref: "#/components/parameters/issuer"
+        - $ref: "#/components/parameters/keyAlgorithm"
+        - $ref: "#/components/parameters/keySizeMin"
+        - $ref: "#/components/parameters/keySizeMax"
+        - $ref: "#/components/parameters/hashAlgorithm"
+        - $ref: "#/components/parameters/revocation"
+        - $ref: "#/components/parameters/risk"
+        - $ref: "#/components/parameters/projectId"
+        - $ref: "#/components/parameters/serverId"
+        - $ref: "#/components/parameters/userId"
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/size"
+        - name: sort
+          in: query
+          description: "`property,asc` or `property,desc`; property is one of notAfter, notBefore, subjectDn, issuerDn, keySize, keyAlgorithm, hashAlgorithm, status, id."
+          schema: { type: string, example: "notAfter,asc" }
+      responses:
+        "200":
+          description: A page of certificates
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Page"
+                  - type: object
+                    properties:
+                      content:
+                        type: array
+                        items: { $ref: "#/components/schemas/Certificate" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/v1/certificates/export:
+    post:
+      tags: [Certificates]
+      operationId: exportCertificates
+      summary: The certificates, as a CSV or Excel file
+      description: |
+        The same filters and order as the list, without the paging, up to
+        `cert-alert.exports.max-rows` (200,000; `X-CertAlert-Truncated: true` when there were
+        more). Streamed. Text that a spreadsheet would read as a formula (starting with
+        `=`, `+`, `-`, `@`, tab or CR) is written with a leading apostrophe. Audited as
+        `inventory.exported` - which is why it is a `POST`, though it changes nothing else.
+        The parameters may be sent in the query string, as below, or as an
+        `application/x-www-form-urlencoded` body.
+      x-required-scope: certificates:read
+      security:
+        - apiToken: [certificates:read]
+      parameters:
+        - name: format
+          in: query
+          schema: { type: string, enum: [csv, xlsx], default: csv }
+        - $ref: "#/components/parameters/q"
+        - $ref: "#/components/parameters/status"
+        - $ref: "#/components/parameters/ownerType"
+        - $ref: "#/components/parameters/expiresWithinDays"
+        - $ref: "#/components/parameters/expiresFrom"
+        - $ref: "#/components/parameters/expiresTo"
+        - $ref: "#/components/parameters/issuer"
+        - $ref: "#/components/parameters/keyAlgorithm"
+        - $ref: "#/components/parameters/keySizeMin"
+        - $ref: "#/components/parameters/keySizeMax"
+        - $ref: "#/components/parameters/hashAlgorithm"
+        - $ref: "#/components/parameters/revocation"
+        - $ref: "#/components/parameters/risk"
+        - $ref: "#/components/parameters/projectId"
+        - { name: sort, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: The file
+          headers:
+            Content-Disposition:
+              schema: { type: string, example: 'attachment; filename="certalert-certificates-20261021-142233.csv"' }
+          content:
+            text/csv: { schema: { type: string } }
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet: { schema: { type: string, format: binary } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /api/v1/certificates/{id}:
+    get:
+      tags: [Certificates]
+      operationId: getCertificate
+      summary: One certificate
+      x-required-scope: certificates:read
+      security:
+        - apiToken: [certificates:read]
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        "200":
+          description: The certificate
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Certificate" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/summary/expiry:
+    get:
+      tags: [Certificates]
+      operationId: expirySummary
+      summary: How the inventory stands
+      description: Counts by state, by how soon they expire (7, 30, 60 and 90 days), revoked, and by owner type. Takes the same filters as the list.
+      x-required-scope: certificates:read
+      security:
+        - apiToken: [certificates:read]
+      parameters:
+        - $ref: "#/components/parameters/q"
+        - $ref: "#/components/parameters/status"
+        - $ref: "#/components/parameters/ownerType"
+        - $ref: "#/components/parameters/issuer"
+        - $ref: "#/components/parameters/keyAlgorithm"
+        - $ref: "#/components/parameters/hashAlgorithm"
+        - $ref: "#/components/parameters/projectId"
+      responses:
+        "200":
+          description: The summary
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExpirySummary" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/servers:
+    get:
+      tags: [Servers]
+      operationId: listServers
+      summary: Servers, paged
+      x-required-scope: certificates:read
+      security:
+        - apiToken: [certificates:read]
+      parameters:
+        - name: q
+          in: query
+          description: Text in the server's name, uid, URL or DN.
+          schema: { type: string }
+        - $ref: "#/components/parameters/certificateStatus"
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/size"
+      responses:
+        "200":
+          description: A page of servers
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Page"
+                  - type: object
+                    properties:
+                      content:
+                        type: array
+                        items: { $ref: "#/components/schemas/Server" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/servers/{id}:
+    get:
+      tags: [Servers]
+      operationId: getServer
+      summary: One server
+      x-required-scope: certificates:read
+      security:
+        - apiToken: [certificates:read]
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        "200":
+          description: The server
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Server" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/servers/{id}/certificates:
+    get:
+      tags: [Servers]
+      operationId: getServerCertificates
+      summary: A server's certificates, in detail
+      x-required-scope: certificates:read
+      security:
+        - apiToken: [certificates:read]
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/servers/{id}/contacts:
+    get:
+      tags: [Servers]
+      operationId: getServerContacts
+      summary: A server's points of contact
+      x-required-scope: certificates:read
+      security:
+        - apiToken: [certificates:read]
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [Servers]
+      operationId: addServerContact
+      summary: Add a point of contact
+      x-required-scope: inventory:write
+      security:
+        - apiToken: [inventory:write]
+      parameters:
+        - $ref: "#/components/parameters/id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: An address, or the id of a person in the directory.
+              properties:
+                email: { type: string, format: email }
+                userId: { type: integer, format: int64 }
+      responses:
+        "201": { $ref: "#/components/responses/Json" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { description: Already a contact }
+
+  /api/v1/servers/{id}/contacts/{contactId}:
+    delete:
+      tags: [Servers]
+      operationId: removeServerContact
+      summary: Remove a point of contact added in CertAlert
+      x-required-scope: inventory:write
+      security:
+        - apiToken: [inventory:write]
+      parameters:
+        - $ref: "#/components/parameters/id"
+        - { name: contactId, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        "204": { description: Removed }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/servers/{id}/attributes:
+    get:
+      tags: [Servers]
+      operationId: getServerAttributes
+      summary: A server's attributes
+      x-required-scope: certificates:read
+      security:
+        - apiToken: [certificates:read]
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+
+  /api/v1/servers/{id}/attributes/{definitionId}:
+    put:
+      tags: [Servers]
+      operationId: setServerAttribute
+      summary: Set one attribute of a server
+      x-required-scope: inventory:write
+      security:
+        - apiToken: [inventory:write]
+      parameters:
+        - $ref: "#/components/parameters/id"
+        - { name: definitionId, in: path, required: true, schema: { type: integer, format: int64 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+
+  /api/v1/servers/{id}/probe:
+    post:
+      tags: [Servers]
+      operationId: probeServer
+      summary: Connect to the server's URL and read the certificate it presents
+      x-required-scope: admin
+      security:
+        - apiToken: [admin]
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+
+  /api/v1/servers/{id}/audit:
+    get:
+      tags: [Administration]
+      operationId: getServerAudit
+      summary: What happened to a server
+      x-required-scope: admin
+      security:
+        - apiToken: [admin]
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+
+  /api/v1/stats/servers:
+    get:
+      tags: [Servers]
+      operationId: serverStats
+      summary: Servers by the state of their certificates
+      x-required-scope: certificates:read
+      security:
+        - apiToken: [certificates:read]
+      responses:
+        "200":
+          description: Counts
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DirectoryStats" }
+
+  /api/v1/projects:
+    get:
+      tags: [Projects]
+      operationId: listProjects
+      summary: Projects
+      x-required-scope: certificates:read
+      security:
+        - apiToken: [certificates:read]
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+    post:
+      tags: [Projects]
+      operationId: createProject
+      summary: Create a project
+      x-required-scope: inventory:write
+      security:
+        - apiToken: [inventory:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                description: { type: string }
+      responses:
+        "201": { $ref: "#/components/responses/Json" }
+
+  /api/v1/projects/{id}:
+    put:
+      tags: [Projects]
+      operationId: updateProject
+      summary: Rename or describe a project
+      x-required-scope: inventory:write
+      security:
+        - apiToken: [inventory:write]
+      parameters:
+        - $ref: "#/components/parameters/id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+    delete:
+      tags: [Projects]
+      operationId: deleteProject
+      summary: Delete a project
+      x-required-scope: inventory:write
+      security:
+        - apiToken: [inventory:write]
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        "204": { description: Deleted }
+
+  /api/v1/projects/{id}/users/{userId}:
+    post:
+      tags: [Projects]
+      operationId: addProjectMember
+      summary: Add a person to a project
+      x-required-scope: inventory:write
+      security:
+        - apiToken: [inventory:write]
+      parameters:
+        - $ref: "#/components/parameters/id"
+        - { name: userId, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+    delete:
+      tags: [Projects]
+      operationId: removeProjectMember
+      summary: Remove a person from a project
+      x-required-scope: inventory:write
+      security:
+        - apiToken: [inventory:write]
+      parameters:
+        - $ref: "#/components/parameters/id"
+        - { name: userId, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+
+  /api/v1/projects/{id}/servers/{serverId}:
+    post:
+      tags: [Projects]
+      operationId: addProjectServer
+      summary: Add a server to a project
+      x-required-scope: inventory:write
+      security:
+        - apiToken: [inventory:write]
+      parameters:
+        - $ref: "#/components/parameters/id"
+        - { name: serverId, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+    delete:
+      tags: [Projects]
+      operationId: removeProjectServer
+      summary: Remove a server from a project
+      x-required-scope: inventory:write
+      security:
+        - apiToken: [inventory:write]
+      parameters:
+        - $ref: "#/components/parameters/id"
+        - { name: serverId, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+
+  /api/v1/projects/{id}/admins/{userId}:
+    post:
+      tags: [Projects]
+      operationId: addProjectAdmin
+      summary: Make a person a project administrator
+      x-required-scope: admin
+      security:
+        - apiToken: [admin]
+      parameters:
+        - $ref: "#/components/parameters/id"
+        - { name: userId, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+    delete:
+      tags: [Projects]
+      operationId: removeProjectAdmin
+      summary: Take away a project administrator
+      x-required-scope: admin
+      security:
+        - apiToken: [admin]
+      parameters:
+        - $ref: "#/components/parameters/id"
+        - { name: userId, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+
+  /api/v1/revocation:
+    get:
+      tags: [Certificates]
+      operationId: revocationStatus
+      summary: How the revocation check stands
+      x-required-scope: certificates:read
+      security:
+        - apiToken: [certificates:read]
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+
+  /api/v1/people:
+    get:
+      tags: [People]
+      operationId: listPeople
+      summary: People, paged
+      x-required-scope: people:read
+      security:
+        - apiToken: [people:read]
+      parameters:
+        - name: q
+          in: query
+          description: Text in the person's name, uid, address or DN.
+          schema: { type: string }
+        - $ref: "#/components/parameters/certificateStatus"
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/size"
+      responses:
+        "200":
+          description: A page of people
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Page"
+                  - type: object
+                    properties:
+                      content:
+                        type: array
+                        items: { $ref: "#/components/schemas/Person" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/people/{id}:
+    get:
+      tags: [People]
+      operationId: getPerson
+      summary: One person
+      x-required-scope: people:read
+      security:
+        - apiToken: [people:read]
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        "200":
+          description: The person
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Person" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/users/{id}/certificates:
+    get:
+      tags: [People]
+      operationId: getPersonCertificates
+      summary: A person's certificates, in detail
+      x-required-scope: people:read
+      security:
+        - apiToken: [people:read]
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/users/{id}/addresses:
+    get:
+      tags: [People]
+      operationId: getPersonAddresses
+      summary: The addresses a person answers to
+      x-required-scope: people:read
+      security:
+        - apiToken: [people:read]
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+
+  /api/v1/users/{id}/audit:
+    get:
+      tags: [Administration]
+      operationId: getPersonAudit
+      summary: What happened to a person's entry
+      x-required-scope: admin
+      security:
+        - apiToken: [admin]
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+
+  /api/v1/stats/users:
+    get:
+      tags: [People]
+      operationId: personStats
+      summary: People by the state of their certificates
+      x-required-scope: people:read
+      security:
+        - apiToken: [people:read]
+      responses:
+        "200":
+          description: Counts
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DirectoryStats" }
+
+  /api/v1/jobs:
+    get:
+      tags: [Jobs]
+      operationId: listJobRuns
+      summary: Recent job runs, newest first
+      x-required-scope: jobs:read
+      security:
+        - apiToken: [jobs:read]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
+      responses:
+        "200":
+          description: Runs
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/JobRun" }
+
+  /api/v1/jobs/{id}:
+    get:
+      tags: [Jobs]
+      operationId: getJobRun
+      summary: How a run is going
+      x-required-scope: jobs:read
+      security:
+        - apiToken: [jobs:read]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The run
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JobRun" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/sync/runs:
+    get:
+      tags: [Jobs]
+      operationId: listSyncRuns
+      summary: The history of directory sweeps
+      x-required-scope: jobs:read
+      security:
+        - apiToken: [jobs:read]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 20 } }
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+
+  /api/v1/changelog:
+    get:
+      tags: [Jobs]
+      operationId: changelogStatus
+      summary: How the changelog connector stands
+      x-required-scope: jobs:read
+      security:
+        - apiToken: [jobs:read]
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+
+  /api/v1/sync:
+    post:
+      tags: [Jobs]
+      operationId: startSync
+      summary: Sweep people and servers
+      x-required-scope: jobs:run
+      security:
+        - apiToken: [jobs:run]
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+  /api/v1/sync/users:
+    post:
+      tags: [Jobs]
+      operationId: startUserSweep
+      summary: Sweep people
+      x-required-scope: jobs:run
+      security:
+        - apiToken: [jobs:run]
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+  /api/v1/sync/servers:
+    post:
+      tags: [Jobs]
+      operationId: startServerSweep
+      summary: Sweep servers
+      x-required-scope: jobs:run
+      security:
+        - apiToken: [jobs:run]
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+  /api/v1/sync/refresh:
+    post:
+      tags: [Jobs]
+      operationId: startExpiryRefresh
+      summary: Re-evaluate every certificate's state against today's date
+      x-required-scope: jobs:run
+      security:
+        - apiToken: [jobs:run]
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+  /api/v1/changelog/poll:
+    post:
+      tags: [Jobs]
+      operationId: pollChangelog
+      summary: Read the directory's changelog now
+      x-required-scope: jobs:run
+      security:
+        - apiToken: [jobs:run]
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+  /api/v1/revocation/check:
+    post:
+      tags: [Jobs]
+      operationId: startRevocationCheck
+      summary: Check every certificate's revocation status
+      x-required-scope: jobs:run
+      security:
+        - apiToken: [jobs:run]
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+  /api/v1/notifications/digest:
+    post:
+      tags: [Jobs]
+      operationId: sendDigest
+      summary: Send the expiry round-up now
+      x-required-scope: jobs:run
+      security:
+        - apiToken: [jobs:run]
+      parameters:
+        - name: dryRun
+          in: query
+          description: Build every message and send none; answers 200 with what would have gone.
+          schema: { type: boolean, default: false }
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+        "202": { $ref: "#/components/responses/Accepted" }
+
+  /api/v1/sync/prune:
+    post:
+      tags: [Administration]
+      operationId: startPrune
+      summary: Remove entries the directory no longer holds
+      x-required-scope: admin
+      security:
+        - apiToken: [admin]
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+  /api/v1/sync/prune/preview:
+    get:
+      tags: [Administration]
+      operationId: previewPrune
+      summary: How many entries a prune would remove
+      x-required-scope: admin
+      security:
+        - apiToken: [admin]
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+  /api/v1/sync/certificate-cleanup:
+    post:
+      tags: [Administration]
+      operationId: startCertificateCleanup
+      summary: Delete long-expired and revoked certificates from the directory
+      x-required-scope: admin
+      security:
+        - apiToken: [admin]
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+  /api/v1/sync/certificate-cleanup/preview:
+    get:
+      tags: [Administration]
+      operationId: previewCertificateCleanup
+      summary: What a cleanup would delete
+      x-required-scope: admin
+      security:
+        - apiToken: [admin]
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+
+  /api/v1/audit/summary:
+    get:
+      tags: [Administration]
+      operationId: auditSummary
+      summary: The audit trail at a glance
+      x-required-scope: admin
+      security:
+        - apiToken: [admin]
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+  /api/v1/admin/audit/events:
+    get:
+      tags: [Administration]
+      operationId: listAuditEvents
+      summary: Audit events, filtered and paged
+      x-required-scope: admin
+      security:
+        - apiToken: [admin]
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+  /api/v1/admin/audit/events/{seq}:
+    get:
+      tags: [Administration]
+      operationId: getAuditEvent
+      summary: One audit event, as recorded
+      x-required-scope: admin
+      security:
+        - apiToken: [admin]
+      parameters:
+        - { name: seq, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+  /api/v1/admin/audit/export:
+    get:
+      tags: [Administration]
+      operationId: exportAuditEvents
+      summary: The audit trail as CSV or NDJSON
+      x-required-scope: admin
+      security:
+        - apiToken: [admin]
+      parameters:
+        - { name: format, in: query, schema: { type: string, enum: [csv, ndjson], default: csv } }
+      responses:
+        "200":
+          description: The export
+          content:
+            text/csv: { schema: { type: string } }
+            application/x-ndjson: { schema: { type: string } }
+  /api/v1/admin/audit/verify:
+    post:
+      tags: [Administration]
+      operationId: verifyAuditChain
+      summary: Check the audit trail's hash chain
+      x-required-scope: admin
+      security:
+        - apiToken: [admin]
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+  /api/v1/admin/audit/delivery:
+    get:
+      tags: [Administration]
+      operationId: auditDelivery
+      summary: How audit forwarding to the SIEM stands
+      x-required-scope: admin
+      security:
+        - apiToken: [admin]
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+  /api/v1/admin/server-attributes:
+    get:
+      tags: [Administration]
+      operationId: listServerAttributeDefinitions
+      summary: The attributes kept about servers
+      x-required-scope: admin
+      security:
+        - apiToken: [admin]
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+    post:
+      tags: [Administration]
+      operationId: createServerAttributeDefinition
+      summary: Define an attribute
+      x-required-scope: admin
+      security:
+        - apiToken: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "201": { $ref: "#/components/responses/Json" }
+  /api/v1/admin/server-attributes/{id}:
+    put:
+      tags: [Administration]
+      operationId: updateServerAttributeDefinition
+      summary: Change an attribute's definition
+      x-required-scope: admin
+      security:
+        - apiToken: [admin]
+      parameters:
+        - $ref: "#/components/parameters/id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+    delete:
+      tags: [Administration]
+      operationId: deleteServerAttributeDefinition
+      summary: Retire an attribute, and every value of it
+      x-required-scope: admin
+      security:
+        - apiToken: [admin]
+      parameters:
+        - $ref: "#/components/parameters/id"
+      responses:
+        "204": { description: Retired }
+  /api/v1/license:
+    get:
+      tags: [Administration]
+      operationId: getLicense
+      summary: What the license allows
+      x-required-scope: admin
+      security:
+        - apiToken: [admin]
+      responses:
+        "200": { $ref: "#/components/responses/Json" }
+
+components:
+  securitySchemes:
+    apiToken:
+      type: http
+      scheme: bearer
+      bearerFormat: "cat_ followed by 43 base64url characters"
+      description: |
+        An API token, created by an administrator on the Integrations page. Scopes:
+        `certificates:read`, `people:read`, `jobs:read`, `jobs:run` (implies jobs:read),
+        `inventory:write`, `admin` (implies every other). An operation's `x-required-scope`
+        is the scope it needs.
+
+  parameters:
+    id:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    page:
+      name: page
+      in: query
+      description: Zero-based page number.
+      schema: { type: integer, minimum: 0, default: 0 }
+    size:
+      name: size
+      in: query
+      description: Rows per page, up to `cert-alert.api.max-page-size` (500 by default).
+      schema: { type: integer, minimum: 1, default: 100 }
+    q:
+      name: q
+      in: query
+      description: Text found in the subject, issuer, serial number, fingerprint, names or owner's name (case aside).
+      schema: { type: string }
+    status:
+      name: status
+      in: query
+      description: The certificate's state; repeat for more than one.
+      schema:
+        type: array
+        items: { type: string, enum: [VALID, EXPIRING_SOON, EXPIRED] }
+      explode: true
+    certificateStatus:
+      name: certificateStatus
+      in: query
+      description: The worst state among the entry's certificates; repeat for more than one.
+      schema:
+        type: array
+        items: { type: string, enum: [NONE, VALID, EXPIRING_SOON, EXPIRED] }
+      explode: true
+    ownerType:
+      name: ownerType
+      in: query
+      schema: { type: string, enum: [USER, SERVER] }
+    expiresWithinDays:
+      name: expiresWithinDays
+      in: query
+      description: Expires between now and this many days ahead.
+      schema: { type: integer, minimum: 1 }
+    expiresFrom:
+      name: expiresFrom
+      in: query
+      description: Expires on or after the start of this day (UTC).
+      schema: { type: string, format: date }
+    expiresTo:
+      name: expiresTo
+      in: query
+      description: Expires on or before the end of this day (UTC).
+      schema: { type: string, format: date }
+    issuer:
+      name: issuer
+      in: query
+      description: Text found in the issuer's DN.
+      schema: { type: string }
+    keyAlgorithm:
+      name: keyAlgorithm
+      in: query
+      description: RSA, EC, Ed25519 ...; repeat for more than one.
+      schema: { type: array, items: { type: string } }
+      explode: true
+    keySizeMin:
+      name: keySizeMin
+      in: query
+      schema: { type: integer }
+    keySizeMax:
+      name: keySizeMax
+      in: query
+      schema: { type: integer }
+    hashAlgorithm:
+      name: hashAlgorithm
+      in: query
+      description: SHA-256, SHA-1 ...; repeat for more than one.
+      schema: { type: array, items: { type: string } }
+      explode: true
+    revocation:
+      name: revocation
+      in: query
+      schema:
+        type: array
+        items: { type: string, enum: [NOT_CHECKED, GOOD, REVOKED, UNKNOWN] }
+      explode: true
+    risk:
+      name: risk
+      in: query
+      description: "`any`, or one flag: WILDCARD, BROAD_WILDCARD, MANY_NAMES, MANY_DOMAINS, BARE_HOSTNAME. Ignored where risk analysis is not licensed."
+      schema: { type: string }
+    projectId:
+      name: projectId
+      in: query
+      description: Held by a member or server of this project. Ignored where projects are not licensed.
+      schema: { type: integer, format: int64 }
+    serverId:
+      name: serverId
+      in: query
+      schema: { type: integer, format: int64 }
+    userId:
+      name: userId
+      in: query
+      schema: { type: integer, format: int64 }
+
+  responses:
+    Json:
+      description: JSON
+      content:
+        application/json:
+          schema: {}
+    Accepted:
+      description: The job is queued; ask after it at `Location`.
+      headers:
+        Location:
+          schema: { type: string, example: /api/v1/jobs/4f6c... }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/JobRun" }
+    BadRequest:
+      description: A filter or a body that does not make sense
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Unauthorized:
+      description: No token, or one that is unknown, revoked or expired
+      headers:
+        WWW-Authenticate:
+          schema: { type: string, example: 'Bearer realm="cert-alert", error="invalid_token"' }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    Forbidden:
+      description: The token's scopes do not cover this operation
+      headers:
+        WWW-Authenticate:
+          schema: { type: string, example: 'Bearer realm="cert-alert", error="insufficient_scope"' }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    NotFound:
+      description: No such thing
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    TooManyRequests:
+      description: The token is over its rate
+      headers:
+        Retry-After:
+          description: Seconds until it may try again
+          schema: { type: integer }
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+
+  schemas:
+    Problem:
+      type: object
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+    Page:
+      type: object
+      properties:
+        content: { type: array, items: {} }
+        page: { type: integer }
+        size: { type: integer }
+        totalElements: { type: integer, format: int64 }
+        totalPages: { type: integer }
+        first: { type: boolean }
+        last: { type: boolean }
+    Certificate:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        ownerType: { type: string, enum: [USER, SERVER] }
+        ownerId: { type: integer, format: int64 }
+        ownerName: { type: string }
+        ownerDn: { type: string }
+        ownerEmail: { type: [string, "null"] }
+        pointsOfContact: { type: [string, "null"], description: A server's directory points of contact, as shown }
+        subjectDn: { type: string }
+        issuerDn: { type: string }
+        serialNumber: { type: string }
+        sha256Fingerprint: { type: string }
+        notBefore: { type: string, format: date-time }
+        notAfter: { type: string, format: date-time }
+        daysUntilExpiry: { type: integer, description: Negative once expired }
+        status: { type: string, enum: [VALID, EXPIRING_SOON, EXPIRED] }
+        keyAlgorithm: { type: string }
+        keySize: { type: [integer, "null"] }
+        signatureAlgorithm: { type: string }
+        hashAlgorithm: { type: string }
+        subjectAlternativeNames: { type: [string, "null"] }
+        use: { type: string }
+        revocationStatus: { type: string, enum: [NOT_CHECKED, GOOD, REVOKED, UNKNOWN] }
+        revokedAt: { type: [string, "null"], format: date-time }
+        risks: { type: array, items: { type: string } }
+        cachedAt: { type: string, format: date-time }
+    ExpirySummary:
+      type: object
+      properties:
+        asOf: { type: string, format: date-time }
+        total: { type: integer, format: int64 }
+        byStatus:
+          type: object
+          additionalProperties: { type: integer, format: int64 }
+          example: { VALID: 812, EXPIRING_SOON: 31, EXPIRED: 6 }
+        expiringWithinDays:
+          type: object
+          additionalProperties: { type: integer, format: int64 }
+          example: { "7": 4, "30": 31, "60": 70, "90": 102 }
+        revoked: { type: integer, format: int64 }
+        byOwnerType:
+          type: object
+          additionalProperties: { type: integer, format: int64 }
+    DirectoryStats:
+      type: object
+      properties:
+        total: { type: integer, format: int64 }
+        byStatus:
+          type: object
+          additionalProperties: { type: integer, format: int64 }
+    Server:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        dn: { type: string }
+        commonName: { type: string }
+        uid: { type: string }
+        serverUrl: { type: string }
+        serverPocDisplay: { type: string }
+        certificateCount: { type: integer }
+        certificateStatus: { type: string, enum: [NONE, VALID, EXPIRING_SOON, EXPIRED] }
+        earliestExpiry: { type: [string, "null"], format: date-time }
+        latestExpiry: { type: [string, "null"], format: date-time }
+        lastSyncedAt: { type: [string, "null"], format: date-time }
+      additionalProperties: true
+    Person:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        dn: { type: string }
+        uid: { type: string }
+        displayName: { type: string }
+        email: { type: string }
+        certificateCount: { type: integer }
+        certificateStatus: { type: string, enum: [NONE, VALID, EXPIRING_SOON, EXPIRED] }
+        earliestExpiry: { type: [string, "null"], format: date-time }
+        latestExpiry: { type: [string, "null"], format: date-time }
+      additionalProperties: true
+    JobRun:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        job: { type: string }
+        state: { type: string, enum: [QUEUED, RUNNING, SUCCEEDED, FAILED, SKIPPED] }
+        finished: { type: boolean }
+        requestedAt: { type: string, format: date-time }
+        startedAt: { type: [string, "null"], format: date-time }
+        finishedAt: { type: [string, "null"], format: date-time }
+        result: { description: What the job returned, once it has succeeded }
+        error: { type: [string, "null"] }
+        statusUrl: { type: string }
+
+  x-webhooks-note: |
+    Outbound webhooks are documented under `webhooks` below; they are configured on the
+    Integrations page, not through this API.
+
+webhooks:
+  certalertEvent:
+    post:
+      summary: An event CertAlert posts to a configured endpoint (format JSON)
+      description: |
+        Headers: `X-CertAlert-Event` (the type), `X-CertAlert-Delivery` (the event id, the same on
+        every retry - de-duplicate on it), `X-CertAlert-Timestamp` (Unix seconds), and
+        `X-CertAlert-Signature: t=<timestamp>,v1=<hex>`, the HMAC-SHA256 under the endpoint's
+        secret of `<timestamp>.<raw body>`. Reject a signature that does not match, or whose
+        timestamp is more than five minutes from now. Answer 2xx; anything else is retried with
+        backoff for up to a day (`cert-alert.webhooks.give-up-after`).
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id: { type: string, format: uuid }
+                type: { type: string, enum: [certificate.expiring, certificate.expired, job.completed, job.failed, webhook.test] }
+                createdAt: { type: string, format: date-time }
+                summary: { type: string }
+                data: { type: object }
+      responses:
+        "200": { description: Received }
