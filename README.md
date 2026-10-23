@@ -492,10 +492,12 @@ Notes on the image:
   one cannot be baked in.
 - The image can serve a directory of its own, because the LDAP SDK ships in the jar for
   [demo mode](#demo-mode) — a complete instance in one container, with nothing to point it
-  at:
+  at. The documented way to run it is `docker-compose.demo.yml`, which publishes no port
+  (see [Demo mode](#demo-mode)). Publishing one yourself is a deliberate choice, and best
+  kept to this machine:
 
   ```bash
-  docker run --rm -p 8080:8080 -v cert-alert-demo-license:/var/lib/ens/certalert \
+  docker run --rm -p 127.0.0.1:8080:8080 -v cert-alert-demo-license:/var/lib/ens \
     cert-alert:latest --spring.profiles.active=demo
   ```
 
@@ -1281,10 +1283,22 @@ A running copy anybody can look at and nobody can change — for showing the app
 people without issuing them a certificate or an account first.
 
 ```bash
-./gradlew bootRun --args='--spring.profiles.active=demo'
+docker compose -f docker-compose.demo.yml -p cert-alert-demo up --build
 ```
 
-That is the whole of it — nothing else has to be running, bar a license. The demo
+That builds the image from this repository and runs it in the `demo` profile — one
+container, nothing else, bar a license. Outside a container,
+`./gradlew bootRun --args='--spring.profiles.active=demo'` does the same.
+
+**The demo compose file publishes no port.** Its sign-in page prints working credentials,
+so binding it to the host's interfaces is something you choose rather than a default. It
+listens on 8080 inside its own network, `cert-alert-demo_demo`; reach it either with a
+reverse proxy attached to that network and pointed at `cert-alert:8080`, or with an
+override file of your own (the file's header shows one, publishing on `127.0.0.1:8080`).
+`docker compose -f docker-compose.demo.yml -p cert-alert-demo down -v` resets it, license
+included.
+
+The demo itself is the same either way: nothing else has to be running, bar a license. The demo
 generates a directory of invented people and servers, serves it from memory over LDAP, and
 then indexes it the way it would index anyone's, so what a visitor sees is the application
 working rather than a mock-up of it.
@@ -1293,8 +1307,10 @@ working rather than a mock-up of it.
 CertAlert from the ENS licensing portal. An unlicensed demo shows only the license screen:
 sign in as `demo.admin` and upload it there — the one change a demo accepts, and only while
 it has no license in full effect, so a visitor cannot swap a working one. The first sweep
-runs as soon as it is installed. Or put it in place before starting: in the license
-volume (`docker cp`, or `ENS_LICENSE_FILE` pointing at it when run from Gradle). No license
+runs as soon as it is installed. Or put it in place before starting: save it as
+`./license/license.lic` and the demo compose file's `license-init` service copies it into
+the license volume (or `docker cp` it there, or point `ENS_LICENSE_FILE` at it when run
+from Gradle). No license
 is ever committed to this repository; the tests sign their own with the portal's TEST key,
 which a real build does not trust.
 
@@ -1351,7 +1367,8 @@ projects are this application's own data — so the demo creates one at startup 
 project administrator in charge of it. Without that, signing in as them would show exactly
 what the reader shows and the page would be describing a role the demo does not have.
 
-It serves plain HTTP, on `http://localhost:8080`, even where `CERT_ALERT_TLS_ENABLED` is
+It serves plain HTTP on port 8080 (`http://localhost:8080` when run from Gradle; inside its
+own network from the compose file), even where `CERT_ALERT_TLS_ENABLED` is
 set. TLS is here to carry X.509 client certificates, and a demo has nothing for one to
 authenticate; it also needs a keystore, which a demo does not carry — so a demo that
 inherited TLS from its environment would fail to start for want of one. Put a demo behind
