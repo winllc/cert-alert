@@ -1,0 +1,116 @@
+# A read-only demo of CertAlert from one command, with nothing to configure: the application in
+# its `demo` profile (src/main/resources/application-demo.yml), built from this repository.
+#
+#     docker compose -f docker-compose.demo.yml -p cert-alert-demo up --build
+#
+# One container does the lot. The demo generates a directory of invented people and servers,
+# serves it from memory over LDAP inside the process, and indexes it into an in-memory database,
+# so there is no PostgreSQL and no directory service beside it. The sign-in page lists the demo
+# accounts - one per role (demo.admin, demo.project, demo.contact, demo.reader), all with the
+# password `password` - and nothing can be changed whichever is chosen.
+#
+# Nothing is published to the host. The sign-in page prints working credentials, and the
+# administrator they open reads the whole directory, so binding the demo to the host's
+# interfaces by default would hand that to anything that can reach the machine. It listens on
+# 8080 inside this project's network (cert-alert-demo_demo) only. Reach it on purpose, either:
+#
+#   1. with a reverse proxy attached to cert-alert-demo_demo, pointed at cert-alert:8080; or
+#   2. with an override file you write yourself, kept out of this repository:
+#
+#          # demo-ports.yml
+#          services:
+#            cert-alert:
+#              ports: ["127.0.0.1:8080:8080"]
+#
+#          docker compose -f docker-compose.demo.yml -f demo-ports.yml -p cert-alert-demo up --build
+#
+#      and open http://localhost:8080.
+#
+# Without either, `docker compose -f docker-compose.demo.yml -p cert-alert-demo exec cert-alert
+# curl -s http://localhost:8080/livez` reaches it from a shell.
+#
+# It needs an ENS license like any installation: download an evaluation license for CertAlert
+# from the ENS licensing portal. Without one the demo shows only the license screen. Either:
+#
+#   - save it as ./license/license.lic before "up" (never commit it; .gitignore excludes it), and
+#     license-init copies it into the license volume; or
+#   - sign in as demo.admin and upload it on the license screen - the one change a demo accepts,
+#     and only while it has no license in full effect.
+#
+# It is kept in the demo-license volume with this installation's id, so it survives restarts and
+# rebuilds. The directory and its index do not: every start generates them afresh.
+#
+# Use -p as above. Without it, compose derives the project from the directory name and this demo
+# would share its network and volumes with docker-compose.yml's stack.
+#
+# To reset - stop it and delete its volumes, license included:
+#
+#     docker compose -f docker-compose.demo.yml -p cert-alert-demo down -v
+#
+# THIS IS NOT A PRODUCTION CONFIGURATION, and never point it at a real directory: see the
+# README's "Demo mode". To install CertAlert, use the release package or the Helm chart.
+#
+# Docker and Podman alike (podman-compose works with the same commands): the images are fully
+# qualified, since Podman has no default registry, and the bind mount carries :Z for SELinux
+# hosts, which Docker without SELinux ignores.
+
+services:
+  # Copies ./license/license.lic, when there is one, into the volume the application keeps its
+  # license and licensing state in (installation id, revisions seen), and hands that directory to
+  # the application's user (uid 185, group 0). Only when the file here is newer than the one in
+  # the volume, so a license uploaded on the license screen is not overwritten by an older file.
+  # Runs and exits before the application starts.
+  license-init:
+    image: docker.io/library/busybox:1.37
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        dir=/var/lib/ens/certalert
+        mkdir -p "$$dir"
+        if [ -f /license/license.lic ]; then
+          cp -u /license/license.lic "$$dir/license.lic"
+          echo "license/license.lic is in the demo-license volume"
+        else
+          echo "No license/license.lic: sign in as demo.admin and upload one on the license screen"
+        fi
+        chown -R 185:0 /var/lib/ens && chmod 0775 /var/lib/ens "$$dir"
+        [ ! -f "$$dir/license.lic" ] || chmod 0664 "$$dir/license.lic"
+    volumes:
+      - ./license:/license:ro,Z
+      - demo-license:/var/lib/ens
+    restart: "no"
+    networks:
+      - demo
+
+  cert-alert:
+    build:
+      context: .
+      args:
+        REVISION: ${GIT_REVISION:-unknown}
+    depends_on:
+      license-init:
+        condition: service_completed_successfully
+    environment:
+      # Read-only, with its own generated directory and an in-memory database; see
+      # application-demo.yml and the README's "Demo mode". Plain HTTP on 8080.
+      SPRING_PROFILES_ACTIVE: demo
+    # The license, this installation's id and the license revisions seen. The image declares
+    # VOLUME /var/lib/ens and /var/log/ens; both are named here so "down -v" names what it removes.
+    volumes:
+      - demo-license:/var/lib/ens
+      - demo-audit:/var/log/ens
+    # No port published to the host - see the header. The image's HEALTHCHECK probes /livez here.
+    expose:
+      - "8080"
+    restart: unless-stopped
+    networks:
+      - demo
+
+networks:
+  demo:
+
+volumes:
+  demo-license:
+  demo-audit:
