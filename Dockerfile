@@ -104,12 +104,19 @@ LABEL org.opencontainers.image.title="cert-alert" \
       org.opencontainers.image.base.name="registry.access.redhat.com/ubi9/openjdk-21-runtime" \
       com.enssolutions.license.path="/var/lib/ens/certalert/license.lic"
 
-# curl is for the health check below. The minimal UBI these images are built on ships
+# Security updates Red Hat has published since the base image was built: the image scan
+# fails the build on any HIGH or CRITICAL vulnerability with a fix, and the fix is usually
+# here before a new base image is.
+# PACKAGES_REFRESH changes on every CI build (the run id), so a cached layer never holds back an
+# update: without it the build cache would keep whichever packages this step first saw.
+ARG PACKAGES_REFRESH=
+#
+# Then curl, for the health check below. The minimal UBI these images are built on ships
 # curl-minimal, which provides it - so this asks whether it is there rather than
 # installing a second curl over the top of the one that is.
-RUN if ! command -v curl >/dev/null 2>&1; then \
-        microdnf install -y --nodocs curl && microdnf clean all; \
-    fi
+RUN microdnf update -y --nodocs \
+ && if ! command -v curl >/dev/null 2>&1; then microdnf install -y --nodocs curl; fi \
+ && microdnf clean all
 
 # No user is created: the image already has one, uid 185, and it is the one Red Hat's
 # tooling and its own documentation expect. Creating another would also mean installing
