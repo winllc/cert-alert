@@ -297,6 +297,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             REVISION=${{ github.sha }}
+            PACKAGES_REFRESH=${{ github.run_id }}-${{ github.run_attempt }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
