@@ -185,7 +185,8 @@ jobs:
   release-bundle:
     # The customer bundle's files (deploy/release), without building anything: shellcheck on
     # its scripts, and its compose files rendered by docker compose and by podman-compose in
-    # every combination its README documents. The image job below installs the built bundle.
+    # every combination its README documents; and that docker-compose.demo.yml publishes no
+    # port. The image job below installs the built bundle.
     runs-on: ubuntu-latest
 
     env:
@@ -210,6 +211,16 @@ jobs:
           podman version
           podman-compose version
           scripts/check-release-bundle.sh
+
+      - name: The demo compose file publishes no port
+        run: |
+          f=docker-compose.demo.yml
+          docker compose -f "$f" -p cert-alert-demo config --format json | python3 -c '
+          import json, sys
+          bad = [n for n, s in json.load(sys.stdin)["services"].items() if s.get("ports")]
+          sys.exit("services with ports: %s" % bad if bad else 0)'
+          podman-compose -f "$f" -p cert-alert-demo config > "$RUNNER_TEMP/demo.yml"
+          ! grep -n 'ports:' "$RUNNER_TEMP/demo.yml"
 
   image:
     # Builds the container image on every push, scans it, and publishes what it just proved
