@@ -146,6 +146,10 @@ check "touching nothing" bash -c "! grep -q 'exec -i' '$STUB_CALLS'"
 printf 'not a dump\n' | gzip > "$WORK/not-a-dump.sql.gz"
 check "refuses what is not a pg_dump" bash -c "! (cd '$DIR' && ./restore.sh '$WORK/not-a-dump.sql.gz' --yes) > '$OUT' 2>&1"
 check "restores with --yes" run ./restore.sh "$WORK/mine.sql.gz" --yes
+# A real database's dump runs past a pipe buffer: reading only its start must not count as a failure.
+{ printf -- '--\n-- PostgreSQL database dump\n--\n'; head -c 4000000 /dev/zero | tr '\0' 'x' | fold -w 100; } | gzip > "$WORK/large.sql.gz"
+check "takes a backup larger than a pipe buffer" run ./restore.sh "$WORK/large.sql.gz" --yes
+check "restores with --yes again" run ./restore.sh "$WORK/mine.sql.gz" --yes
 check "the schema emptied first" bash -c "head -n 2 '$STUB_PSQL_IN' | tail -n 1 | grep -qx 'DROP SCHEMA IF EXISTS public CASCADE;'"
 check "then the backup" grep -q 'CREATE TABLE stand_in' "$STUB_PSQL_IN"
 check "in one transaction" grep -q -- '--single-transaction' "$STUB_CALLS"

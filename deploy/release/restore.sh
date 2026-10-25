@@ -41,8 +41,12 @@ die() { printf '\nerror: %s\n' "$*" >&2; exit 1; }
 [ -f "$FILE" ] || die "$FILE is not a file."
 [ -f .env ] || die "no .env here: run this in the directory cert-alert was installed from."
 gzip -t "$FILE" || die "$FILE is not a whole gzip file."
-gzip -dc "$FILE" | head -n 40 | grep -q 'PostgreSQL database dump' \
-    || die "$FILE does not look like a pg_dump backup."
+# Only the start is read: gzip then dies of a broken pipe, which pipefail would take for a bad file.
+header=$( (gzip -dc "$FILE" 2> /dev/null || true) | head -n 40)
+case "$header" in
+    *'PostgreSQL database dump'*) ;;
+    *) die "$FILE does not look like a pg_dump backup." ;;
+esac
 
 select_engine
 user=$(_engine_env_value CERT_ALERT_DB_USER); user=${user:-certalert}

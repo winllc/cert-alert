@@ -65,7 +65,8 @@ trap 'rm -f "$partial"' EXIT
 say "Backing up database $db to $OUT ..."
 engine exec "$id" pg_dump -U "$user" -d "$db" --no-password | gzip > "$partial"
 gzip -t "$partial" || die "the backup in $partial is not a whole gzip file."
-[ "$(gzip -dc "$partial" | head -c 4096 | wc -c)" -gt 0 ] || die "pg_dump wrote nothing."
+# Only the start is read: gzip then dies of a broken pipe, which pipefail would take for a failure.
+[ "$( (gzip -dc "$partial" 2> /dev/null || true) | head -c 4096 | wc -c)" -gt 0 ] || die "pg_dump wrote nothing."
 mv "$partial" "$OUT"
 chmod 600 "$OUT"
 trap - EXIT
