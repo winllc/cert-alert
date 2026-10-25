@@ -243,6 +243,12 @@ sso:
     jwsAlgorithm: ""
     # Default 2m.
     clockSkew: ""
+    # CERT_ALERT_SSO_OIDC_PROVIDER_LOGOUT: signing out of CertAlert signs out at the provider
+    # too (its end_session_endpoint), which sends the browser back to <publicUrl>/login?logout
+    # - register that with it as a post-logout redirect URI. Empty: true on a new
+    # installation; an upgrade keeps what it had (false for a release from before this
+    # setting, or when rendered without cluster access).
+    providerLogout: ""
   saml:
     # CERT_ALERT_SSO_SAML_ENABLED. A SAML 2.0 service provider. Its metadata is served at
     # <publicUrl>/saml2/service-provider-metadata/saml; the assertion consumer is
@@ -626,14 +632,26 @@ webhooks:
   # Empty: any host the address rules allow (never loopback, link-local or metadata).
   # Webhooks are https (443 by default): networkPolicy.egress.web has to reach them.
   allowedHosts: []
-  # CERT_ALERT_WEBHOOKS_BLOCK_PRIVATE_NETWORKS: refuse private addresses as well.
-  blockPrivateNetworks: false
+  # A host listed here may be on a private network: this is how a receiver inside the
+  # network (a chat bridge, a ticketing relay) is let in.
+  # CERT_ALERT_WEBHOOKS_BLOCK_PRIVATE_NETWORKS: private addresses (10/8, 172.16/12,
+  # 192.168/16, 100.64/10, fc00::/7). Empty (the default): refused for webhooks saved from
+  # now on; a webhook saved before this release keeps its address, with a startup warning,
+  # until its URL is changed. true: refused for every webhook. false: allowed for every
+  # webhook, as releases before this one did.
+  blockPrivateNetworks: ""
   # CERT_ALERT_WEBHOOKS_SECRET_KEY: a base64 AES key (openssl rand -base64 32) the signing
-  # secrets are encrypted with in the database. Inline, or from a Secret of your own.
-  # Unset, they are stored unencrypted (a warning is logged).
+  # secrets and URLs are encrypted with in the database. Inline, or from a Secret of your own.
   secretKey: ""
   existingSecret: ""
   existingSecretKey: webhooks-secret-key
+  # With neither: a new installation gets a random key in the chart's Secret, kept across
+  # upgrades like the generated database password (by lookup). An upgrade of a release that
+  # had no key does not get one - set secretKey or existingSecret to start encrypting (what is
+  # stored is encrypted at the next start). Rendering without cluster access (helm template,
+  # Argo CD) generates nothing: give the key yourself there. Unset, secrets are stored
+  # unencrypted and a warning is logged.
+  generateSecretKey: true
 
 # ---------------------------------------------------------------------------------------
 # Audit logging (ens-audit/1) - the ENS_AUDIT_* settings shared by every ENS product
@@ -676,6 +694,64 @@ audit:
     # udp, tcp or tls.
     protocol: tcp
     facility: local0
+
+# ---------------------------------------------------------------------------------------
+# Backup before every upgrade (see the chart README's "Backups and upgrades")
+# ---------------------------------------------------------------------------------------
+# A pre-upgrade hook Job that pg_dumps the database, gzipped, onto a volume, before helm
+# upgrade changes anything - the new pods migrate the schema as they start. If the dump fails
+# the upgrade stops there, with nothing changed. For the embedded database, or an external one
+# the chart has credentials for (database.password or database.existingSecret).
+#
+# Off by default: turning it on for an existing release creates the volume on that upgrade
+# and takes the first dump at the next one (a hook runs before the volume would exist), the
+# volume needs a storage class that can bind it, a large database needs a longer helm
+# --timeout (hooks count against it), and pg_dump must be as new as the server (the image
+# below is PostgreSQL 17). Your own database backups are still what to rely on: this is the
+# undo for one upgrade.
+upgradeBackup:
+  enabled: false
+  # Default: the embedded database's image (database.embedded.image).
+  image:
+    repository: ""
+    tag: ""
+    digest: ""
+    pullPolicy: IfNotPresent
+  # PGSSLMODE for an external database: verify-full checks its certificate and name (the CA
+  # in the image's trust store or via extraVolumes is not wired in here: use require, or a
+  # database the network keeps private).
+  sslMode: prefer
+  # How many dumps to keep on the volume, newest first.
+  keep: 5
+  persistence:
+    # A PVC of your own; otherwise one is created and kept (helm.sh/resource-policy: keep).
+    existingClaim: ""
+    size: 8Gi
+    storageClass: ""
+    accessModes: [ReadWriteOnce]
+  # The most the dump may take (seconds). helm upgrade --timeout must allow it too.
+  activeDeadlineSeconds: 1800
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 70
+    runAsGroup: 70
+    fsGroup: 70
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    capabilities:
+      drop: [ALL]
+  nodeSelector: {}
+  tolerations: []
 
 # ---------------------------------------------------------------------------------------
 # The ENS license

@@ -118,6 +118,7 @@ The license screen shows the installation id; after the first sign-in it is also
 | `sso.oidc.usernameClaim` / `.match` / `.groupsClaim` | `""` | `CERT_ALERT_SSO_OIDC_USERNAME_CLAIM` / `_MATCH` / `_GROUPS_CLAIM` | Default `preferred_username`, `UID` (or `DN`), none |
 | `sso.oidc.adminGroups` / `.auditorGroups` | `[]` | `CERT_ALERT_SSO_OIDC_ADMIN_GROUPS_<n>` / `_AUDITOR_GROUPS_<n>` | This provider's groups granting the role; only its groups are matched |
 | `sso.oidc.displayName`, `.scopes`, `.jwsAlgorithm`, `.clockSkew` | | `CERT_ALERT_SSO_OIDC_*` | |
+| `sso.oidc.providerLogout` | `""` | `CERT_ALERT_SSO_OIDC_PROVIDER_LOGOUT` | Signing out signs out at the provider too (its `end_session_endpoint`), back to `<publicUrl>/login?logout` - register that as a post-logout redirect URI. Empty: `true` on a new installation; an upgrade keeps what it had (`false` for a release from before the setting, or when rendered without cluster access, e.g. Argo CD) |
 | `sso.saml.enabled` | `false` | `CERT_ALERT_SSO_SAML_ENABLED` | SAML 2.0 sign-in. SP metadata: `https://<host>/saml2/service-provider-metadata/saml` |
 | `sso.saml.metadataUrl` or `.metadataConfigMap` (+ `.metadataConfigMapKey`) | `""` | `CERT_ALERT_SSO_SAML_METADATA_LOCATION` | The identity provider's metadata, from a URL or a ConfigMap of your own |
 | `sso.saml.signingSecret` | `""` | `CERT_ALERT_SSO_SAML_SIGNING_*_LOCATION` | A Secret with `tls.key` (PKCS#8 PEM) and `tls.crt` to sign requests with |
@@ -220,11 +221,25 @@ API tokens and webhooks are created on **Admin > Integrations**; these values bo
 | `api.maxLifetime` | `""` (the application's `365d`) | `CERT_ALERT_API_MAX_LIFETIME`; `0` removes the limit |
 | `webhooks.enabled` | `true` | `CERT_ALERT_WEBHOOKS_ENABLED` |
 | `webhooks.allowedHosts` | `[]` | `CERT_ALERT_WEBHOOKS_ALLOWED_HOSTS` (names, `*.suffix`, CIDRs) |
-| `webhooks.blockPrivateNetworks` | `false` | `CERT_ALERT_WEBHOOKS_BLOCK_PRIVATE_NETWORKS` |
-| `webhooks.secretKey` | `""` | `CERT_ALERT_WEBHOOKS_SECRET_KEY` (or `existingSecret` + `existingSecretKey`, `webhooks-secret-key`): a base64 AES key the signing secrets are encrypted with |
+| `webhooks.blockPrivateNetworks` | `""` | `CERT_ALERT_WEBHOOKS_BLOCK_PRIVATE_NETWORKS`. Empty: private addresses refused for webhooks saved from now on, while one saved before this release keeps its address (startup warning) until its URL changes; `true`: refused for all; `false`: allowed for all, as before. A host in `allowedHosts` may be private |
+| `webhooks.secretKey` | `""` | `CERT_ALERT_WEBHOOKS_SECRET_KEY` (or `existingSecret` + `existingSecretKey`, `webhooks-secret-key`): a base64 AES key the signing secrets and URLs are encrypted with |
+| `webhooks.generateSecretKey` | `true` | With neither of the above, a new installation gets a random key in the chart's Secret, kept across upgrades (by `lookup`, like the generated database password). Never generated on an upgrade, nor when rendering without cluster access (`helm template`, Argo CD): give the key yourself there |
 
 Webhooks go out on https; with `networkPolicy.enabled`, `networkPolicy.egress.web` has to
 reach the receivers.
+
+### Backups before upgrades
+
+| Value | Default | Description |
+|---|---|---|
+| `upgradeBackup.enabled` | `false` | A `pre-upgrade` hook Job that `pg_dump`s the database onto a volume before `helm upgrade` changes anything; if the dump fails, the upgrade stops there. For the embedded database, or an external one given `database.password` or `database.existingSecret` |
+| `upgradeBackup.persistence.existingClaim` | `""` | A PVC of your own; otherwise `<release>-cert-alert-upgrade-backups` is created (`size` `8Gi`) and kept on uninstall |
+| `upgradeBackup.keep` | `5` | Dumps kept, newest first |
+| `upgradeBackup.sslMode` | `prefer` | `PGSSLMODE` for an external database (`disable` for the embedded one) |
+| `upgradeBackup.activeDeadlineSeconds` | `1800` | The most the dump may take; `helm upgrade --timeout` must allow it too |
+| `upgradeBackup.image` | the embedded database's | `pg_dump` must be at least the server's major version (PostgreSQL 17 by default) |
+
+See [Backups and upgrades](#backups-and-upgrades) for why it is off by default.
 
 ### License and persistence
 
@@ -544,7 +559,16 @@ is kept, with the installed license and the installation id. A license given wit
 `license.file` or `license.existingSecret` is not copied again while one is installed. Back up
 the database first: migrations are not undone by `helm rollback`.
 
-Before upgrading, read the [upgrade notes](../../../README.md#upgrade-notes). In particular:
+Before upgrading, read the [upgrade notes](../../../README.md#upgrade-notes), and take a
+backup - or let `upgradeBackup` take one (see [Backups and upgrades](#backups-and-upgrades)).
+In particular:
+
+- `webhooks.blockPrivateNetworks` now defaults to `""`: webhooks saved after the upgrade may
+  not go to a private address unless `webhooks.allowedHosts` names the host; the existing ones
+  keep theirs (startup warning) until their URL changes. `false` keeps the old rule for all.
+- `webhooks.generateSecretKey` gives new installations an encryption key for webhook secrets;
+  an upgraded release without one is unchanged - set `webhooks.secretKey` to start encrypting.
+- `sso.oidc.providerLogout` is on for new installations only; an upgrade signs out as before.
 
 - `security.adminIdentifiers` now matches a uid or an entry DN only. An e-mail address there
   is ignored, and the NOTES and the startup log warn about it.
@@ -552,6 +576,48 @@ Before upgrading, read the [upgrade notes](../../../README.md#upgrade-notes). In
 - Jobs started by hand answer 202 and run in the background (`/api/v1/jobs/{id}`), and
   sessions are kept in the database: everybody signs in once more after the upgrade.
 - `strategy` now defaults to `{}` (`Recreate` for one replica, as before).
+
+### Backups and upgrades
+
+The schema is migrated by the first new pod as it starts; with more than one replica the old
+pods keep serving meanwhile, so migrations are written expand-contract (see the
+[main README](../../../README.md#schema-migrations-expand-and-contract)) and an upgrade can
+be rolled. What `helm rollback` cannot undo is a migration: the way back is a backup.
+
+`upgradeBackup.enabled=true` takes one before every upgrade:
+
+- **Turning it on.** The upgrade that turns it on creates the volume; the first dump is
+  taken at the next upgrade (a hook runs before the volume would exist). With
+  `upgradeBackup.persistence.existingClaim` it is taken from the first upgrade on. Under
+  Argo CD the hook runs as a PreSync hook at every sync and needs `existingClaim` (Argo CD
+  renders without `lookup`); turn it on after the first sync, when the database exists.
+- **Why it is off by default.** An existing release would get a volume it may not be able to
+  bind (no default storage class), a dump that has to fit in `helm upgrade --timeout`
+  (default 5m), a `pg_dump` (PostgreSQL 17) that must be as new as an external server, and,
+  with `networkPolicy` on, an external database that has to admit the Job's pod - each of
+  which would stop an upgrade that works today. Your own database backups remain what to rely
+  on; this is the undo for one upgrade.
+- **A failed dump stops the upgrade** before anything is applied; the Job is kept for its
+  log (`kubectl logs job/<release>-cert-alert-upgrade-backup`). `helm upgrade --no-hooks`
+  skips it.
+- **Restoring one.** Scale cert-alert to zero, then load the dump into an emptied schema in
+  one transaction from a pod that mounts the volume, and roll back to the release it was
+  taken before:
+
+  ```bash
+  kubectl scale deploy/cert-alert --replicas=0
+  kubectl run pg-restore --rm -it --restart=Never --image=docker.io/library/postgres:17.11-alpine \
+    --overrides='{"spec":{"volumes":[{"name":"b","persistentVolumeClaim":{"claimName":"cert-alert-upgrade-backups"}}],
+      "containers":[{"name":"pg-restore","image":"docker.io/library/postgres:17.11-alpine","stdin":true,"tty":true,
+      "volumeMounts":[{"name":"b","mountPath":"/backups"}],"command":["sh"]}]}}'
+  # in the pod: ls -t /backups, then
+  #   { echo 'DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;'; gunzip -c /backups/<file>; } \
+  #     | PGPASSWORD=... psql -h <database host> -U certalert -d certalert -v ON_ERROR_STOP=1 --single-transaction
+  helm rollback cert-alert <revision before the upgrade>
+  ```
+
+  The webhook secret key must be the one the dump was taken with (it is in the chart's
+  Secret, or yours).
 
 ### Uninstall
 

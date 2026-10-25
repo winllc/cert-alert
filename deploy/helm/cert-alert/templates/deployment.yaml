@@ -10,7 +10,7 @@
   (dict "env" "CERT_ALERT_LDAP_PASSWORD" "ref" (include "cert-alert.secretRef" (dict "root" . "inline" $v.ldap.bindPassword "existing" $v.ldap.existingSecret "existingKey" $v.ldap.existingSecretKey "key" "ldap-password")))
   (dict "env" "SPRING_MAIL_PASSWORD" "ref" (include "cert-alert.secretRef" (dict "root" . "inline" $v.mail.password "existing" $v.mail.existingSecret "existingKey" $v.mail.existingSecretKey "key" "mail-password")))
   (dict "env" "ENS_AUDIT_SPLUNK_TOKEN" "ref" (include "cert-alert.secretRef" (dict "root" . "inline" $v.audit.splunk.token "existing" $v.audit.splunk.existingSecret "existingKey" $v.audit.splunk.existingSecretKey "key" "splunk-hec-token")))
-  (dict "env" "CERT_ALERT_WEBHOOKS_SECRET_KEY" "ref" (include "cert-alert.secretRef" (dict "root" . "inline" $v.webhooks.secretKey "existing" $v.webhooks.existingSecret "existingKey" $v.webhooks.existingSecretKey "key" "webhooks-secret-key")))
+  (dict "env" "CERT_ALERT_WEBHOOKS_SECRET_KEY" "ref" (include "cert-alert.secretRef" (dict "root" . "inline" (include "cert-alert.webhooks.secretKey" .) "existing" $v.webhooks.existingSecret "existingKey" $v.webhooks.existingSecretKey "key" "webhooks-secret-key")))
 -}}
 {{- if $v.sso.oidc.enabled -}}
 {{- $secretEnv = append $secretEnv (dict "env" "CERT_ALERT_SSO_OIDC_CLIENT_SECRET" "ref" (include "cert-alert.secretRef" (dict "root" . "inline" $v.sso.oidc.clientSecret "existing" $v.sso.oidc.existingSecret "existingKey" $v.sso.oidc.existingSecretKey "key" "oidc-client-secret"))) -}}

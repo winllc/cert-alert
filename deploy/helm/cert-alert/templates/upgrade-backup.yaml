@@ -1,0 +1,140 @@
+{{- /*
+The database, dumped before helm upgrade changes anything (values.yaml: upgradeBackup). The
+volume is an ordinary, kept resource; the Job is a pre-upgrade hook, rendered only once the
+volume exists (lookup, or a claim of your own), so the upgrade that turns this on creates the
+volume and the next one takes the first dump rather than waiting on a volume not made yet.
+*/ -}}
+{{- $b := .Values.upgradeBackup -}}
+{{- $passwordRef := include "cert-alert.db.passwordRef" . -}}
+{{- if and $b.enabled $passwordRef -}}
+{{- $claim := $b.persistence.existingClaim | default (printf "%s-upgrade-backups" (include "cert-alert.fullname" .) | trunc 63 | trimSuffix "-") -}}
+{{- if not $b.persistence.existingClaim }}
+# Dumps taken before each upgrade, the newest upgradeBackup.keep of them. Kept by helm
+# uninstall and an Argo CD prune: delete it yourself when you no longer need them.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $claim }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cert-alert.backup.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+    argocd.argoproj.io/sync-options: Prune=false
+spec:
+  accessModes:
+    {{- toYaml $b.persistence.accessModes | nindent 4 }}
+  {{- with $b.persistence.storageClass }}
+  storageClassName: {{ if eq . "-" }}""{{ else }}{{ . | quote }}{{ end }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $b.persistence.size }}
+{{- end }}
+{{- if or $b.persistence.existingClaim (lookup "v1" "PersistentVolumeClaim" .Release.Namespace $claim) }}
+{{- $ref := fromJson $passwordRef }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-upgrade-backup" (include "cert-alert.fullname" .) | trunc 63 | trimSuffix "-" }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "cert-alert.backup.labels" . | nindent 4 }}
+  annotations:
+    # Before anything of the upgrade is applied; a failure stops the upgrade there.
+    helm.sh/hook: pre-upgrade
+    helm.sh/hook-weight: "-10"
+    # A failed one stays until the next upgrade, for its log.
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: {{ $b.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "cert-alert.backup.selectorLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "cert-alert.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- include "cert-alert.securityContext" (dict "ctx" $b.podSecurityContext "root" .) | nindent 8 }}
+      {{- with $b.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $b.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: pg-dump
+          image: {{ include "cert-alert.backupImage" . }}
+          imagePullPolicy: {{ $b.image.pullPolicy }}
+          securityContext:
+            {{- include "cert-alert.securityContext" (dict "ctx" $b.containerSecurityContext "root" .) | nindent 12 }}
+          env:
+            - name: PGHOST
+              value: {{ include "cert-alert.db.host" . | quote }}
+            - name: PGPORT
+              value: {{ .Values.database.port | toString | quote }}
+            - name: PGDATABASE
+              value: {{ .Values.database.name | quote }}
+            - name: PGUSER
+              value: {{ .Values.database.username | quote }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $ref.name }}
+                  key: {{ $ref.key }}
+            - name: PGSSLMODE
+              value: {{ ternary "disable" $b.sslMode .Values.database.embedded.enabled | quote }}
+            - name: PGCONNECT_TIMEOUT
+              value: "30"
+            - name: KEEP
+              value: {{ $b.keep | toString | quote }}
+            - name: NAME
+              value: {{ printf "%s-before-rev%d" .Release.Name (int .Release.Revision) | quote }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              umask 077
+              file="/backups/${NAME}-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
+              # One transaction, so the dump is consistent while the old pods keep serving.
+              # pipefail is not POSIX: check pg_dump's own status through a file instead.
+              ( pg_dump --no-password || echo failed > /tmp/pg_dump.failed ) | gzip > "$file.partial"
+              if [ -e /tmp/pg_dump.failed ]; then
+                rm -f "$file.partial"
+                echo "pg_dump of $PGDATABASE on $PGHOST failed: not upgrading" >&2
+                exit 1
+              fi
+              gzip -t "$file.partial"
+              mv "$file.partial" "$file"
+              echo "Backed up $PGDATABASE on $PGHOST to $file ($(wc -c < "$file") bytes)"
+              # The newest $KEEP dumps stay.
+              ls -1t /backups/*.sql.gz | tail -n +"$((KEEP + 1))" | while read -r old; do
+                rm -f -- "$old" && echo "Removed $old"
+              done
+          {{- with $b.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: backups
+              mountPath: /backups
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: backups
+          persistentVolumeClaim:
+            claimName: {{ $claim }}
+        - name: tmp
+          emptyDir: {}
+{{- end }}
+{{- end }}
