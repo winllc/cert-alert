@@ -46,6 +46,20 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/component: database
 {{- end }}
 
+{{/* The pre-upgrade backup Job's labels: not the app's, so no Service, PDB or policy of the app's selects it. */}}
+{{- define "cert-alert.backup.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "cert-alert.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: upgrade-backup
+{{- end }}
+
+{{- define "cert-alert.backup.labels" -}}
+helm.sh/chart: {{ include "cert-alert.chart" . }}
+{{ include "cert-alert.backup.selectorLabels" . }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+app.kubernetes.io/part-of: cert-alert
+{{- end }}
+
 {{- define "cert-alert.db.labels" -}}
 helm.sh/chart: {{ include "cert-alert.chart" . }}
 {{ include "cert-alert.db.selectorLabels" . }}
@@ -105,6 +119,15 @@ registry part gets the mirror prefixed.
 
 {{- define "cert-alert.dbImage" -}}
 {{- include "cert-alert.image" (dict "image" .Values.database.embedded.image "root" . "defaultTag" "17.11-alpine") }}
+{{- end }}
+
+{{/* pg_dump's image for the pre-upgrade backup: its own, or the embedded database's. */}}
+{{- define "cert-alert.backupImage" -}}
+{{- if .Values.upgradeBackup.image.repository -}}
+{{- include "cert-alert.image" (dict "image" .Values.upgradeBackup.image "root" . "defaultTag" "17.11-alpine") }}
+{{- else -}}
+{{- include "cert-alert.dbImage" . }}
+{{- end -}}
 {{- end }}
 
 {{/*
@@ -180,6 +203,60 @@ not set at all. Takes (dict "root" $ "inline" <value> "existing" <secret name>
 {{- index $existing.data "db-password" | b64dec -}}
 {{- else -}}
 {{- randAlphaNum 32 -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+"true" when this render can see the cluster - helm install or upgrade - and so lookup answers
+and a value generated now is found and kept by the next upgrade. Empty under helm template,
+--dry-run=client and tools that render that way (Argo CD), where lookup always answers nothing
+and anything generated would be generated afresh at every render. Listing the namespace's
+Secrets needs nothing Helm does not need already for its own release records.
+*/}}
+{{- define "cert-alert.clusterVisible" -}}
+{{- if hasKey (lookup "v1" "Secret" .Release.Namespace "") "items" }}true{{ end }}
+{{- end }}
+
+{{/*
+The webhooks' secret key for the chart's Secret: given inline, kept from the last release, or
+- on a new installation that can see the cluster, with webhooks.generateSecretKey - a new
+random AES-256 key. Never generated on an upgrade: one that had no key keeps storing secrets
+unencrypted (with a warning) until a key is given, as before. Empty: none.
+*/}}
+{{- define "cert-alert.webhooks.secretKey" -}}
+{{- $v := .Values.webhooks -}}
+{{- if $v.existingSecret -}}
+{{- else if $v.secretKey -}}
+{{- $v.secretKey -}}
+{{- else if $v.generateSecretKey -}}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace (include "cert-alert.secretName" .) -}}
+{{- if and $existing $existing.data (hasKey $existing.data "webhooks-secret-key") -}}
+{{- index $existing.data "webhooks-secret-key" | b64dec -}}
+{{- else if and .Release.IsInstall (include "cert-alert.clusterVisible" .) -}}
+{{- randBytes 32 -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+CERT_ALERT_SSO_OIDC_PROVIDER_LOGOUT: sso.oidc.providerLogout when set; otherwise true for a new
+installation (that can see the cluster), and for an upgrade whatever the last release had -
+which for a release from before the setting is the application's default, false: an upgrade
+signs out as it did.
+*/}}
+{{- define "cert-alert.oidc.providerLogout" -}}
+{{- $set := .Values.sso.oidc.providerLogout -}}
+{{- if not (and (kindIs "string" $set) (eq $set "")) -}}
+{{- toString $set -}}
+{{- else if include "cert-alert.clusterVisible" . -}}
+{{- if .Release.IsInstall -}}
+true
+{{- else -}}
+{{- $existing := lookup "v1" "ConfigMap" .Release.Namespace (include "cert-alert.fullname" .) -}}
+{{- if and $existing $existing.data (hasKey $existing.data "CERT_ALERT_SSO_OIDC_PROVIDER_LOGOUT") -}}
+{{- index $existing.data "CERT_ALERT_SSO_OIDC_PROVIDER_LOGOUT" -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 {{- end }}

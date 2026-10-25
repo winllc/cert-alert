@@ -77,7 +77,8 @@ spec:
     {{- end }}
 {{- if .Values.database.embedded.enabled }}
 ---
-# The embedded database: reachable from cert-alert only, and reaches nothing.
+# The embedded database: reachable from cert-alert (and its pre-upgrade backup) only, and
+# reaches nothing.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -95,6 +96,12 @@ spec:
         - podSelector:
             matchLabels:
               {{- include "cert-alert.selectorLabels" . | nindent 14 }}
+        {{- if .Values.upgradeBackup.enabled }}
+        # The pre-upgrade backup's pg_dump.
+        - podSelector:
+            matchLabels:
+              {{- include "cert-alert.backup.selectorLabels" . | nindent 14 }}
+        {{- end }}
       ports:
         - port: 5432
           protocol: TCP

@@ -28,7 +28,9 @@ import org.springframework.stereotype.Component;
  *       a cloud metadata address, an unspecified, multicast or broadcast address, nor an
  *       IPv6 address carrying one of those IPv4 addresses inside it - whatever the allowlist
  *       says;
- *   <li>and, with {@code block-private-networks}, no private address either.
+ *   <li>and no private address either, unless the allowlist names the host or its address,
+ *       or {@code block-private-networks} is false - or, while it is unset, for a webhook saved
+ *       before private addresses were refused by default.
  * </ul>
  *
  * <p>Checked when the URL is saved, and again at every send, on the addresses the name
@@ -111,8 +113,16 @@ public class WebhookAddressGuard {
      * @throws RefusedDestinationException where it may not be posted to
      */
     public URI checkUrl(String url) throws IOException {
+        return checkUrl(url, false);
+    }
+
+    /**
+     * The URL as it may be saved, for a webhook that may keep a private address it was saved
+     * with before they were refused by default ({@code grandfathered}).
+     */
+    public URI checkUrl(String url, boolean grandfathered) throws IOException {
         URI uri = parse(url);
-        resolve(uri);
+        resolve(uri, grandfathered);
         return uri;
     }
 
@@ -122,6 +132,15 @@ public class WebhookAddressGuard {
      * public address and a private one is not one to post to.
      */
     public InetAddress resolve(URI uri) throws IOException {
+        return resolve(uri, false);
+    }
+
+    /**
+     * {@link #resolve(URI)} for a webhook saved before private addresses were refused by
+     * default ({@code grandfathered}), which keeps the private address it had while
+     * {@code block-private-networks} is unset.
+     */
+    public InetAddress resolve(URI uri, boolean grandfathered) throws IOException {
         String host = hostOf(uri);
         boolean allowedByName = names.contains(host) || suffixes.stream().anyMatch(s -> host.endsWith(s) && host.length() > s.length());
         if (isRestricted() && !allowedByName && ranges.isEmpty()) {
@@ -137,19 +156,26 @@ public class WebhookAddressGuard {
             throw new IOException("Unknown host " + host);
         }
         for (InetAddress address : addresses) {
-            String refusal = refusalFor(address);
+            boolean listed = allowedByName || ranges.stream().anyMatch(range -> range.matches(address));
+            // A host the allowlist names may be private: that is what the allowlist is for.
+            String refusal = refusalFor(address, !listed && properties.blocksPrivateNetworks(grandfathered));
             if (refusal != null) {
                 throw new RefusedDestinationException(host + " resolves to " + address.getHostAddress() + ", " + refusal);
             }
-            if (isRestricted() && !allowedByName && ranges.stream().noneMatch(range -> range.matches(address))) {
+            if (isRestricted() && !listed) {
                 throw new RefusedDestinationException(host + " is not in cert-alert.webhooks.allowed-hosts");
             }
         }
         return addresses[0];
     }
 
-    /** Why this address is never posted to, or null where it may be. */
+    /** Why this address is never posted to, or null where it may be, for a webhook saved now. */
     String refusalFor(InetAddress address) {
+        return refusalFor(address, properties.blocksPrivateNetworks(false));
+    }
+
+    /** Why this address is not posted to, or null where it may be; private ones only if {@code blockPrivate}. */
+    String refusalFor(InetAddress address, boolean blockPrivate) {
         if (address.isLoopbackAddress()) {
             return "a loopback address, which webhooks are never sent to";
         }
@@ -161,14 +187,13 @@ public class WebhookAddressGuard {
             return "a link-local, metadata, unspecified or multicast address, which webhooks are never sent to";
         }
         InetAddress embedded = embeddedIpv4(address);
-        if (embedded != null && refusalFor(embedded) != null) {
+        if (embedded != null && refusalFor(embedded, false) != null) {
             return "an IPv6 address carrying " + embedded.getHostAddress() + ", which webhooks are never sent to";
         }
-        if (properties.isBlockPrivateNetworks()) {
-            if (PRIVATE.stream().anyMatch(range -> range.matches(address))
-                    || (embedded != null && PRIVATE.stream().anyMatch(range -> range.matches(embedded)))) {
-                return "a private address, and cert-alert.webhooks.block-private-networks is on";
-            }
+        if (blockPrivate && (PRIVATE.stream().anyMatch(range -> range.matches(address))
+                || (embedded != null && PRIVATE.stream().anyMatch(range -> range.matches(embedded))))) {
+            return "a private address, which webhooks are not sent to unless cert-alert.webhooks.allowed-hosts "
+                    + "names it (or cert-alert.webhooks.block-private-networks is false)";
         }
         return null;
     }

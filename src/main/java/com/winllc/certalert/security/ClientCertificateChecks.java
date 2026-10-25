@@ -1,5 +1,6 @@
 package com.winllc.certalert.security;
 
+import com.winllc.certalert.LogSafe;
 import com.winllc.certalert.domain.RevocationStatus;
 import com.winllc.certalert.revocation.IssuerCertificates;
 import com.winllc.certalert.revocation.SignInRevocation;
@@ -65,11 +66,11 @@ public class ClientCertificateChecks {
      * @throws RefusedCertificateException where it may not sign anybody in
      */
     public void check(X509Certificate certificate, List<X509Certificate> chain) {
-        String subject = certificate.getSubjectX500Principal().getName();
+        String subject = LogSafe.oneLine(certificate.getSubjectX500Principal().getName());
         List<String> allowed = settings.allowedIssuerList();
         if (!allowed.isEmpty() && !issuerAllowed(certificate.getIssuerX500Principal(), allowed)) {
             log.warn("Refusing client certificate '{}': its issuer '{}' is not in ENS_X509_ALLOWED_ISSUERS",
-                    subject, certificate.getIssuerX500Principal().getName());
+                    subject, LogSafe.oneLine(certificate.getIssuerX500Principal().getName()));
             throw new RefusedCertificateException(
                     RefusedCertificateException.Reason.ISSUER_NOT_ALLOWED, CertificateFingerprints.sha256(certificate));
         }

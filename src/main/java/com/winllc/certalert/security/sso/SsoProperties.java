@@ -188,6 +188,15 @@ public class SsoProperties {
         /** The ID token signature algorithm accepted (RS256, ES256, ...). */
         private String jwsAlgorithm = "RS256";
 
+        /**
+         * Whether signing out of CertAlert also signs out at the provider (OpenID Connect
+         * RP-initiated logout, at the {@code end_session_endpoint} its discovery document names),
+         * which then sends the browser back to {@code <public-url>/login?logout} - the
+         * post-logout redirect URI to register with it. Off by default so an upgrade signs out
+         * as before; new installations' settings turn it on.
+         */
+        private boolean providerLogout;
+
         public String getIssuerUri() {
             return issuerUri;
         }
@@ -238,6 +247,14 @@ public class SsoProperties {
 
         public String getJwsAlgorithm() {
             return jwsAlgorithm;
+        }
+
+        public boolean isProviderLogout() {
+            return providerLogout;
+        }
+
+        public void setProviderLogout(boolean providerLogout) {
+            this.providerLogout = providerLogout;
         }
 
         public void setJwsAlgorithm(String jwsAlgorithm) {

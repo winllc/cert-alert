@@ -77,14 +77,22 @@ random_password() {
     od -An -tx1 -N24 /dev/urandom | tr -d ' \n'
 }
 
+# A random AES-256 key, base64: the webhooks' secret key.
+random_key() {
+    head -c 32 /dev/urandom | base64 | tr -d '\n'
+}
+
 create_env() {
     cp env.template .env
     chmod 600 .env
-    local pw tmp
+    local pw key tmp
     pw=$(random_password)
+    key=$(random_key)
     tmp=$(mktemp .env.XXXXXX)
-    # The engine chosen now, so that an upgrade on a host with both uses the same one.
+    # The engine chosen now, so that an upgrade on a host with both uses the same one. Base64
+    # has no '|', so it is the delimiter for the key.
     sed -e "s/^CERT_ALERT_DB_PASSWORD=\$/CERT_ALERT_DB_PASSWORD=${pw}/" \
+        -e "s|^#[[:space:]]*CERT_ALERT_WEBHOOKS_SECRET_KEY=\$|CERT_ALERT_WEBHOOKS_SECRET_KEY=${key}|" \
         -e "s/^#[[:space:]]*CONTAINER_ENGINE=.*/CONTAINER_ENGINE=${ENGINE}/" .env > "$tmp"
     chmod 600 "$tmp"
     mv "$tmp" .env
@@ -93,8 +101,8 @@ create_env() {
 explain_next_steps() {
     cat <<EOF
 
-Created $(pwd)/.env from env.template, with a random database password, for $ENGINE
-(CONTAINER_ENGINE in .env).
+Created $(pwd)/.env from env.template, with a random database password and webhook
+secret key, for $ENGINE (CONTAINER_ENGINE in .env). Keep a copy of .env with your backups.
 
 Before cert-alert can start, edit .env and set at least:
 
@@ -103,8 +111,14 @@ Before cert-alert can start, edit .env and set at least:
   CERT_ALERT_LDAP_USER / _PASSWORD        the service account it binds as
   CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS   who administers it (uids; addresses are ignored)
 
-and, if you use them, SMTP (SPRING_MAIL_*), TLS (CERT_ALERT_TLS_* with keystores in
-$(pwd)/tls) and the banner. Every setting is described in .env.
+and choose how it is reached (it is published on 0.0.0.0, port 8080; plain HTTP to other
+hosts is refused unless you say so):
+
+  CERT_ALERT_TLS_ENABLED=true             HTTPS from cert-alert itself (keystores in $(pwd)/tls); or
+  CERT_ALERT_BIND_ADDRESS=127.0.0.1       this host only, behind a TLS-terminating proxy of yours; or
+  CERT_ALERT_ALLOW_PLAIN_HTTP=true        plain HTTP to other hosts: a lab, or a network that encrypts
+
+and, if you use them, SMTP (SPRING_MAIL_*) and the banner. Every setting is described in .env.
 
 cert-alert needs an ENS license (from the ENS licensing portal: an evaluation, or the
 license issued against your order). Either put it at
@@ -182,14 +196,28 @@ note_listen_address() {
 
 check_exposure() {
     # Plain HTTP on an interface other hosts reach sends passwords and session cookies across
-    # the network in clear text. Allowed - it is the default, 0.0.0.0 - but never silent.
+    # the network in clear text. Refused unless .env says CERT_ALERT_ALLOW_PLAIN_HTTP=true, and
+    # never silent even then. An .env from a release before that setting (it does not set it at
+    # all) is upgraded as it is: warned about, not refused.
     [ "$(env_value CERT_ALERT_TLS_ENABLED)" = "true" ] && return 0
-    local bind port
+    local bind port allow
     bind=$(env_value CERT_ALERT_BIND_ADDRESS); bind=${bind:-0.0.0.0}
     port=$(env_value CERT_ALERT_PORT); port=${port:-8080}
     case "$bind" in
         127.*|localhost|::1|'[::1]') return 0 ;;
     esac
+    allow=$(env_value CERT_ALERT_ALLOW_PLAIN_HTTP)
+    if [ "$allow" != true ] && env_has CERT_ALERT_ALLOW_PLAIN_HTTP; then
+        say "" >&2
+        say "Not starting cert-alert: it would serve plain HTTP to other hosts - TLS is off (CERT_ALERT_TLS_ENABLED" >&2
+        say "is not true) and it is published on $bind (CERT_ALERT_BIND_ADDRESS), port $port - and directory" >&2
+        say "passwords and session cookies would cross the network in clear text. In .env, either:" >&2
+        say "  - turn TLS on in the application: CERT_ALERT_TLS_ENABLED=true, keystores in tls/; or" >&2
+        say "  - put a TLS-terminating reverse proxy on this host in front: CERT_ALERT_BIND_ADDRESS=127.0.0.1," >&2
+        say "    SERVER_FORWARD_HEADERS_STRATEGY=framework and ENS_COOKIE_SECURE=true; or" >&2
+        say "  - accept plain HTTP (a lab, or a network that encrypts for you): CERT_ALERT_ALLOW_PLAIN_HTTP=true." >&2
+        die "plain HTTP on $bind refused; edit $(pwd)/.env, then run this again."
+    fi
     say "" >&2
     say "WARNING: cert-alert is reachable over plain HTTP: TLS is off (CERT_ALERT_TLS_ENABLED is not" >&2
     say "         true) and it is published on $bind (CERT_ALERT_BIND_ADDRESS), port $port. Directory" >&2
@@ -198,7 +226,22 @@ check_exposure() {
     say "           - put a TLS-terminating reverse proxy in front and set" >&2
     say "             CERT_ALERT_BIND_ADDRESS=127.0.0.1, SERVER_FORWARD_HEADERS_STRATEGY=framework" >&2
     say "             and ENS_COOKIE_SECURE=true." >&2
+    if [ "$allow" = true ]; then
+        say "         (Allowed because .env sets CERT_ALERT_ALLOW_PLAIN_HTTP=true.)" >&2
+    else
+        say "         This .env is from a release before CERT_ALERT_ALLOW_PLAIN_HTTP, so it is kept as it is;" >&2
+        say "         new installations refuse this. Add CERT_ALERT_ALLOW_PLAIN_HTTP=true to .env to accept" >&2
+        say "         it in as many words, or one of the above." >&2
+    fi
     say "" >&2
+}
+
+note_webhook_key() {
+    # An .env from a release that did not generate the key: said, not changed.
+    env_has CERT_ALERT_WEBHOOKS_SECRET_KEY && [ -n "$(env_value CERT_ALERT_WEBHOOKS_SECRET_KEY)" ] && return 0
+    say "Note: CERT_ALERT_WEBHOOKS_SECRET_KEY is not set in .env, so webhook signing secrets and URLs are"
+    say "      stored unencrypted. New installations get one; to encrypt yours, add"
+    say "      CERT_ALERT_WEBHOOKS_SECRET_KEY=<the output of: openssl rand -base64 32> to .env (keep a copy)."
 }
 
 check_port() {
@@ -304,19 +347,9 @@ copy_from_previous() {
 
 backup_database() {
     [ "$BACKUP" = true ] || { say "Skipping the database backup (--no-backup)."; return 0; }
-    local id user db file
-    id=$(service_container postgres 2> /dev/null || true)
-    if [ -z "$id" ] || [ "$(engine inspect -f '{{.State.Running}}' "$id" 2> /dev/null)" != "true" ]; then
-        say "No running database to back up."
-        return 0
-    fi
-    user=$(env_value CERT_ALERT_DB_USER); user=${user:-certalert}
-    db=$(env_value CERT_ALERT_DB_NAME); db=${db:-certalert}
-    mkdir -p backups
-    file="backups/${PRODUCT}-before-${VERSION}-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
-    say "Backing up the database to $file ..."
-    engine exec "$id" pg_dump -U "$user" -d "$db" | gzip > "$file"
-    chmod 600 "$file"
+    # backup.sh, with the engine already chosen; nothing to do when no database is running.
+    CONTAINER_ENGINE=$ENGINE ./backup.sh --if-running \
+        --out "backups/${PRODUCT}-before-${VERSION}-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
 }
 
 wait_until_healthy() {
@@ -379,6 +412,7 @@ if [ "$MODE" = install ]; then
     keep_previous_listen_address
     check_env
     check_exposure
+    note_webhook_key
     check_port
     check_license
     load_images
@@ -393,6 +427,7 @@ else
     note_listen_address
     check_env
     check_exposure
+    note_webhook_key
     check_port
     check_license
     load_images

@@ -50,6 +50,18 @@ cert-alert {{ .Chart.AppVersion }} is installed as release "{{ .Release.Name }}"
    WARNING: persistence.license.enabled=false - the license and installation id are lost
    with every pod restart. Evaluation only.
 {{- end }}
+{{- if not (or .Values.webhooks.existingSecret (include "cert-alert.webhooks.secretKey" .)) }}
+
+Webhooks: no secret key, so their signing secrets and URLs are stored unencrypted. Set
+webhooks.secretKey (openssl rand -base64 32) or webhooks.existingSecret; what is stored is
+encrypted at the next start.
+{{- end }}
+{{- if .Values.upgradeBackup.enabled }}
+
+Backups before upgrades: on. Each helm upgrade first pg_dumps the database onto
+{{ .Values.upgradeBackup.persistence.existingClaim | default (printf "%s-upgrade-backups" (include "cert-alert.fullname" .) | trunc 63 | trimSuffix "-") }}{{ if not .Values.upgradeBackup.persistence.existingClaim }} (created by this release, so the first dump is taken at the
+next upgrade){{ end }}; a failed dump stops the upgrade. See the chart README, "Backups and upgrades".
+{{- end }}
 {{- if .Values.database.embedded.enabled }}
 
 4. Database: EMBEDDED, EVALUATION ONLY, NO BACKUPS

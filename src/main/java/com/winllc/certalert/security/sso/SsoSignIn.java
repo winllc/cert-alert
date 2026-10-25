@@ -25,6 +25,7 @@ import org.springframework.security.oauth2.client.oidc.authentication.OidcIdToke
 import org.springframework.security.oauth2.client.oidc.authentication.OidcIdTokenValidator;
 import org.springframework.security.oauth2.client.oidc.userinfo.OidcUserRequest;
 import org.springframework.security.oauth2.client.oidc.userinfo.OidcUserService;
+import org.springframework.security.oauth2.client.oidc.web.logout.OidcClientInitiatedLogoutSuccessHandler;
 import org.springframework.security.oauth2.client.registration.ClientRegistration;
 import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.security.oauth2.client.registration.ClientRegistrations;
@@ -50,6 +51,9 @@ import org.springframework.security.saml2.provider.service.registration.RelyingP
 import org.springframework.security.saml2.provider.service.registration.RelyingPartyRegistrationRepository;
 import org.springframework.security.saml2.provider.service.registration.RelyingPartyRegistrations;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
+import org.springframework.security.web.authentication.SimpleUrlAuthenticationFailureHandler;
+import org.springframework.security.web.authentication.logout.LogoutSuccessHandler;
+import org.springframework.security.web.authentication.logout.SimpleUrlLogoutSuccessHandler;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.util.function.SingletonSupplier;
@@ -86,8 +90,23 @@ public class SsoSignIn {
     /** Where a refused single sign-on is sent, so the page can say which kind of refusal. */
     public static final String FAILURE_URL = "/login?sso_error";
 
+    /** Where Microsoft Entra ID points instead of listing groups, when there are too many for a token. */
+    static final String CLAIM_NAMES = "_claim_names";
+
+    /** The error a group overage is refused with; the sign-in page says what it means. */
+    static final String GROUPS_OVERAGE = "groups_overage";
+
+    /** Where a sign-in refused for a group overage is sent. */
+    public static final String GROUPS_OVERAGE_URL = "/login?sso_error=groups";
+
+    /** Where signing out lands, here or - by way of the provider - back here. */
+    public static final String SIGNED_OUT_URL = "/login?logout";
+
     private final SsoProperties properties;
     private final SsoIdentityResolver identities;
+    /** The OpenID Connect registration, once {@link #apply} has added it. */
+    private ClientRegistrationRepository oidcRegistrations;
+
     public SsoSignIn(SsoProperties properties, SsoIdentityResolver identities) {
         this.properties = properties;
         this.identities = identities;
@@ -151,6 +170,11 @@ public class SsoSignIn {
         if (properties.getOidc().isEnabled()) {
             applyOidc(http, success);
             log.info("Single sign-on: OpenID Connect from {}", properties.getOidc().getIssuerUri());
+            if (!properties.getOidc().isProviderLogout()) {
+                log.warn("Signing out of CertAlert does not sign out at the OpenID Connect provider: set "
+                        + "CERT_ALERT_SSO_OIDC_PROVIDER_LOGOUT=true (cert-alert.sso.oidc.provider-logout), and register {}"
+                        + " with the provider as a post-logout redirect URI", properties.requirePublicUrl() + SIGNED_OUT_URL);
+            }
         }
         if (properties.getSaml().isEnabled()) {
             applySaml(http, events, success);
@@ -174,9 +198,22 @@ public class SsoSignIn {
             return new DelegatingOAuth2TokenValidator<>(new JwtTimestampValidator(oidc.getClockSkew()), idToken);
         });
 
+        oidcRegistrations = registrations;
+        SimpleUrlAuthenticationFailureHandler refused =
+                new SimpleUrlAuthenticationFailureHandler(FAILURE_URL);
+        SimpleUrlAuthenticationFailureHandler overage =
+                new SimpleUrlAuthenticationFailureHandler(GROUPS_OVERAGE_URL);
         http.oauth2Login(login -> login
                 .loginPage("/login")
-                .failureUrl(FAILURE_URL)
+                // A group overage gets a page of its own, saying what to change at the provider.
+                .failureHandler((request, response, exception) -> {
+                    if (exception instanceof OAuth2AuthenticationException oauth
+                            && GROUPS_OVERAGE.equals(oauth.getError().getErrorCode())) {
+                        overage.onAuthenticationFailure(request, response, exception);
+                    } else {
+                        refused.onAuthenticationFailure(request, response, exception);
+                    }
+                })
                 .successHandler(success)
                 .clientRegistrationRepository(registrations)
                 .authorizedClientRepository(new NothingKept())
@@ -237,6 +274,7 @@ public class SsoSignIn {
             OidcUser user = provider.loadUser(request);
             Map<String, Object> claims = user.getClaims();
             Object name = claims.get(oidc.getUsernameClaim());
+            refuseGroupOverage(claims, oidc, name);
             Collection<String> groups = listOf(StringUtils.hasText(oidc.getGroupsClaim()) ? claims.get(oidc.getGroupsClaim()) : null);
             DirectoryPrincipal person = identities
                     .resolve(name == null ? null : name.toString(), oidc.getMatch(), groups, oidc,
@@ -248,6 +286,56 @@ public class SsoSignIn {
                                 new OAuth2Error("directory_entry_not_found", message, null), message);
                     });
             return new OidcDirectoryPrincipal(person, user.getIdToken(), user.getUserInfo());
+        };
+    }
+
+    /**
+     * Microsoft Entra ID leaves the groups claim out of a token for somebody in more groups than
+     * fit (200 in a JWT), and names a Graph query in {@code _claim_names} instead. Signing them
+     * in without it would quietly leave out the administrator or auditor role a group grants, so
+     * the sign-in is refused, saying why (audited as a failed {@code auth.login}).
+     */
+    private static void refuseGroupOverage(Map<String, Object> claims, SsoProperties.Oidc oidc, Object name) {
+        String groupsClaim = oidc.getGroupsClaim();
+        if (!StringUtils.hasText(groupsClaim) || claims.get(groupsClaim) != null) {
+            return;
+        }
+        if (claims.get(CLAIM_NAMES) instanceof Map<?, ?> pointers && pointers.containsKey(groupsClaim)) {
+            String message = "The identity provider left the '" + groupsClaim + "' claim out of the token for "
+                    + describe(oidc.getUsernameClaim(), name) + " - more groups than fit in a token (group overage) - "
+                    + "so the roles their groups grant cannot be known. Have the provider send only the groups "
+                    + "assigned to this application (Entra ID: groupMembershipClaims ApplicationGroup), or fewer";
+            throw new OAuth2AuthenticationException(new OAuth2Error(GROUPS_OVERAGE, message, null), message);
+        }
+    }
+
+    /**
+     * What signing out does: back to the sign-in page - by way of the provider's
+     * {@code end_session_endpoint} for somebody signed in with OpenID Connect, where
+     * {@code cert-alert.sso.oidc.provider-logout} is on and the provider names one (the ID token
+     * as {@code id_token_hint}, {@code <public-url>/login?logout} as the
+     * {@code post_logout_redirect_uri}).
+     */
+    public LogoutSuccessHandler logoutSuccessHandler() {
+        SimpleUrlLogoutSuccessHandler here =
+                new SimpleUrlLogoutSuccessHandler();
+        here.setDefaultTargetUrl(SIGNED_OUT_URL);
+        if (oidcRegistrations == null) {
+            return here;
+        }
+        OidcClientInitiatedLogoutSuccessHandler atProvider =
+                new OidcClientInitiatedLogoutSuccessHandler(
+                        oidcRegistrations);
+        // Pinned, like the redirect URI: never built from the request's Host or Forwarded headers.
+        atProvider.setPostLogoutRedirectUri(properties.requirePublicUrl() + SIGNED_OUT_URL);
+        atProvider.setDefaultTargetUrl(SIGNED_OUT_URL);
+        // Read at each sign-out, so it follows the setting.
+        return (request, response, authentication) -> {
+            if (properties.getOidc().isProviderLogout()) {
+                atProvider.onLogoutSuccess(request, response, authentication);
+            } else {
+                here.onLogoutSuccess(request, response, authentication);
+            }
         };
     }
 

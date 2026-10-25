@@ -249,7 +249,8 @@ public class SecurityConfig {
                         .permitAll())
                 .logout(logout -> logout
                         .addLogoutHandler(sessionPolicy::loggingOut)
-                        .logoutSuccessUrl("/login?logout")
+                        // At the OpenID Connect provider too, where that is configured.
+                        .logoutSuccessHandler(sso.logoutSuccessHandler())
                         .permitAll())
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(authenticationEntryPoint())

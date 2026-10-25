@@ -1,0 +1,24 @@
+# The pre-upgrade backup Job, onto a claim of the operator's own (so it renders without
+# cluster access), for the embedded database behind its NetworkPolicy; and the webhook
+# settings given explicitly.
+ldap:
+  url: ldap://directory.example.test:389
+  base: dc=example,dc=test
+  bindDn: cn=cert-alert,ou=services,dc=example,dc=test
+  bindPassword: change-me
+database:
+  embedded:
+    enabled: true
+security:
+  adminIdentifiers: [alice]
+networkPolicy:
+  enabled: true
+upgradeBackup:
+  enabled: true
+  keep: 3
+  persistence:
+    existingClaim: cert-alert-backups
+webhooks:
+  blockPrivateNetworks: true
+  allowedHosts: [relay.corp.example.test]
+  secretKey: ci-placeholder-not-a-key

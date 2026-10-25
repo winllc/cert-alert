@@ -451,8 +451,9 @@ jobs:
       - name: Install the bundle with Podman
         # The bundle as a customer unpacks it, installed and upgraded with rootful Podman and
         # podman-compose (systemd runs Podman's health checks), from the images it ships. No
-        # directory here, so LDAP reports DOWN, which the liveness check ignores. Checks the
-        # default publishes the UI on 0.0.0.0:8080 of the host.
+        # directory here, so LDAP reports DOWN, which the liveness check ignores. Checks that a
+        # new .env refuses plain HTTP on 0.0.0.0 until CERT_ALERT_ALLOW_PLAIN_HTTP=true, that the
+        # UI is then published on 0.0.0.0:8080 of the host, and that a backup restores.
         if: steps.release.outputs.enabled == 'true'
         timeout-minutes: 15
         env:
@@ -471,10 +472,20 @@ jobs:
           sudo grep -qx 'CONTAINER_ENGINE=podman' .env
           sudo sed -i -e 's|^CERT_ALERT_LDAP_URL=.*|CERT_ALERT_LDAP_URL=ldap://127.0.0.1:1|' \
             -e 's|=CHANGE_ME$|=ci|' .env
+          sudo grep -qE '^CERT_ALERT_WEBHOOKS_SECRET_KEY=.{44}$' .env
+          if as_root ./install.sh; then
+            echo "::error::install.sh started plain HTTP on 0.0.0.0 without CERT_ALERT_ALLOW_PLAIN_HTTP=true"
+            exit 1
+          fi
+          sudo sed -i -e 's|^CERT_ALERT_ALLOW_PLAIN_HTTP=.*|CERT_ALERT_ALLOW_PLAIN_HTTP=true|' .env
           as_root ./install.sh
           curl -fsS http://127.0.0.1:8080/livez
           ss -ltnH 'sport = :8080' | tee /dev/stderr | grep -q '0\.0\.0\.0:8080'
           as_root ./upgrade.sh
+          curl -fsS http://127.0.0.1:8080/livez
+          as_root ./backup.sh --out backups/ci.sql.gz
+          as_root ./restore.sh backups/ci.sql.gz --yes
+          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8080/livez && break; sleep 5; done
           curl -fsS http://127.0.0.1:8080/livez
           as_root podman-compose down -v
 

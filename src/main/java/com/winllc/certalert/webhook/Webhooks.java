@@ -76,16 +76,22 @@ public class Webhooks {
             Long id, String name, String url, WebhookEndpoint.Format format, Collection<WebhookEvent> events, boolean enabled) {
         WebhookEndpoint endpoint = find(id);
         String label = checkName(name);
-        URI checked = checkUrl(url);
+        String before = secrets.revealUrl(endpoint);
+        // The same URL keeps what it was allowed when saved; a new one is held to today's rules.
+        boolean sameUrl = url != null && url.trim().equals(before);
+        URI checked = checkUrl(url, sameUrl && endpoint.isPrivateNetworksAllowed());
         Set<WebhookEvent> subscribed = checkEvents(events);
         AuditRecord record = AuditRecord.of(AuditRecord.Category.CONFIGURATION, "webhook.changed")
                 .severity(AuditRecord.Severity.NOTICE)
                 .target("webhook", String.valueOf(id), label)
-                .change("url", WebhookSecrets.redact(secrets.revealUrl(endpoint)), WebhookSecrets.redact(checked.toString()))
+                .change("url", WebhookSecrets.redact(before), WebhookSecrets.redact(checked.toString()))
                 .change("events", WebhookEvent.format(endpoint.getEvents()), WebhookEvent.format(subscribed))
                 .change("enabled", endpoint.isEnabled(), enabled);
         endpoint.update(label, secrets.storeUrl(checked.toString()), format == null ? endpoint.getFormat() : format, subscribed, enabled,
                 Instant.now(clock));
+        if (!sameUrl) {
+            endpoint.urlChanged();
+        }
         audit.record(record);
         notifications.endpointsChanged();
         return endpoint;
@@ -136,8 +142,12 @@ public class Webhooks {
     }
 
     private URI checkUrl(String url) {
+        return checkUrl(url, false);
+    }
+
+    private URI checkUrl(String url, boolean grandfathered) {
         try {
-            return guard.checkUrl(url);
+            return guard.checkUrl(url, grandfathered);
         } catch (IOException e) {
             throw new IllegalArgumentException(e.getMessage());
         }

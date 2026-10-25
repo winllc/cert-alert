@@ -643,9 +643,13 @@ cert-alert:
   webhooks:
     enabled: true
     # Hosts a webhook may go to: names, *.suffix or CIDR ranges. Empty: any host the address
-    # rules allow.
+    # rules allow. A host named here may be on a private network.
     allowed-hosts: []
-    block-private-networks: false
+    # Private addresses (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7): unset refuses them
+    # for new webhooks - a webhook saved before this default keeps its address, with a warning,
+    # until its URL changes; true refuses them for every webhook; false allows them for every
+    # webhook, as releases before it did.
+    # block-private-networks:
     # A base64 AES key the signing secrets are encrypted with in the database.
     # secret-key: ${CERT_ALERT_WEBHOOKS_SECRET_KEY:}
     connect-timeout: 5s

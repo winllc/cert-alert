@@ -1,5 +1,6 @@
 package com.winllc.certalert.security;
 
+import com.winllc.certalert.LogSafe;
 import com.winllc.certalert.domain.DirectoryUser;
 import java.security.cert.X509Certificate;
 import java.util.List;
@@ -55,7 +56,7 @@ public class CertificateMapping {
     /** The one cached person the filter finds for this certificate, if it finds exactly one. */
     public Optional<DirectoryUser> find(X509Certificate certificate) {
         String template = settings.getUserFilter();
-        String subject = certificate.getSubjectX500Principal().getName();
+        String subject = LogSafe.oneLine(certificate.getSubjectX500Principal().getName());
         CertificateIdentity identity = CertificateIdentity.of(certificate);
         Optional<String> filter = identity.fill(template);
         if (filter.isEmpty()) {
@@ -73,7 +74,7 @@ public class CertificateMapping {
         List<String> found = ldap.search(security.getLdap().getUserSearchBase(), filter.get(), controls, nameOf);
         if (found.size() != 1) {
             log.warn("Not mapping client certificate '{}': {} found {} directory entries, not one",
-                    subject, filter.get(), found.size());
+                    subject, LogSafe.oneLine(filter.get()), found.size());
             return Optional.empty();
         }
         Optional<DirectoryUser> cached = resolver.findByDn(found.getFirst());

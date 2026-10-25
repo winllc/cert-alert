@@ -23,7 +23,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * <p>One rule ahead of every other, rather than a condition on each endpoint, so an endpoint
  * added later is covered without anybody remembering to. What it lets through are the
  * requests that only read, or that are about the session rather than the data: the tables'
- * searches, which POST their query; verifying the audit chain, which reads it; signing in
+ * searches, which POST their query; the inventory export, which POSTs for its CSRF token;
+ * verifying the audit chain, which reads it; signing in
  * and out; and agreeing to the banner.
  *
  * <p>Placed after the sign-in filters and before authorisation, so the refusal goes through
@@ -42,6 +43,9 @@ public final class ReadOnlyRoleFilter extends OncePerRequestFilter {
             // A person's own saved views of the inventory: a preference, not the data.
             PathPatternRequestMatcher.withDefaults().matcher("/api/v1/saved-views"),
             PathPatternRequestMatcher.withDefaults().matcher("/api/v1/saved-views/*"),
+            // The inventory as a file: a POST only to carry the CSRF token and be audited; it
+            // returns what an auditor may already read row by row.
+            PathPatternRequestMatcher.withDefaults().matcher("/api/v1/certificates/export"),
             PathPatternRequestMatcher.withDefaults().matcher("/login"),
             PathPatternRequestMatcher.withDefaults().matcher("/logout"),
             PathPatternRequestMatcher.withDefaults().matcher(ConsentFilter.PATH)));

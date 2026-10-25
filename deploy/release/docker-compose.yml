@@ -84,8 +84,9 @@ services:
       # 8080 inside whichever way it is served: plain HTTP, or HTTPS once
       # CERT_ALERT_TLS_ENABLED=true. Only the host side moves. Every interface by default;
       # CERT_ALERT_BIND_ADDRESS=127.0.0.1 keeps it to this host, for a TLS-terminating
-      # reverse proxy in front. With TLS off on any other address install.sh warns that it
-      # is reachable over plain HTTP. An upgrade keeps the address and port in .env. The
+      # reverse proxy in front. With TLS off on any other address install.sh refuses to start
+      # it unless .env says CERT_ALERT_ALLOW_PLAIN_HTTP=true (an .env from a release before
+      # that setting is only warned about). An upgrade keeps the address and port in .env. The
       # host port stays 1024 or above for rootless Podman. Not published at all, for a proxy
       # on the compose network: copy docker-compose.no-ports.yml to docker-compose.override.yml.
       - "${CERT_ALERT_BIND_ADDRESS:-0.0.0.0}:${CERT_ALERT_PORT:-8080}:8080"

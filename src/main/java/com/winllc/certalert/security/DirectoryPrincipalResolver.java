@@ -1,5 +1,6 @@
 package com.winllc.certalert.security;
 
+import com.winllc.certalert.LogSafe;
 import com.winllc.certalert.demo.DemoAccounts;
 import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.domain.EmailAddresses;
@@ -136,7 +137,7 @@ public class DirectoryPrincipalResolver {
         }
         if (named.size() > 1) {
             log.warn("{} name {} different directory entries; matching none of them",
-                    identifiers, named.size());
+                    LogSafe.oneLine(identifiers), named.size());
             return Optional.empty();
         }
         return named.values().stream().findFirst();

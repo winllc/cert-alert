@@ -224,6 +224,28 @@ class InventoryExportTest {
         assertThat(audit.after(head, 100)).noneMatch(event -> event.action().equals("inventory.exported"));
     }
 
+    /**
+     * An auditor reads every row, so may export them: the export is a POST only for its CSRF
+     * token and its audit record, and the read-only role lets it through (CA-22).
+     */
+    @Test
+    void anAuditorMayExportTheInventory() throws Exception {
+        long head = audit.headSeq();
+        String csv = mockMvc.perform(post("/api/v1/certificates/export").param("format", "csv")
+                        .with(SecurityMockMvcRequestPostProcessors.user("aud").roles("USER", "AUDITOR")).with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Type", CertificateExport.CSV_CONTENT_TYPE))
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        assertThat(csv.lines()).hasSizeGreaterThan(1);
+        assertThat(audit.after(head, 100)).anyMatch(event -> event.action().equals("inventory.exported"));
+        // Still read-only everywhere else: the bulk contact change next to it is refused.
+        mockMvc.perform(post("/api/v1/servers/contacts/bulk")
+                        .with(SecurityMockMvcRequestPostProcessors.user("aud").roles("USER", "AUDITOR")).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"serverIds\":[" + weakServer + "],\"email\":\"pki-team@example.gov\"}"))
+                .andExpect(status().isForbidden());
+    }
+
     @Test
     void anExportStopsAtTheLimitAndSaysSo() throws Exception {
         properties.setMaxRows(1);

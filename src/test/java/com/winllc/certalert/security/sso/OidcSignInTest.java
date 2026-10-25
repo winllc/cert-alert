@@ -2,7 +2,10 @@ package com.winllc.certalert.security.sso;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.nimbusds.jwt.JWTClaimsSet;
@@ -80,6 +83,9 @@ class OidcSignInTest {
 
     @Autowired
     private SsoIdentityResolver identities;
+
+    @Autowired
+    private SsoProperties ssoProperties;
 
     private MockMvc mockMvc;
 
@@ -248,6 +254,65 @@ class OidcSignInTest {
         assertRefused(signIn(session, Map.of("preferred_username", "nobody")), session);
         assertThat(logins(head)).singleElement().satisfies(line -> assertThat(line)
                 .contains("\"outcome\":\"failure\"", "\"method\":\"oidc\"", "does not hold"));
+    }
+
+    /**
+     * Entra ID's group overage: the groups claim left out, a pointer to Graph in its place.
+     * Refused with a page of its own and an audit record, rather than signed in without the
+     * roles the groups would grant (CA-25).
+     */
+    @Test
+    void aGroupOverageIsRefusedRatherThanSignedInWithoutRoles() throws Exception {
+        long head = auditStore.headSeq();
+        MockHttpSession session = new MockHttpSession();
+        MvcResult result = signIn(session, Map.of("preferred_username", "olivia",
+                "_claim_names", Map.of("groups", "src1"),
+                "_claim_sources", Map.of("src1", Map.of("endpoint",
+                        "https://graph.windows.net/tenant/users/olivia/getMemberObjects"))));
+        assertThat(result.getResponse().getRedirectedUrl()).isEqualTo("/login?sso_error=groups");
+        assertThat(signedIn(session)).isNull();
+        assertThat(logins(head)).singleElement().satisfies(line -> assertThat(line)
+                .contains("\"outcome\":\"failure\"", "\"method\":\"oidc\"", "group overage"));
+        mockMvc.perform(get("/login").param("sso_error", "groups"))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("id=\"sso-error-groups\"")))
+                .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("id=\"sso-error\""))));
+
+        // With the groups there, the same person signs in.
+        MockHttpSession listed = new MockHttpSession();
+        signIn(listed, Map.of("preferred_username", "olivia", "groups", List.of("cert-alert-admins"),
+                "_claim_names", Map.of("groups", "src1")));
+        assertThat(roles(signedIn(listed))).contains("ROLE_ADMIN");
+    }
+
+    /**
+     * Signing out ends the provider's session too, where provider-logout is on: by its
+     * end_session_endpoint, with the ID token as the hint and the pinned public address to
+     * come back to. Off, it is the sign-in page as before (CA-25).
+     */
+    @Test
+    void signingOutSignsOutAtTheProviderWhereThatIsOn() throws Exception {
+        try {
+            ssoProperties.getOidc().setProviderLogout(true);
+            MockHttpSession session = new MockHttpSession();
+            signIn(session, Map.of("preferred_username", "olivia"));
+            assertThat(signedIn(session)).isNotNull();
+            String location = mockMvc.perform(post("/logout").with(csrf()).session(session))
+                    .andExpect(status().is3xxRedirection())
+                    .andReturn().getResponse().getRedirectedUrl();
+            assertThat(location).startsWith(provider.issuer() + "/logout?");
+            assertThat(query(location))
+                    .containsEntry("post_logout_redirect_uri", PUBLIC_URL + "/login?logout")
+                    .containsKey("id_token_hint");
+
+            ssoProperties.getOidc().setProviderLogout(false);
+            MockHttpSession other = new MockHttpSession();
+            signIn(other, Map.of("preferred_username", "olivia"));
+            mockMvc.perform(post("/logout").with(csrf()).session(other))
+                    .andExpect(status().is3xxRedirection())
+                    .andExpect(redirectedUrl("/login?logout"));
+        } finally {
+            ssoProperties.getOidc().setProviderLogout(false);
+        }
     }
 
     /** An address is never who somebody is, however the provider phrases it. */

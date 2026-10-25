@@ -70,6 +70,7 @@ data:
   {{- include "cert-alert.envList" (dict "name" "CERT_ALERT_SSO_OIDC_AUDITOR_GROUPS" "values" .auditorGroups) }}
   {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SSO_OIDC_JWS_ALGORITHM" "value" .jwsAlgorithm) }}
   {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SSO_OIDC_CLOCK_SKEW" "value" .clockSkew) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SSO_OIDC_PROVIDER_LOGOUT" "value" (include "cert-alert.oidc.providerLogout" $)) }}
   {{- end }}
   {{- end }}
   {{- with $v.sso.saml }}
@@ -158,7 +159,8 @@ data:
   {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_API_MAX_LIFETIME" "value" $v.api.maxLifetime) }}
   CERT_ALERT_WEBHOOKS_ENABLED: {{ $v.webhooks.enabled | quote }}
   CERT_ALERT_WEBHOOKS_ALLOWED_HOSTS: {{ join "," $v.webhooks.allowedHosts | quote }}
-  CERT_ALERT_WEBHOOKS_BLOCK_PRIVATE_NETWORKS: {{ $v.webhooks.blockPrivateNetworks | quote }}
+  {{- /* Unset: the application's default (see values.yaml). */}}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_WEBHOOKS_BLOCK_PRIVATE_NETWORKS" "value" $v.webhooks.blockPrivateNetworks) }}
   # Audit logging (ens-audit/1); the Splunk token is in a Secret.
   ENS_AUDIT_STDOUT: {{ $v.audit.stdout | quote }}
   ENS_AUDIT_FILE: {{ ternary "/var/log/ens/certalert/audit.jsonl" "" $v.audit.file.enabled | quote }}

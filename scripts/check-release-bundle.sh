@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Checks the customer release bundle's files (deploy/release) without building anything:
-# runs shellcheck on its scripts, and its compose files rendered with every compose command
+# runs shellcheck on its scripts and scripts/test-release-scripts.sh (install.sh, backup.sh
+# and restore.sh against a stand-in engine), and its compose files rendered with every compose command
 # present - docker compose, podman-compose - in each combination the bundle README documents:
 #
 #   default                         published on 0.0.0.0:8080
@@ -22,8 +23,13 @@ fail() { printf 'check-release-bundle: %s\n' "$*" >&2; exit 1; }
 
 echo "shellcheck"
 command -v shellcheck > /dev/null || fail "shellcheck is not installed (pip install shellcheck-py)"
-shellcheck -x "$BUNDLE/install.sh" "$BUNDLE/upgrade.sh" "$BUNDLE/container-engine.sh" \
-    "$REPO_ROOT/scripts/release-bundle.sh" "$0"
+shellcheck -x "$BUNDLE/install.sh" "$BUNDLE/upgrade.sh" "$BUNDLE/backup.sh" "$BUNDLE/restore.sh" \
+    "$BUNDLE/container-engine.sh" "$REPO_ROOT/scripts/release-bundle.sh" \
+    "$REPO_ROOT/scripts/test-release-scripts.sh" "$0"
+
+# install.sh, backup.sh and restore.sh against a stand-in container engine.
+echo "release scripts"
+"$REPO_ROOT/scripts/test-release-scripts.sh"
 
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/check-release-bundle.XXXXXX")
 trap 'rm -rf "$WORK"' EXIT

@@ -1,5 +1,6 @@
 package com.winllc.certalert.webhook;
 
+import com.winllc.certalert.LogSafe;
 import com.winllc.certalert.cluster.JobLocks;
 import jakarta.annotation.PreDestroy;
 import java.io.IOException;
@@ -302,7 +303,7 @@ public class WebhookOutbox {
         String error;
         try {
             URI uri = WebhookAddressGuard.parse(secrets.revealUrl(endpoint));
-            InetAddress address = guard.resolve(uri);
+            InetAddress address = guard.resolve(uri, endpoint.isPrivateNetworksAllowed());
             byte[] body = delivery.getPayload().getBytes(StandardCharsets.UTF_8);
             long timestamp = Instant.now(clock).getEpochSecond();
             Map<String, String> headers = new LinkedHashMap<>();
@@ -376,7 +377,7 @@ public class WebhookOutbox {
 
     /** A receiver's or a resolver's words, on one line: nothing from outside starts a log line of its own. */
     private static String oneLine(String value) {
-        return value == null ? null : value.replaceAll("[\\r\\n\\t]", " ");
+        return LogSafe.oneLine(value);
     }
 
     private static String describe(Exception e) {
