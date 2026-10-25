@@ -303,7 +303,7 @@ public class WebhookOutbox {
         String error;
         try {
             URI uri = WebhookAddressGuard.parse(secrets.revealUrl(endpoint));
-            InetAddress address = guard.resolve(uri);
+            InetAddress address = guard.resolve(uri, endpoint.isPrivateNetworksAllowed());
             byte[] body = delivery.getPayload().getBytes(StandardCharsets.UTF_8);
             long timestamp = Instant.now(clock).getEpochSecond();
             Map<String, String> headers = new LinkedHashMap<>();

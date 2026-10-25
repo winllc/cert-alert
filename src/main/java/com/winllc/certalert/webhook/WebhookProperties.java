@@ -24,10 +24,16 @@ public class WebhookProperties {
 
     /**
      * Whether private addresses (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7) are
-     * refused too. Off by default: a receiver inside the same network - a chat bridge, a
-     * ticketing relay - is the usual case on premises.
+     * refused too. {@code true} refuses them for every webhook; {@code false} allows them for
+     * every webhook (what releases before this one did by default).
+     *
+     * <p>Unset - the default - refuses them, except for a webhook saved before this default
+     * (see {@link WebhookEndpoint#isPrivateNetworksAllowed()}), which keeps going where it went
+     * until its URL is changed, with a warning. Either way a host named in
+     * {@link #allowedHosts} may be private: the allowlist is how a receiver inside the network
+     * - a chat bridge, a ticketing relay - is let in.
      */
-    private boolean blockPrivateNetworks = false;
+    private Boolean blockPrivateNetworks;
 
     /**
      * A base64 AES key (16, 24 or 32 bytes) the webhooks' signing secrets are encrypted with
@@ -94,12 +100,20 @@ public class WebhookProperties {
         this.allowedHosts = allowedHosts;
     }
 
-    public boolean isBlockPrivateNetworks() {
+    public Boolean getBlockPrivateNetworks() {
         return blockPrivateNetworks;
     }
 
-    public void setBlockPrivateNetworks(boolean blockPrivateNetworks) {
+    public void setBlockPrivateNetworks(Boolean blockPrivateNetworks) {
         this.blockPrivateNetworks = blockPrivateNetworks;
+    }
+
+    /**
+     * Whether a private address is refused for a webhook - one saved before private networks
+     * were refused by default ({@code grandfathered}), or not.
+     */
+    public boolean blocksPrivateNetworks(boolean grandfathered) {
+        return blockPrivateNetworks != null ? blockPrivateNetworks : !grandfathered;
     }
 
     public String getSecretKey() {

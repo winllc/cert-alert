@@ -14,6 +14,9 @@ public interface WebhookEndpointRepository extends JpaRepository<WebhookEndpoint
 
     long countByEnabledTrue();
 
+    /** Webhooks saved before private addresses were refused by default, still allowed one. */
+    List<WebhookEndpoint> findByPrivateNetworksAllowedTrueOrderById();
+
     /** Endpoints with a URL or a signing secret still stored as given. */
     @Query("select e from WebhookEndpoint e where e.urlEncrypted = false or e.secretEncrypted = false")
     List<WebhookEndpoint> findUnencrypted();

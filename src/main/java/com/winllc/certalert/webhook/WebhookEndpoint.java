@@ -71,6 +71,14 @@ public class WebhookEndpoint {
     @Column(nullable = false)
     private boolean enabled;
 
+    /**
+     * Saved before private addresses were refused by default (V29 sets it on every webhook
+     * that existed then), so it keeps a private address while
+     * {@code cert-alert.webhooks.block-private-networks} is unset - until its URL changes.
+     */
+    @Column(name = "private_networks_allowed", nullable = false)
+    private boolean privateNetworksAllowed;
+
     @Column(name = "created_by", nullable = false, length = 320)
     private String createdBy;
 
@@ -134,6 +142,15 @@ public class WebhookEndpoint {
 
     public boolean isEnabled() {
         return enabled;
+    }
+
+    public boolean isPrivateNetworksAllowed() {
+        return privateNetworksAllowed;
+    }
+
+    /** A new URL is held to today's rules: whatever the old one was allowed stays with it. */
+    void urlChanged() {
+        this.privateNetworksAllowed = false;
     }
 
     public String getCreatedBy() {

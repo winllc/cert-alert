@@ -160,7 +160,7 @@ class WebhookDeliveryTest {
     private WebhookAddressGuard resolvingTo(String address) {
         return new WebhookAddressGuard(properties) {
             @Override
-            public InetAddress resolve(URI uri) throws IOException {
+            public InetAddress resolve(URI uri, boolean grandfathered) throws IOException {
                 return InetAddress.getByName(address);
             }
         };

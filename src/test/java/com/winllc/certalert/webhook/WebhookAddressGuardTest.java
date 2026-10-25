@@ -97,7 +97,12 @@ class WebhookAddressGuardTest {
                     .isInstanceOf(WebhookAddressGuard.RefusedDestinationException.class);
         }
         assertThat(guard.checkUrl("https://nat64public/x")).isNotNull();
-        assertThat(guard.checkUrl("https://nat64private/x")).isNotNull();
+        // Private, inside NAT64: refused by default like any private address, allowed where they are.
+        assertThatThrownBy(() -> guard.checkUrl("https://nat64private/x")).hasMessageContaining("private");
+        WebhookProperties allowing = new WebhookProperties();
+        allowing.setBlockPrivateNetworks(false);
+        assertThat(guard(allowing, Map.of("nat64private", List.of("64:ff9b::a01:203")))
+                .checkUrl("https://nat64private/x")).isNotNull();
         WebhookProperties blocking = new WebhookProperties();
         blocking.setBlockPrivateNetworks(true);
         assertThatThrownBy(() -> guard(blocking, Map.of("nat64private", List.of("64:ff9b::a01:203")))
@@ -131,14 +136,52 @@ class WebhookAddressGuardTest {
                 .hasMessageContaining("169.254.169.254");
     }
 
+    /**
+     * Private networks are refused by default (CA-24); a webhook saved before that default
+     * keeps its private address while the setting is unset; true refuses it too; false allows
+     * them all, as before.
+     */
     @Test
-    void privateNetworksAreAllowedUnlessBlocked() throws Exception {
+    void privateNetworksAreRefusedByDefaultExceptForWebhooksSavedBefore() throws Exception {
         Map<String, List<String>> dns = Map.of("bridge.corp", List.of("10.1.2.3"), "ula", List.of("fd12::1"));
-        assertThat(guard(dns).checkUrl("https://bridge.corp/x")).isNotNull();
+        URI bridge = URI.create("https://bridge.corp/x");
+
+        WebhookAddressGuard byDefault = guard(dns);
+        assertThatThrownBy(() -> byDefault.checkUrl("https://bridge.corp/x")).hasMessageContaining("private");
+        assertThatThrownBy(() -> byDefault.checkUrl("https://ula/x")).hasMessageContaining("private");
+        assertThatThrownBy(() -> byDefault.resolve(bridge)).hasMessageContaining("private");
+        // Saved before the default changed: still posted to.
+        assertThat(byDefault.checkUrl("https://bridge.corp/x", true)).isNotNull();
+        assertThat(byDefault.resolve(bridge, true)).isEqualTo(ip("10.1.2.3"));
+        // Never loopback or metadata, however old the webhook.
+        assertThatThrownBy(() -> guard(Map.of("meta", List.of("169.254.169.254"))).resolve(URI.create("https://meta/x"), true))
+                .isInstanceOf(WebhookAddressGuard.RefusedDestinationException.class);
+
         WebhookProperties blocking = new WebhookProperties();
         blocking.setBlockPrivateNetworks(true);
         assertThatThrownBy(() -> guard(blocking, dns).checkUrl("https://bridge.corp/x")).hasMessageContaining("private");
-        assertThatThrownBy(() -> guard(blocking, dns).checkUrl("https://ula/x")).hasMessageContaining("private");
+        assertThatThrownBy(() -> guard(blocking, dns).resolve(bridge, true)).hasMessageContaining("private");
+
+        WebhookProperties allowing = new WebhookProperties();
+        allowing.setBlockPrivateNetworks(false);
+        assertThat(guard(allowing, dns).checkUrl("https://bridge.corp/x")).isNotNull();
+        assertThat(guard(allowing, dns).checkUrl("https://ula/x")).isNotNull();
+    }
+
+    /** The allowlist is the opt-in for a receiver inside the network, by name or by range. */
+    @Test
+    void aHostTheAllowlistNamesMayBePrivate() throws Exception {
+        Map<String, List<String>> dns = Map.of(
+                "bridge.corp", List.of("10.1.2.3"),
+                "relay.corp", List.of("192.168.7.9"),
+                "other.corp", List.of("172.16.0.5"));
+        WebhookProperties properties = new WebhookProperties();
+        properties.setBlockPrivateNetworks(true);
+        properties.setAllowedHosts(List.of("bridge.corp", "192.168.7.0/24"));
+        WebhookAddressGuard guard = guard(properties, dns);
+        assertThat(guard.checkUrl("https://bridge.corp/x")).isNotNull();
+        assertThat(guard.checkUrl("https://relay.corp/x")).isNotNull();
+        assertThatThrownBy(() -> guard.checkUrl("https://other.corp/x")).hasMessageContaining("private");
     }
 
     @Test
