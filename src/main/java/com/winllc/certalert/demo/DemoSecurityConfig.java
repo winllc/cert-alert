@@ -194,8 +194,9 @@ public class DemoSecurityConfig {
                 // A denial from the authorization filter never reaches the controller
                 // advice - it is translated further down the chain - so the wording has to
                 // be put on the response here.
-                .exceptionHandling(exceptions -> exceptions.accessDeniedHandler(
-                        new AuditingAccessDeniedHandler(refuse(json), denials)));
+                .exceptionHandling(exceptions -> exceptions
+                        .authenticationEntryPoint(SignInSuccessHandler.signInPage())
+                        .accessDeniedHandler(new AuditingAccessDeniedHandler(refuse(json), denials)));
 
         // The same providers the ordinary configuration uses, so a demo password is checked
         // by binding to the directory exactly as a real one is.

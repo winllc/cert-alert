@@ -232,7 +232,7 @@ class SamlSignInTest {
     void signingInLandsOnAPageThatPersonMayRead() throws Exception {
         assertThat(answerFrom("/admin").getResponse().getRedirectedUrl()).isEqualTo("/");
         assertThat(answerFrom("/servers").getResponse().getRedirectedUrl())
-                .isEqualTo("http://localhost/servers?continue");
+                .isEqualTo("/servers?continue");
     }
 
     /** Sally's signed answer, from a browser that asked for this page and was sent to sign in. */
