@@ -16,6 +16,8 @@ as `cert-alert-@VERSION@.tgz`).
 |---|---|
 | `install.sh` | first install (safe to re-run) |
 | `upgrade.sh` | move an existing install to this release |
+| `backup.sh` | back the database up (see [Backup and restore](#backup-and-restore)) |
+| `restore.sh` | put a backup back |
 | `docker-compose.yml` | cert-alert and its PostgreSQL, pinned to this release's images |
 | `docker-compose.no-ports.yml` | publishes nothing on the host, for a proxy on the compose network (see below) |
 | `container-engine.sh` | picks Docker or Podman for the scripts |
@@ -50,7 +52,7 @@ gpg --verify SHA256SUMS.asc SHA256SUMS      # with the ENS Solutions release key
 tar xzf cert-alert-@VERSION@.tar.gz
 cd cert-alert-@VERSION@
 ./install.sh          # loads the images, creates .env, and tells you what to fill in
-vi .env               # your directory, administrators, SMTP, TLS ...
+vi .env               # your directory, administrators, how it is reached (below), SMTP ...
 cp /path/to/license.lic license/license.lic     # optional - or upload it once it is running
 ./install.sh          # validates .env, starts it, and installs license/license.lic
 ```
@@ -59,8 +61,20 @@ The scripts use Docker when its daemon answers, and Podman otherwise; they print
 the first run records it as `CONTAINER_ENGINE` in `.env` so later runs and upgrades use the
 same one. `./install.sh --engine podman` (or `CONTAINER_ENGINE=podman ./install.sh`) chooses.
 
-The UI is then on port 8080 of every interface of this host (`CERT_ALERT_PORT` and
-`CERT_ALERT_BIND_ADDRESS` in `.env`). Sign in as one of `CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS`
+In `.env`, besides the directory and the administrators, **choose how cert-alert is
+reached** - `install.sh` will not start it serving plain HTTP to other hosts (see
+[Listening, and TLS](#listening-and-tls)):
+
+- `CERT_ALERT_TLS_ENABLED=true`, with the keystore and truststore in `tls/` - HTTPS on every
+  interface; or
+- `CERT_ALERT_BIND_ADDRESS=127.0.0.1` behind a TLS-terminating reverse proxy of yours; or
+- `CERT_ALERT_ALLOW_PLAIN_HTTP=true` - plain HTTP on every interface, for a lab or a network
+  that encrypts for you (warned about every time).
+
+The first run also generates the database password and `CERT_ALERT_WEBHOOKS_SECRET_KEY` (the
+key webhook secrets are encrypted with): keep a copy of `.env` with your backups.
+
+The UI is then on port 8080 (`CERT_ALERT_PORT` and `CERT_ALERT_BIND_ADDRESS` in `.env`). Sign in as one of `CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS`
 with a directory password - or a client certificate with TLS on - and press
 **Sync directory**.
 
@@ -68,8 +82,9 @@ with a directory password - or a client certificate with TLS on - and press
 
 A new install publishes the UI on **every interface** (`CERT_ALERT_BIND_ADDRESS=0.0.0.0` in
 `.env`), port 8080 (`CERT_ALERT_PORT`). With TLS off that is plain HTTP, where directory
-passwords and session cookies cross the network in clear text, and `install.sh` warns so
-every time it runs. Choose one of:
+passwords and session cookies cross the network in clear text, so `install.sh` refuses to
+start it on any address but `127.0.0.1` unless `.env` says `CERT_ALERT_ALLOW_PLAIN_HTTP=true`
+(a new `.env` says `false`), and warns every time it runs when it does. Choose one of:
 
 - **Turn TLS on in cert-alert** (`CERT_ALERT_TLS_ENABLED=true`, keystore and truststore in
   `tls/`), keeping `0.0.0.0` (or set the interface's address). Client certificate (CAC/PIV)
@@ -83,6 +98,8 @@ every time it runs. Choose one of:
   `cp docker-compose.no-ports.yml docker-compose.override.yml`, then `./install.sh`. Both
   compose commands read that override file on their own, and upgrades carry it over. It
   needs Docker Compose 2.24+ or podman-compose 1.4.0+ (for `!reset`).
+- **Accept plain HTTP** - a lab, or a network that encrypts for you:
+  `CERT_ALERT_ALLOW_PLAIN_HTTP=true`. `install.sh` still warns every time.
 
 To restrict who can reach it otherwise, set `CERT_ALERT_BIND_ADDRESS` to one interface's
 address, or firewall the port. Run `./install.sh` (or `docker compose up -d`) after changing
@@ -96,9 +113,10 @@ stays there - the upgrade prints a note, and never opens it to the network; set
 `CERT_ALERT_BIND_ADDRESS=0.0.0.0` yourself when you want that. If `.env` does not set
 `CERT_ALERT_BIND_ADDRESS` and was written for the release that listened on `127.0.0.1` by
 default, the upgrade adds `CERT_ALERT_BIND_ADDRESS=127.0.0.1` to it under a comment saying so;
-an `.env` from a release before that keeps `0.0.0.0`, as it was. `install.sh` no longer
-refuses plain HTTP on another address; it warns, and `CERT_ALERT_ALLOW_PLAIN_HTTP` is no
-longer read (delete it when you like). Two defaults do change: idle sessions end after 15
+an `.env` from a release before that keeps `0.0.0.0`, as it was. **An `.env` that does not
+mention `CERT_ALERT_ALLOW_PLAIN_HTTP` at all** - one written before this release - is kept as
+it is: plain HTTP to other hosts is warned about, not refused, and the warning says to add
+`CERT_ALERT_ALLOW_PLAIN_HTTP=true` (or move to TLS). One that sets it is held to it. Two defaults changed in an earlier release: idle sessions end after 15
 minutes rather than 30 (`ENS_SESSION_IDLE_TIMEOUT=30m` restores it), and with TLS on a client
 that can do only ChaCha20, CBC or RSA-key-exchange suites can no longer connect.
 
@@ -174,7 +192,7 @@ cd cert-alert-<new>
 ```
 
 It copies `.env`, `license/`, `tls/` and `email-templates/` across (never overwriting),
-keeps the installed license and installation id (they are in the `ens-license` volume),
+keeps the installed license and installation id (they are in the database),
 lists any settings new in this release, backs up the database to `backups/`, loads the
 new images and restarts on them. The database is kept and migrated on start; migrations
 are not undone, so going back to an older release means restoring that backup into it.
@@ -184,13 +202,48 @@ release, Docker if its daemon answers - so an existing Docker install upgrades w
 manual steps. It keeps the listen address and port in `.env`: see
 [Listening, and TLS](#listening-and-tls) - an install on `127.0.0.1` stays there.
 
-Read the upgrade notes in the main README first. Two of them change what `.env` needs:
+Read the upgrade notes in the main README first. `.env` is never rewritten by an upgrade;
+what is new in this release:
+
+- Plain HTTP to other hosts: refused for a new `.env`, warned about for yours (above).
+- Webhooks: private addresses are refused for webhooks saved from now on unless
+  `CERT_ALERT_WEBHOOKS_ALLOWED_HOSTS` names the host; the ones you have keep their address
+  until their URL changes (named in a startup warning). `CERT_ALERT_WEBHOOKS_BLOCK_PRIVATE_NETWORKS=false`
+  keeps the old rule for every webhook. Without `CERT_ALERT_WEBHOOKS_SECRET_KEY`, webhook secrets
+  stay unencrypted (a note says so): add one (`openssl rand -base64 32`) to encrypt them.
+- OpenID Connect: `CERT_ALERT_SSO_OIDC_PROVIDER_LOGOUT=true` signs out at the provider too
+  (register `<public URL>/login?logout` there first); off unless you set it.
+
+From earlier releases:
 
 - `CERT_ALERT_SECURITY_ADMIN_IDENTIFIERS` now matches uids (or entry DNs) only. An e-mail
   address there is ignored, and a warning at startup names the uid to use instead.
 - With `ENS_X509_REVOCATION` unset, client certificates are now checked for revocation at
   sign-in, soft-fail. Set `ENS_X509_REVOCATION_FAIL=closed` for the STIG, `ENS_X509_CRL_DIR`
   on an air-gapped network, or `ENS_X509_REVOCATION=off` for the old behaviour.
+
+## Backup and restore
+
+```bash
+./backup.sh                              # backups/cert-alert-<UTC time>.sql.gz
+./backup.sh --keep 14                    # ... and keep the newest 14 of these
+./backup.sh --out /srv/backups/ca.sql.gz # somewhere else
+./restore.sh backups/<file>.sql.gz       # asks first; --yes not to
+```
+
+`backup.sh` takes a consistent `pg_dump` while cert-alert keeps running, gzipped and readable
+by its owner only. The database is the whole installation - certificates, audit trail,
+sessions, the license and installation id, API tokens and webhooks - but not `.env`: keep a
+copy of `.env` with the backups, as safely, because `CERT_ALERT_WEBHOOKS_SECRET_KEY` in it is
+what the webhooks' stored secrets are encrypted with. Run it from cron or a systemd timer,
+e.g. `15 2 * * * cd /opt/cert-alert-@VERSION@ && ./backup.sh --keep 14`.
+
+`restore.sh` stops cert-alert, empties the database's schema and loads the backup in one
+transaction - if it does not load, the database is left as it was - then starts cert-alert,
+which migrates a backup from an earlier release forward. To go back to an earlier release,
+restore the backup its upgrade took (`backups/cert-alert-before-<version>-*.sql.gz`) from the
+earlier release's directory with its own `restore.sh`, then `./install.sh` there. Try a
+restore once before you need it.
 
 ## Day to day
 
@@ -199,7 +252,7 @@ docker compose ps                      # status and health (or podman-compose ps
 docker compose logs -f cert-alert      # application log
 docker compose up -d                   # after editing .env (restart alone does not re-read it)
 docker compose down                    # stop (data kept)
-docker compose exec -T postgres pg_dump -U certalert certalert | gzip > backup.sql.gz
+./backup.sh                            # back the database up to backups/
 ```
 
 `docker compose down -v` also deletes the database volume, and the license volume with the

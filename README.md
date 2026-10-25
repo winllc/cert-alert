@@ -176,9 +176,14 @@ want email, your SMTP server. The install guide covers both in full:
 
 - **The release package** - `cert-alert-<version>.tar.gz`, signed and checksummed (see
   [Releases](#releases)). Docker Compose or Podman (podman-compose), with the images inside,
-  so it installs on a host with no internet access: unpack, `./install.sh`, fill in `.env`, `./install.sh` again. Upgrades
-  with `./upgrade.sh --from <previous release directory>`. Its `README.md` (from
-  [`deploy/release/`](deploy/release/README.md)) has the details.
+  so it installs on a host with no internet access: unpack, `./install.sh`, fill in `.env`, `./install.sh` again. In
+  `.env`, besides the directory and the administrators, choose how it is reached: TLS in
+  cert-alert (`CERT_ALERT_TLS_ENABLED=true`), `CERT_ALERT_BIND_ADDRESS=127.0.0.1` behind a
+  TLS-terminating proxy of yours, or - for a lab - `CERT_ALERT_ALLOW_PLAIN_HTTP=true`;
+  `install.sh` will not start it serving plain HTTP to other hosts otherwise. Upgrades
+  with `./upgrade.sh --from <previous release directory>`, which backs the database up first;
+  `./backup.sh` and `./restore.sh` do so on demand (see [Backup and restore](#backup-and-restore)).
+  Its `README.md` (from [`deploy/release/`](deploy/release/README.md)) has the details.
 - **The Helm chart** - [`deploy/helm/cert-alert`](deploy/helm/cert-alert/README.md), published
   with every release to `oci://ghcr.io/winllc/charts/cert-alert` and included in the release
   download as `cert-alert-<version>.tgz`:
@@ -196,6 +201,30 @@ want email, your SMTP server. The install guide covers both in full:
 Either way, an administrator then installs the ENS license on the license screen
 (`/admin/license`), or hands it to the installer (`license/license.lic` for the package,
 `--set-file license.file=...` for the chart), and presses **Sync directory**.
+
+### Backup and restore
+
+The database is the whole installation: the certificate cache, the audit trail, sessions,
+the license and the installation id, API tokens and webhooks. What it does not hold is the
+configuration - the bundle's `.env`, the chart's values and Secrets - and in particular the
+webhook secret key (`CERT_ALERT_WEBHOOKS_SECRET_KEY`), without which the webhooks' stored
+secrets and URLs cannot be read. Back up both, and keep the key as safe as the dumps.
+
+- **Release package.** `./backup.sh` writes a consistent `pg_dump` (one transaction, taken
+  while cert-alert runs), gzipped and readable by its owner only, to `backups/` (or `--out
+  FILE`; `--keep N` keeps the newest N) - run it from cron or a systemd timer. `./upgrade.sh`
+  takes one before every upgrade (`backups/cert-alert-before-<version>-*.sql.gz`).
+  `./restore.sh FILE` asks first (or `--yes`), stops cert-alert, empties the schema and loads
+  the dump in one transaction - a dump that does not load leaves the database as it was - and
+  starts cert-alert again, which migrates an older dump forward. To go back to an earlier
+  release, restore the dump its upgrade took with that release's own directory and scripts.
+- **Helm.** Back up an external PostgreSQL with your own tooling. `upgradeBackup.enabled=true`
+  adds a `pre-upgrade` hook that dumps the database onto a volume before every `helm upgrade`
+  and stops the upgrade if it cannot (off by default; see the chart README, "Backups and
+  upgrades", for why and for restoring).
+
+Test a restore before you need one: into a second installation, or with `./restore.sh` on a
+copy of the host.
 
 ### If entries sync but no certificates do
 
@@ -748,7 +777,8 @@ The ENS platform baseline:
   that port, where health and Prometheus are open without signing in — so never publish it
   beyond your monitoring network. Unset (the default), Prometheus is not served at all, and the
   application's port keeps the actuator exactly as before (`health` and `info` open, `metrics`
-  and `loggers` for administrators). `/livez` and `/readyz` stay on the application's port
+  and `loggers` for administrators; every change of a level through `loggers` is recorded as
+  `logging.level-changed` - who, which logger, old and new level - before it is made). `/livez` and `/readyz` stay on the application's port
   either way. The Helm chart sets the port (`metrics.enabled`, default on, port `9090`) and
   points its probes at it.
 - **Health**: `/actuator/health/liveness` is the process alone; `/actuator/health/readiness`
@@ -813,17 +843,19 @@ The ENS platform baseline, the same in every ENS product:
   The Helm chart sets it whenever its ingress or an edge or reencrypt Route terminates TLS.
 - **The release bundle** publishes on every interface (`0.0.0.0`) by default
   (`CERT_ALERT_BIND_ADDRESS`, `CERT_ALERT_PORT`). With TLS off on any address but
-  `127.0.0.1`, `install.sh` warns every time that it is reachable over plain HTTP: turn TLS
-  on, or set `CERT_ALERT_BIND_ADDRESS=127.0.0.1` behind a TLS-terminating reverse proxy. See
-  `deploy/release/README.md`, "Listening, and TLS".
+  `127.0.0.1`, `install.sh` refuses to start it unless `.env` sets
+  `CERT_ALERT_ALLOW_PLAIN_HTTP=true` (a new `.env` says `false`), and warns every time it
+  does: turn TLS on, or set `CERT_ALERT_BIND_ADDRESS=127.0.0.1` behind a TLS-terminating
+  reverse proxy. An `.env` from a release before the setting (it does not mention it) is
+  only warned about. See `deploy/release/README.md`, "Listening, and TLS".
 - **PostgreSQL**: reach a database outside the bundle's internal network over TLS, with
   `sslmode=verify-full` in the JDBC URL (the chart's `database.params`).
 
 ### Upgrading: listening address, TLS suites and idle timeout
 
-- **Release bundle, Docker or Podman.** New installs listen on `0.0.0.0` again, and
-  `install.sh` warns about plain HTTP rather than refusing it; `CERT_ALERT_ALLOW_PLAIN_HTTP`
-  is no longer read. An upgrade keeps the address and port in `.env`: an install on
+- **Release bundle, Docker or Podman.** New installs listen on `0.0.0.0` again. (Since
+  then, a new `.env` sets `CERT_ALERT_ALLOW_PLAIN_HTTP=false` and plain HTTP to other hosts
+  is refused again on new installs - see [the upgrade notes](#release-bundle-plain-http-to-other-hosts-is-refused-on-new-installs).) An upgrade keeps the address and port in `.env`: an install on
   `127.0.0.1` stays there (when the copied `.env` leaves `CERT_ALERT_BIND_ADDRESS` unset and
   was written for the bundle that defaulted to `127.0.0.1`, `install.sh` writes
   `CERT_ALERT_BIND_ADDRESS=127.0.0.1` into it). The scripts run on Docker or Podman
@@ -1088,8 +1120,27 @@ client's.
   SAML therefore needs HTTPS.
 
 Sign-ins and refusals are recorded as `auth.login` with method `oidc` or `saml`, and the
-refusal's reason. Signing out ends the session here; it does not sign the person out of the
-provider (no single logout).
+refusal's reason.
+
+**Signing out.** Signing out ends the session here. With OpenID Connect and
+`cert-alert.sso.oidc.provider-logout: true` (`CERT_ALERT_SSO_OIDC_PROVIDER_LOGOUT`) it also
+signs the person out at the provider: the browser is sent to the `end_session_endpoint` its
+discovery document names, with the ID token as `id_token_hint` and
+`<public-url>/login?logout` as `post_logout_redirect_uri` - register that address with the
+provider (Entra ID: a redirect URI of the app registration and its front-channel logout URL;
+Okta: a sign-out redirect URI). A provider that names no `end_session_endpoint` is skipped.
+Off by default so an upgrade signs out as before (a startup warning says so while OIDC is on);
+new installations' settings (the bundle's `env.template`, the chart on a new install) turn it
+on. Signing out at the provider does not sign the person out of CertAlert sessions in other
+browsers, and SAML single logout is not supported.
+
+**Entra ID group overage.** For somebody in more groups than fit in a token (200 in a JWT),
+Entra ID leaves the groups claim out and points at Microsoft Graph instead
+(`_claim_names.groups`). Signing them in without it would quietly leave out the
+administrator or auditor role a group grants, so such a sign-in is refused, recorded as a
+failed `auth.login` saying why, and the sign-in page says to ask the provider's
+administrator. Send only the groups assigned to the application (app registration, Token
+configuration: groups assigned to the application, `groupMembershipClaims: ApplicationGroup`).
 
 **The consent banner.** Starting a single sign-on is held at the banner like anything else.
 The SAML answer is a cross-site `POST` that the session cookie (SameSite=Lax) does not come
@@ -1240,8 +1291,9 @@ change something: anything but `GET`, `HEAD` and `OPTIONS`, whatever the endpoin
 rule ahead of all the others rather than one per endpoint, so an endpoint added later is
 covered too. That includes what an ordinary user may do, such as editing contacts with
 `contact-editors: AUTHENTICATED` or marking a notification read. The exceptions only read or
-concern the session: the search tables (which `POST` their query), verifying the audit chain,
-signing in and out, and agreeing to the consent banner. The pages hide what an auditor
+concern the session: the search tables (which `POST` their query), the inventory export
+(a `POST` for its CSRF token; audited as `inventory.exported`), their own saved views,
+verifying the audit chain, signing in and out, and agreeing to the consent banner. The pages hide what an auditor
 cannot use. Somebody who is both an auditor and an administrator is an administrator.
 
 #### Roles from groups
@@ -1469,7 +1521,8 @@ compose file, or a generated LDIF loaded into a real server — set
 > page, and the account they open reads every entry the directory holds. That is a
 > reasonable thing to do with invented entries on an instance you can throw away, and
 > nothing else. `cert-alert.demo.enabled` is not a way to run this application for real,
-> any more than `cert-alert.security.enabled: false` is.
+> any more than `cert-alert.security.enabled: false` is - which the application refuses to
+> start with outside the `dev` profile.
 
 ## The search tables
 
@@ -2810,9 +2863,17 @@ SIIT IPv4-translated (::ffff:0:0/96) address arriving as IPv6. The post
 then goes to the address that was checked - the connection is not made by a second lookup -
 with TLS SNI and certificate hostname verification against the URL's host and the JVM's trust
 store. So a name that pointed somewhere harmless when it was saved and at the metadata
-service now (DNS rebinding) is refused at the send. Narrow it further with
-`cert-alert.webhooks.allowed-hosts` (names, `*.suffix`, CIDR ranges) and
-`cert-alert.webhooks.block-private-networks: true`. Webhooks connect directly: an outbound
+service now (DNS rebinding) is refused at the send.
+
+**Private networks.** A private address (10/8, 172.16/12, 192.168/16, 100.64/10, fc00::/7)
+is refused unless `cert-alert.webhooks.allowed-hosts` (names, `*.suffix`, CIDR ranges) names
+the host or covers the address: the allowlist is how a receiver inside the network - a chat
+bridge, a ticketing relay - is let in, and once set it also narrows every webhook to the
+hosts it lists. `cert-alert.webhooks.block-private-networks` decides the rest: unset (the
+default), private addresses are refused for webhooks saved from now on, while a webhook saved
+before this default keeps its address until its URL is changed, and is named in a warning at
+every start; `true` refuses them for every webhook; `false` allows them for every webhook (what
+releases before did), with a warning at every start. Webhooks connect directly: an outbound
 HTTP proxy is not used. A watchdog closes the connection at `cert-alert.webhooks.delivery-timeout`
 (30 seconds) whatever it is waiting on - a handshake, a body the receiver does not read, an
 answer a byte at a time - so one receiver cannot hold the sender or its lock.
@@ -2825,7 +2886,11 @@ host (`https://hooks.slack.com/[redacted]`).
 `cert-alert.webhooks.secret-key` (Helm: `webhooks.secretKey`/`webhooks.existingSecret`;
 bundle: `CERT_ALERT_WEBHOOKS_SECRET_KEY`) to a base64 AES key (`openssl rand -base64 32`) and
 both are stored AES-GCM encrypted; without one they are stored as they are and a warning is logged at
-startup. URLs and secrets saved before the key was set are encrypted at the next start (once, under the
+startup. New installations get one: the bundle's `install.sh` writes a random key into a new
+`.env`, and the chart generates one into its Secret on a new install (`webhooks.generateSecretKey`,
+kept across upgrades by `lookup`; not under Argo CD or `helm template`, which cannot look it up -
+give the key yourself there). An upgraded installation without a key keeps storing them
+unencrypted, with the warning, until one is set. URLs and secrets saved before the key was set are encrypted at the next start (once, under the
 job lock, safe with several replicas). Changing the key makes the stored secrets unreadable:
 press "New secret" and save the URL again on each webhook afterwards. **Give every replica the
 same key.** A replica started without one leaves deliveries to encrypted webhooks for a replica
@@ -3000,6 +3065,30 @@ strategy with `maxUnavailable: 0` and `minReadySeconds`, a PodDisruptionBudget
 pause so a pod leaves the Service before it stops taking requests. Readiness is the database
 and the audit log; a pod is not sent traffic until it is ready. With one replica nothing
 changes: `Recreate`, no budget.
+
+### Schema migrations: expand and contract
+
+The schema is migrated by Flyway when a pod starts (`spring.flyway`, then Hibernate
+`ddl-auto: validate`). Above one replica a rolling update starts the first new pod - which
+migrates - while the old pods keep serving on the same database, and they only check the
+schema when they started. So every migration has to leave the schema usable by the release
+before it. The rule for this repository's migrations:
+
+1. **Expand only, in a release.** Add tables, add columns that are nullable or have a
+   default, add indexes, widen a column. Old code ignores what it does not know, and its
+   inserts get the default.
+2. **Never in the same release as the code that stops using it:** drop or rename a table or
+   column, narrow a type, add `NOT NULL` without a default, or change what a value means. A
+   rename is an add (expand), a release that writes both and reads the new one, and a drop
+   (contract) at least one release later - once no supported version reads the old one.
+3. **Data backfills** go in the expand migration only if they are idempotent and quick;
+   otherwise in code, behind the job lock.
+4. **Contract migrations** say in their header comment which release stopped using what they
+   drop, and are listed in the upgrade notes.
+
+V21-V29 are all expand-only. Before an upgrade, back up (the bundle's `upgrade.sh` does;
+Helm: `upgradeBackup`, or your own), because `helm rollback` and starting an older release do
+not undo a migration - the way back is restoring the backup the upgrade took.
 
 ## Following the changelog
 
@@ -3411,6 +3500,72 @@ class SlackAlertNotifier implements AlertNotifier {
 
 Read these before upgrading. They apply to the compose bundle, the Helm chart and a plain
 `java -jar` alike.
+
+### Release bundle: plain HTTP to other hosts is refused on new installs
+
+A new `.env` sets `CERT_ALERT_ALLOW_PLAIN_HTTP=false`, and `install.sh` will not start
+cert-alert with TLS off on an address other than loopback (the default is `0.0.0.0`) until
+`.env` turns TLS on (`CERT_ALERT_TLS_ENABLED=true`), sets `CERT_ALERT_BIND_ADDRESS=127.0.0.1`
+behind your own TLS-terminating proxy, or says `CERT_ALERT_ALLOW_PLAIN_HTTP=true` (warned
+about at every run). An upgrade keeps its `.env` unchanged: one from an earlier release does
+not mention the setting, so plain HTTP there is warned about, not refused - add
+`CERT_ALERT_ALLOW_PLAIN_HTTP=true` to say so in as many words, or move to TLS. An `.env` that
+sets `CERT_ALERT_ALLOW_PLAIN_HTTP=false` explicitly (from the release that briefly defaulted
+to `127.0.0.1`) is held to it. Why refusing rather than going back to `127.0.0.1`: a loopback
+default starts "successfully" where nobody else can reach it and protects nothing once the
+address is changed; the refusal covers every non-loopback address and costs a lab one line.
+
+### Webhooks: private addresses, and the secret key
+
+- `cert-alert.webhooks.block-private-networks` (`CERT_ALERT_WEBHOOKS_BLOCK_PRIVATE_NETWORKS`,
+  Helm `webhooks.blockPrivateNetworks`) is now unset by default, which refuses private
+  addresses for webhooks saved from now on. Webhooks that exist at the upgrade (migration V29,
+  `webhook_endpoint.private_networks_allowed`) keep the address they have until their URL is
+  changed, and are named in a warning at every start; nothing stops on upgrade. To keep a
+  receiver inside the network for good, list it in `allowed-hosts`, which may now name private
+  hosts and ranges. `false` keeps the old rule for every webhook (warned at every start); the
+  chart's old default rendered `false` explicitly, so a release that set it keeps it, one that
+  only had the default moves to unset.
+- New installations get a webhook secret key (bundle: `install.sh`; Helm:
+  `webhooks.generateSecretKey`, on a new install that can see the cluster). An upgrade without
+  one is unchanged - set `CERT_ALERT_WEBHOOKS_SECRET_KEY` / `webhooks.secretKey` to start
+  encrypting (what is stored is encrypted at the next start), and back it up with `.env` or
+  the values.
+
+### Security off refuses to start outside `dev`; log-level changes are audited
+
+`cert-alert.security.enabled=false` now stops the application from starting unless the `dev`
+profile is active. Changing a level through the `loggers` actuator endpoint records
+`logging.level-changed` (category `configuration`) before the change is made.
+
+### Single sign-on: group overage refused; signing out at the OIDC provider
+
+An OIDC sign-in whose token carries `_claim_names.groups` instead of the groups claim (Entra
+ID's group overage) is now refused (`/login?sso_error=groups`, a failed `auth.login`) rather
+than signed in without the roles its groups grant. `cert-alert.sso.oidc.provider-logout`
+(`CERT_ALERT_SSO_OIDC_PROVIDER_LOGOUT`) signs out at the provider too; off on upgrade
+(startup warning), on for new installations (the chart's empty `sso.oidc.providerLogout`
+means true on a new install and keeps what an upgraded release had). Register
+`<public-url>/login?logout` as a post-logout redirect URI before turning it on.
+
+### Auditors may export the inventory
+
+The export (`POST /api/v1/certificates/export`) is now open to the auditor role, like the
+rows it contains; it is audited as before.
+
+### Backups, and migration V29
+
+The bundle ships `backup.sh` and `restore.sh`, and `upgrade.sh` backs up through `backup.sh`.
+The chart has an optional pre-upgrade backup hook (`upgradeBackup.enabled`, off by default).
+Flyway adds `webhook_endpoint.private_networks_allowed` (V29, expand-only) on the first start.
+See [Backup and restore](#backup-and-restore) and
+[Schema migrations](#schema-migrations-expand-and-contract).
+
+### Log lines from sign-ins stay on one line
+
+Certificate subjects and issuers, identity-provider usernames and sign-in identifiers are
+logged with line breaks as spaces and other control characters as `?`, so a log search for
+an exact subject containing such characters no longer matches it verbatim.
 
 ### The classification marking is text, and is on email
 
