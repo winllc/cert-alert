@@ -35,9 +35,15 @@
                 <div th:if="${param.error}" class="alert alert-danger" role="alert">
                     That username and password were not accepted by the directory.
                 </div>
-                <div th:if="${param.sso_error}" class="alert alert-danger" role="alert" id="sso-error">
+                <div th:if="${param.sso_error != null and param.sso_error[0] != 'groups'}" class="alert alert-danger" role="alert" id="sso-error">
                     Single sign-on did not sign you in: the identity provider's answer was not
                     accepted, or the directory does not hold the person it named.
+                </div>
+                <div th:if="${param.sso_error != null and param.sso_error[0] == 'groups'}" class="alert alert-danger" role="alert" id="sso-error-groups">
+                    Single sign-on did not sign you in: the identity provider left your groups out of
+                    its answer, because you belong to more of them than it sends, so the roles they
+                    grant here cannot be known. Ask its administrator to send only the groups assigned
+                    to CertAlert.
                 </div>
                 <div th:if="${param.logout}" class="alert alert-success" role="alert">
                     You have been signed out.

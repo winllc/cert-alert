@@ -57,7 +57,8 @@ public final class TestOidcProvider implements AutoCloseable {
         }
         server.createContext("/.well-known/openid-configuration", exchange -> json(exchange, """
                 {"issuer":"%1$s","authorization_endpoint":"%1$s/authorize","token_endpoint":"%1$s/token",
-                 "jwks_uri":"%1$s/jwks","response_types_supported":["code"],"subject_types_supported":["public"],
+                 "jwks_uri":"%1$s/jwks","end_session_endpoint":"%1$s/logout",
+                 "response_types_supported":["code"],"subject_types_supported":["public"],
                  "id_token_signing_alg_values_supported":["RS256"],"code_challenge_methods_supported":["S256"]}
                 """.formatted(issuer())));
         server.createContext("/jwks", exchange -> json(exchange, new JWKSet(key.toPublicJWK()).toString()));
