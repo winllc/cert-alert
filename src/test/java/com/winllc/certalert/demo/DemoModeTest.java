@@ -143,6 +143,15 @@ class DemoModeTest {
     // --- one policy or the other, never both -------------------------------------------
 
     @Test
+    void aSignInFormLeftOpenAcrossARestartGoesBackToTheSignInPage() throws Exception {
+        // Its token belongs to a session the restart (or the timeout) ended: no 403 at /login.
+        mockMvc.perform(post("/login").param("username", "demo.reader").param("password", PASSWORD)
+                        .with(csrf().useInvalidToken()))
+                .andExpect(redirectedUrl("/login?expired"))
+                .andExpect(unauthenticated());
+    }
+
+    @Test
     void theOrdinarySecurityConfigurationIsNotInForce() {
         assertThat(beans.getBeanNamesForType(SecurityConfig.class)).isEmpty();
         assertThat(beans.getBeanNamesForType(DemoSecurityConfig.class)).hasSize(1);
