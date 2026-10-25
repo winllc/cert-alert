@@ -241,6 +241,36 @@ class AuthenticationTest {
     }
 
     @Test
+    void aSignInFormFromASessionThatHasEndedGoesBackToTheSignInPage() throws Exception {
+        // The token on the form belongs to a session that is gone (timed out, the service restarted):
+        // not processed, and the sign-in page again rather than a 403 at /login.
+        mockMvc.perform(post("/login").param("username", "alice").param("password", "password"))
+                .andExpect(redirectedUrl("/login?expired"))
+                .andExpect(unauthenticated());
+        mockMvc.perform(post("/login").param("username", "alice").param("password", "password")
+                        .with(csrf().useInvalidToken()))
+                .andExpect(redirectedUrl("/login?expired"))
+                .andExpect(unauthenticated());
+    }
+
+    @Test
+    void aStaleSignOutFormLeavesSomebodySignedInOnTheStartPage() throws Exception {
+        // Sign-out needs its token too; without it nobody is signed out, but nor do they see a 403.
+        MockHttpSession session = (MockHttpSession) mockMvc.perform(formLogin().user("alice").password("password"))
+                .andExpect(authenticated())
+                .andReturn().getRequest().getSession(false);
+        mockMvc.perform(post("/logout").session(session).with(csrf().useInvalidToken()))
+                .andExpect(redirectedUrl("/"));
+        mockMvc.perform(get("/users").session(session)).andExpect(status().isOk());
+    }
+
+    @Test
+    void otherRefusedTokensKeepTheir403() throws Exception {
+        mockMvc.perform(post("/api/v1/sync/users").with(x509(aliceCertificate)).with(csrf().useInvalidToken()))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
     void healthStaysOpenSoTheThingCanBeMonitored() throws Exception {
         mockMvc.perform(get("/actuator/health")).andExpect(status().isOk());
     }
