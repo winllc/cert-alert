@@ -26,6 +26,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContext;
@@ -209,6 +210,35 @@ class OidcSignInTest {
         signIn(notAdmin, Map.of("preferred_username", "olivia",
                 "groups", List.of("admins", "Administrators", DIRECTORY_ADMINS)));
         assertThat(roles(signedIn(notAdmin))).containsExactly("ROLE_USER");
+    }
+
+    /**
+     * Back to the page that sent them to sign in, unless the person the provider named may
+     * not read it - somebody else's administration page, left open when their session ended.
+     */
+    @Test
+    void signingInLandsOnAPageThatPersonMayRead() throws Exception {
+        MockHttpSession reader = from("/admin");
+        assertThat(signIn(reader, Map.of("preferred_username", "olivia")).getResponse().getRedirectedUrl())
+                .isEqualTo("/");
+
+        MockHttpSession servers = from("/servers");
+        assertThat(signIn(servers, Map.of("preferred_username", "olivia")).getResponse().getRedirectedUrl())
+                .isEqualTo("http://localhost/servers?continue");
+
+        MockHttpSession admin = from("/admin");
+        assertThat(signIn(admin, Map.of("preferred_username", "olivia", "groups", List.of("cert-alert-admins")))
+                        .getResponse().getRedirectedUrl())
+                .isEqualTo("http://localhost/admin?continue");
+    }
+
+    /** The session a browser has after asking for this page and being sent to sign in. */
+    private MockHttpSession from(String page) throws Exception {
+        return (MockHttpSession) mockMvc.perform(get(page).accept(MediaType.TEXT_HTML))
+                .andExpect(status().is3xxRedirection())
+                .andReturn()
+                .getRequest()
+                .getSession(false);
     }
 
     @Test

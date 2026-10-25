@@ -10,6 +10,7 @@ import org.springframework.http.ProblemDetail;
 import tools.jackson.databind.ObjectMapper;
 import com.winllc.certalert.audit.AccessDenials;
 import com.winllc.certalert.audit.AuditingAccessDeniedHandler;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
@@ -27,12 +28,14 @@ import com.winllc.certalert.security.SessionPolicy;
 import com.winllc.certalert.security.SessionPolicyFilter;
 import com.winllc.certalert.security.SecurityHeaders;
 import com.winllc.certalert.security.SignedInDirectoryUser;
+import com.winllc.certalert.security.SignInSuccessHandler;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.authorization.AuthorizationDecision;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
+import org.springframework.security.web.access.WebInvocationPrivilegeEvaluator;
 import org.springframework.security.web.access.ExceptionTranslationFilter;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.slf4j.Logger;
@@ -125,6 +128,7 @@ public class DemoSecurityConfig {
             EnsSecurityProperties ens,
             ConsentBanner consentBanner,
             SessionPolicy sessionPolicy,
+            ObjectProvider<WebInvocationPrivilegeEvaluator> privileges,
             org.springframework.core.env.Environment environment)
             throws Exception {
         log.warn("DEMO MODE: every account in this directory is published on the sign-in page with "
@@ -179,7 +183,10 @@ public class DemoSecurityConfig {
                         .anyRequest()
                         .access((authentication, context) -> new AuthorizationDecision(
                                 signedIn(authentication.get()) && isRead(context.getRequest()))))
-                .formLogin(form -> form.loginPage("/login").permitAll())
+                // Not back to the page the last account was on when this one may not read it.
+                .formLogin(form -> form.loginPage("/login")
+                        .successHandler(new SignInSuccessHandler(privileges))
+                        .permitAll())
                 .logout(logout -> logout
                         .addLogoutHandler(sessionPolicy::loggingOut)
                         .logoutSuccessUrl("/login?logout")

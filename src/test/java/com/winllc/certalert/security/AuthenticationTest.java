@@ -35,6 +35,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockHttpSession;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
@@ -44,6 +46,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
@@ -389,6 +392,28 @@ class AuthenticationTest {
                         .withAuthentication(authentication -> assertThat(authentication.getAuthorities())
                                 .extracting(GrantedAuthority::getAuthority)
                                 .contains(DirectoryPrincipalResolver.ROLE_USER)));
+    }
+
+    /**
+     * Signing in goes back to the page that asked for it, unless the person who signed in
+     * may not read it - somebody else's administration page, left open when their session
+     * ended - in which case they start at the beginning rather than on a 403.
+     */
+    @Test
+    void signingInLandsOnAPageThatPersonMayRead() throws Exception {
+        mockMvc.perform(signInFrom("/admin", "alice")).andExpect(redirectedUrl("/"));
+        mockMvc.perform(signInFrom("/servers", "alice")).andExpect(redirectedUrl("http://localhost/servers?continue"));
+        mockMvc.perform(signInFrom("/admin", "admin")).andExpect(redirectedUrl("http://localhost/admin?continue"));
+    }
+
+    /** Signing in with a password, from the sign-in page that asking for this page led to. */
+    private MockHttpServletRequestBuilder signInFrom(String page, String username) throws Exception {
+        MockHttpSession session = (MockHttpSession) mockMvc.perform(get(page).accept(MediaType.TEXT_HTML))
+                .andExpect(redirectedUrl("/login"))
+                .andReturn()
+                .getRequest()
+                .getSession(false);
+        return post("/login").param("username", username).param("password", "password").session(session).with(csrf());
     }
 
     // --- a password signs in the entry it bound as --------------------------------------

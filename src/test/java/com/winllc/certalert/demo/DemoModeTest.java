@@ -43,6 +43,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
@@ -333,6 +334,23 @@ class DemoModeTest {
         }
     }
 
+    /**
+     * Signing in goes back to the page that sent somebody to the sign-in page, unless the
+     * account they signed in as may not read it. A demo invites signing in as one account
+     * after another, so the page the last one was on - the administration page, the license
+     * screen - is routinely where the next is sent, and a 403 is no page to start on.
+     */
+    @Test
+    void signingInLandsOnAPageThatAccountMayRead() throws Exception {
+        for (String uid : new String[] {"demo.project", "demo.contact", "demo.reader"}) {
+            for (String page : new String[] {"/admin", "/admin/license", "/admin/audit"}) {
+                mockMvc.perform(signInFrom(page, uid)).andExpect(redirectedUrl("/"));
+            }
+            mockMvc.perform(signInFrom("/servers", uid)).andExpect(redirectedUrl("http://localhost/servers?continue"));
+        }
+        mockMvc.perform(signInFrom("/admin", "demo.admin")).andExpect(redirectedUrl("http://localhost/admin?continue"));
+    }
+
     @Test
     void theAdministratorMayRehearseTheRoundUp() throws Exception {
         mockMvc.perform(post("/api/v1/notifications/digest")
@@ -402,6 +420,16 @@ class DemoModeTest {
                 .getSession(false);
     }
 
+    /** Signing in as this account, from the sign-in page that asking for this page led to. */
+    private MockHttpServletRequestBuilder signInFrom(String page, String username) throws Exception {
+        MockHttpSession session = (MockHttpSession) mockMvc.perform(get(page).accept(MediaType.TEXT_HTML))
+                .andExpect(redirectedUrl("/login"))
+                .andReturn()
+                .getRequest()
+                .getSession(false);
+        return post("/login").param("username", username).param("password", PASSWORD).session(session).with(csrf());
+    }
+
     private static String table(String column) {
         return """
                 {"draw":1,"start":0,"length":10,
@@ -433,6 +461,27 @@ class DemoModeTest {
                     .andExpect(status().is3xxRedirection())
                     .andExpect(flash().attributeExists("notice"));
             assertThat(licenses.current().state()).isEqualTo(LicenseState.VALID);
+        } finally {
+            TestLicenses.restoreFull(licenses);
+        }
+    }
+
+    /**
+     * Unlicensed, somebody who is not an administrator is told to ask one - even when the
+     * page that sent them to sign in was the license screen, which they may not open.
+     */
+    @Test
+    void anUnlicensedDemoSendsEverybodyElseToAskAnAdministrator() throws Exception {
+        TestLicenses.uninstall(licenses);
+        try {
+            MockHttpSession session = (MockHttpSession) mockMvc.perform(signInFrom("/admin/license", "demo.reader"))
+                    .andExpect(redirectedUrl("/"))
+                    .andReturn()
+                    .getRequest()
+                    .getSession(false);
+            mockMvc.perform(get("/").session(session).accept(MediaType.TEXT_HTML))
+                    .andExpect(redirectedUrl("/unlicensed"));
+            mockMvc.perform(get("/unlicensed").session(session)).andExpect(status().isOk());
         } finally {
             TestLicenses.restoreFull(licenses);
         }
