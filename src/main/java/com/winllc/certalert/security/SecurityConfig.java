@@ -8,6 +8,7 @@ import com.winllc.certalert.audit.AuditingAccessDeniedHandler;
 import com.winllc.certalert.demo.DemoMode;
 import com.winllc.certalert.observability.ManagementEndpoints;
 import com.winllc.certalert.security.sso.SsoSignIn;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
@@ -34,6 +35,7 @@ import org.springframework.security.web.authentication.logout.LogoutFilter;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.access.AccessDeniedHandlerImpl;
 import org.springframework.security.web.access.ExceptionTranslationFilter;
+import org.springframework.security.web.access.WebInvocationPrivilegeEvaluator;
 import org.springframework.security.web.authentication.DelegatingAuthenticationEntryPoint;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
@@ -97,7 +99,8 @@ public class SecurityConfig {
             ForwardedCertificates forwardedCertificates,
             AuthenticationEventPublisher authenticationEvents,
             Environment environment,
-            SsoSignIn sso)
+            SsoSignIn sso,
+            ObjectProvider<WebInvocationPrivilegeEvaluator> privileges)
             throws Exception {
 
         SecurityHeaders.apply(http, ens.getCsp().isReportOnly());
@@ -238,7 +241,10 @@ public class SecurityConfig {
         // OpenID Connect and SAML, each only where it is configured.
         sso.apply(http, authenticationEvents);
 
-        http.formLogin(form -> form.loginPage("/login").permitAll())
+        // Not back to a page the person signing in may not read (see SignInSuccessHandler).
+        http.formLogin(form -> form.loginPage("/login")
+                        .successHandler(new SignInSuccessHandler(privileges))
+                        .permitAll())
                 .logout(logout -> logout
                         .addLogoutHandler(sessionPolicy::loggingOut)
                         .logoutSuccessUrl("/login?logout")
