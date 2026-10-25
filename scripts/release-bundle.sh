@@ -11,7 +11,8 @@
 # Writes to $OUT_DIR (default dist/release-<version>):
 #
 #   cert-alert-<version>.tar.gz     unpacks to cert-alert-<version>/: README.md, VERSION,
-#                                   install.sh, upgrade.sh, container-engine.sh,
+#                                   install.sh, upgrade.sh, backup.sh, restore.sh,
+#                                   container-engine.sh,
 #                                   docker-compose.yml, docker-compose.no-ports.yml,
 #                                   env.template, license/README.txt,
 #                                   images/cert-alert-images-<version>.tar
@@ -104,6 +105,8 @@ cp "$TEMPLATE_DIR/license/README.txt" "$STAGE/license/README.txt"
 cp "$TEMPLATE_DIR/container-engine.sh" "$STAGE/container-engine.sh"
 install -m 0755 "$TEMPLATE_DIR/install.sh" "$STAGE/install.sh"
 install -m 0755 "$TEMPLATE_DIR/upgrade.sh" "$STAGE/upgrade.sh"
+install -m 0755 "$TEMPLATE_DIR/backup.sh" "$STAGE/backup.sh"
+install -m 0755 "$TEMPLATE_DIR/restore.sh" "$STAGE/restore.sh"
 chmod 0644 "$STAGE/VERSION" "$STAGE/README.md" "$STAGE/docker-compose.yml" \
     "$STAGE/docker-compose.no-ports.yml" "$STAGE/container-engine.sh" \
     "$STAGE/env.template" "$STAGE/license/README.txt"

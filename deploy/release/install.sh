@@ -304,19 +304,9 @@ copy_from_previous() {
 
 backup_database() {
     [ "$BACKUP" = true ] || { say "Skipping the database backup (--no-backup)."; return 0; }
-    local id user db file
-    id=$(service_container postgres 2> /dev/null || true)
-    if [ -z "$id" ] || [ "$(engine inspect -f '{{.State.Running}}' "$id" 2> /dev/null)" != "true" ]; then
-        say "No running database to back up."
-        return 0
-    fi
-    user=$(env_value CERT_ALERT_DB_USER); user=${user:-certalert}
-    db=$(env_value CERT_ALERT_DB_NAME); db=${db:-certalert}
-    mkdir -p backups
-    file="backups/${PRODUCT}-before-${VERSION}-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
-    say "Backing up the database to $file ..."
-    engine exec "$id" pg_dump -U "$user" -d "$db" | gzip > "$file"
-    chmod 600 "$file"
+    # backup.sh, with the engine already chosen; nothing to do when no database is running.
+    CONTAINER_ENGINE=$ENGINE ./backup.sh --if-running \
+        --out "backups/${PRODUCT}-before-${VERSION}-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
 }
 
 wait_until_healthy() {
