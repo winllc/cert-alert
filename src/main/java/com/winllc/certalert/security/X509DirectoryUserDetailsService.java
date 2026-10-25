@@ -1,5 +1,6 @@
 package com.winllc.certalert.security;
 
+import com.winllc.certalert.LogSafe;
 import com.winllc.certalert.domain.CachedCertificate;
 import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.repository.CachedCertificateRepository;
@@ -83,7 +84,8 @@ public class X509DirectoryUserDetailsService
     @Transactional(readOnly = true)
     public UserDetails loadUserDetails(PreAuthenticatedAuthenticationToken token) {
         X509Certificate certificate = certificateOf(token);
-        String subject = certificate.getSubjectX500Principal().getName();
+        // For the log only, on one line: whoever made the certificate chose its subject.
+        String subject = LogSafe.oneLine(certificate.getSubjectX500Principal().getName());
         checks.check(certificate, chainOf(token, certificate));
 
         Optional<DirectoryUser> byFingerprint = byPublishedCertificate(certificate, subject);
@@ -117,7 +119,8 @@ public class X509DirectoryUserDetailsService
                             resolver.principalFor(user, DirectoryPrincipal.AuthenticationMethod.X509);
                 })
                 .orElseThrow(() -> {
-                    log.warn("Rejecting client certificate '{}': no directory entry matches {}", subject, identifiers);
+                    log.warn("Rejecting client certificate '{}': no directory entry matches {}", subject,
+                            LogSafe.oneLine(identifiers));
                     return new UsernameNotFoundException("No directory entry matches this certificate");
                 });
     }

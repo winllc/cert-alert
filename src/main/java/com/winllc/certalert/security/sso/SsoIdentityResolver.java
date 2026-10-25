@@ -1,5 +1,6 @@
 package com.winllc.certalert.security.sso;
 
+import com.winllc.certalert.LogSafe;
 import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.ldap.LdapProperties;
 import com.winllc.certalert.ldap.UserField;
@@ -93,7 +94,8 @@ public class SsoIdentityResolver {
         try {
             entry = match == SsoProperties.Match.DN ? entryAt(value) : entryForUid(value);
         } catch (RuntimeException e) {
-            log.warn("Could not look {} up in the directory for a single sign-on: {}", value, e.toString());
+            log.warn("Could not look {} up in the directory for a single sign-on: {}", LogSafe.oneLine(value),
+                    LogSafe.oneLine(e.toString()));
             return Optional.empty();
         }
         return entry.map(found -> {
@@ -149,7 +151,7 @@ public class SsoIdentityResolver {
                 .filter(user -> user.getUid() != null && user.getUid().equalsIgnoreCase(uid))
                 .toList();
         if (named.size() > 1) {
-            log.warn("uid {} names {} cached directory entries; matching none of them", uid, named.size());
+            log.warn("uid {} names {} cached directory entries; matching none of them", LogSafe.oneLine(uid), named.size());
         }
         return named.size() == 1 ? Optional.of(named.getFirst()) : Optional.empty();
     }

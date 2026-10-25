@@ -303,6 +303,23 @@ class X509SignInTest {
         mockMvc.perform(get("/users").with(x509(hankCac))).andExpect(unauthenticated());
     }
 
+    /**
+     * Whoever made a certificate chose its subject, and the default console pattern is not
+     * JSON: a line break in it must not start a forged log line of its own (CA-26).
+     */
+    @Test
+    void aSubjectWithALineBreakStaysOnOneLogLine(CapturedOutput output) throws Exception {
+        X509Certificate forged = cac(new org.bouncycastle.asn1.x500.X500NameBuilder()
+                .addRDN(org.bouncycastle.asn1.x500.style.BCStyle.CN,
+                        "EVIL\r\n2026-10-25T00:00:00Z INFO FORGED grace signed in")
+                .build(), "nobody@mil", "nobody@example.gov");
+
+        mockMvc.perform(get("/users").with(x509(forged))).andExpect(unauthenticated());
+
+        assertThat(output.getOut()).contains("Rejecting client certificate 'CN=EVIL 2026-10-25T00:00:00Z INFO FORGED");
+        assertThat(output.getOut().lines()).noneMatch(line -> line.startsWith("2026-10-25T00:00:00Z"));
+    }
+
     private List<String> refusals(ThrowingRunnable request) throws Exception {
         authenticationAudit.flush();
         long head = auditStore.headSeq();
@@ -321,6 +338,10 @@ class X509SignInTest {
 
     /** A CAC-shaped certificate: EDIPI in the CN, a UPN, an address. */
     private static X509Certificate cac(String subject, String upn, String email) throws Exception {
+        return cac(new X500Name(subject), upn, email);
+    }
+
+    private static X509Certificate cac(X500Name subject, String upn, String email) throws Exception {
         java.security.KeyPair keys = com.winllc.certalert.support.TestCertificates.sharedKeyPair();
         Instant now = Instant.now();
         JcaX509v3CertificateBuilder builder = new JcaX509v3CertificateBuilder(
@@ -328,7 +349,7 @@ class X509SignInTest {
                 BigInteger.valueOf(now.toEpochMilli()),
                 Date.from(now.minus(Duration.ofDays(1))),
                 Date.from(now.plus(Duration.ofDays(30))),
-                new X500Name(subject),
+                subject,
                 keys.getPublic());
         ASN1Encodable[] otherName = {
             new ASN1ObjectIdentifier("1.3.6.1.4.1.311.20.2.3"), new DERTaggedObject(true, 0, new DERUTF8String(upn))

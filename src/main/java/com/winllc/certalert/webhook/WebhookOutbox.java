@@ -1,5 +1,6 @@
 package com.winllc.certalert.webhook;
 
+import com.winllc.certalert.LogSafe;
 import com.winllc.certalert.cluster.JobLocks;
 import jakarta.annotation.PreDestroy;
 import java.io.IOException;
@@ -376,7 +377,7 @@ public class WebhookOutbox {
 
     /** A receiver's or a resolver's words, on one line: nothing from outside starts a log line of its own. */
     private static String oneLine(String value) {
-        return value == null ? null : value.replaceAll("[\\r\\n\\t]", " ");
+        return LogSafe.oneLine(value);
     }
 
     private static String describe(Exception e) {

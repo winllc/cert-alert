@@ -1,5 +1,6 @@
 package com.winllc.certalert.security;
 
+import com.winllc.certalert.LogSafe;
 import com.winllc.certalert.audit.SessionAudit;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpSession;
@@ -220,7 +221,7 @@ public class SessionPolicy implements HttpSessionListener, HttpSessionIdListener
         for (Held oldest : ended) {
             pushedOut.add(oldest.sessionId());
             log.info("Ending the oldest session of {}: over ENS_SESSION_MAX_PER_USER ({})",
-                    authentication.getName(), properties.getSession().getMaxPerUser());
+                    LogSafe.oneLine(authentication.getName()), properties.getSession().getMaxPerUser());
             audit.expired(authentication, oldest.sessionId(), "concurrent", null);
         }
     }
@@ -264,7 +265,7 @@ public class SessionPolicy implements HttpSessionListener, HttpSessionIdListener
             oldest.setAttribute(ENDED, "concurrent");
             sessions.save(oldest);
             log.info("Ending the oldest session of {}: over ENS_SESSION_MAX_PER_USER ({})",
-                    authentication.getName(), max);
+                    LogSafe.oneLine(authentication.getName()), max);
             audit.expired(authentication, oldest.getId(), "concurrent", null);
         }
     }
