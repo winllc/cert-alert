@@ -7,6 +7,7 @@
 # Copies .env, license/, tls/ and email-templates/ from the previous release (never
 # overwriting what is here), backs up the database (--no-backup to skip), loads the new
 # images and restarts on them. The database and license volumes are kept (the installed
-# license and this installation's id stay); the schema is migrated on start.
+# license and this installation's id stay, in the database); the schema is migrated on start.
+# license/license.lic, if there is one, goes into .env as ENS_LICENSE (see install.sh).
 set -euo pipefail
 exec "$(dirname "$0")/install.sh" --upgrade "$@"

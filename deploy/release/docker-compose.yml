@@ -90,10 +90,11 @@ services:
       # on the compose network: copy docker-compose.no-ports.yml to docker-compose.override.yml.
       - "${CERT_ALERT_BIND_ADDRESS:-0.0.0.0}:${CERT_ALERT_PORT:-8080}:8080"
     volumes:
-      # The ENS license, this installation's id (licenses are bound to it) and the license
-      # revisions seen - writable, because the license screen saves uploads here. A named
-      # volume, so it survives upgrades; install.sh copies license/license.lic into it.
-      # The image sets ENS_LICENSE_FILE and ENS_LICENSE_STATE_DIR to point here.
+      # The ENS license, this installation's id and the license revisions seen of releases
+      # that kept them in files. They are now in the database: the first start of this release
+      # imports them from here, and the volume is not read after that. install.sh gives
+      # license/license.lic as ENS_LICENSE in .env instead. The image sets ENS_LICENSE_FILE and
+      # ENS_LICENSE_STATE_DIR to point here.
       - ens-license:/var/lib/ens/certalert
       # The audit trail's JSONL file, when ENS_AUDIT_FILE points under /var/log/ens (e.g.
       # /var/log/ens/certalert/audit.jsonl). A named volume, writable by the runtime user
