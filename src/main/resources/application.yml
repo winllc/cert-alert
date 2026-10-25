@@ -93,6 +93,15 @@ server:
   error:
     include-message: never
 
+  # Redirects say "/login", not "http://<the host this server thinks it has>/login". Behind a
+  # proxy that does not pass the original host and scheme on (or before
+  # SERVER_FORWARD_HEADERS_STRATEGY is set), an absolute one names the wrong origin: a sign-in's
+  # redirect to it is then refused by the Content-Security-Policy's form-action 'self', and the
+  # Sign in button seems to do nothing. A relative one is resolved by the browser against the
+  # address it actually used.
+  tomcat:
+    use-relative-redirects: true
+
   # A container stops with SIGTERM. Finishing in-flight requests, and letting the changelog
   # connector stop between changes rather than mid-batch, is worth a few seconds.
   shutdown: graceful

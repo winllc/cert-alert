@@ -241,6 +241,22 @@ class AuthenticationTest {
     }
 
     @Test
+    void redirectsAreRelativeSoAProxyThatRenamesTheHostDoesNotBreakSigningIn() throws Exception {
+        // The proxy reached this server as app:8080 and said so; the browser is at another origin. An
+        // absolute redirect to http://app:8080/... is refused by form-action 'self' after the form posts.
+        MockHttpSession session = (MockHttpSession) mockMvc.perform(get("/servers").header("Host", "app:8080")
+                        .accept(MediaType.TEXT_HTML))
+                .andExpect(redirectedUrl("/login"))
+                .andReturn().getRequest().getSession(false);
+        mockMvc.perform(post("/login").header("Host", "app:8080").session(session).with(csrf())
+                        .param("username", "alice").param("password", "password"))
+                .andExpect(redirectedUrl("/servers?continue"));
+        mockMvc.perform(post("/login").header("Host", "app:8080").with(csrf())
+                        .param("username", "alice").param("password", "password"))
+                .andExpect(redirectedUrl("/"));
+    }
+
+    @Test
     void aSignInFormFromASessionThatHasEndedGoesBackToTheSignInPage() throws Exception {
         // The token on the form belongs to a session that is gone (timed out, the service restarted):
         // not processed, and the sign-in page again rather than a 403 at /login.
@@ -432,8 +448,8 @@ class AuthenticationTest {
     @Test
     void signingInLandsOnAPageThatPersonMayRead() throws Exception {
         mockMvc.perform(signInFrom("/admin", "alice")).andExpect(redirectedUrl("/"));
-        mockMvc.perform(signInFrom("/servers", "alice")).andExpect(redirectedUrl("http://localhost/servers?continue"));
-        mockMvc.perform(signInFrom("/admin", "admin")).andExpect(redirectedUrl("http://localhost/admin?continue"));
+        mockMvc.perform(signInFrom("/servers", "alice")).andExpect(redirectedUrl("/servers?continue"));
+        mockMvc.perform(signInFrom("/admin", "admin")).andExpect(redirectedUrl("/admin?continue"));
     }
 
     /** Signing in with a password, from the sign-in page that asking for this page led to. */

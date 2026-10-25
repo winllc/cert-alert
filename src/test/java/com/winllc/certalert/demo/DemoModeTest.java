@@ -355,9 +355,9 @@ class DemoModeTest {
             for (String page : new String[] {"/admin", "/admin/license", "/admin/audit"}) {
                 mockMvc.perform(signInFrom(page, uid)).andExpect(redirectedUrl("/"));
             }
-            mockMvc.perform(signInFrom("/servers", uid)).andExpect(redirectedUrl("http://localhost/servers?continue"));
+            mockMvc.perform(signInFrom("/servers", uid)).andExpect(redirectedUrl("/servers?continue"));
         }
-        mockMvc.perform(signInFrom("/admin", "demo.admin")).andExpect(redirectedUrl("http://localhost/admin?continue"));
+        mockMvc.perform(signInFrom("/admin", "demo.admin")).andExpect(redirectedUrl("/admin?continue"));
     }
 
     @Test

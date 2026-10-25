@@ -224,12 +224,12 @@ class OidcSignInTest {
 
         MockHttpSession servers = from("/servers");
         assertThat(signIn(servers, Map.of("preferred_username", "olivia")).getResponse().getRedirectedUrl())
-                .isEqualTo("http://localhost/servers?continue");
+                .isEqualTo("/servers?continue");
 
         MockHttpSession admin = from("/admin");
         assertThat(signIn(admin, Map.of("preferred_username", "olivia", "groups", List.of("cert-alert-admins")))
                         .getResponse().getRedirectedUrl())
-                .isEqualTo("http://localhost/admin?continue");
+                .isEqualTo("/admin?continue");
     }
 
     /** The session a browser has after asking for this page and being sent to sign in. */
