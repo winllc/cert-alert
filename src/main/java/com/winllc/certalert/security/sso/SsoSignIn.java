@@ -49,7 +49,7 @@ import org.springframework.security.saml2.provider.service.authentication.Saml2A
 import org.springframework.security.saml2.provider.service.registration.RelyingPartyRegistration;
 import org.springframework.security.saml2.provider.service.registration.RelyingPartyRegistrationRepository;
 import org.springframework.security.saml2.provider.service.registration.RelyingPartyRegistrations;
-import org.springframework.security.web.authentication.SavedRequestAwareAuthenticationSuccessHandler;
+import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.util.function.SingletonSupplier;
@@ -132,8 +132,14 @@ public class SsoSignIn {
         "/saml2/service-provider-metadata/**"
     };
 
-    /** Adds whichever providers are configured to the chain. */
-    public void apply(HttpSecurity http, AuthenticationEventPublisher events) throws Exception {
+    /**
+     * Adds whichever providers are configured to the chain.
+     *
+     * @param success where a sign-in lands: the same handler as the password sign-in's, so
+     *     nobody is returned to a saved page they may not read whichever way they signed in
+     */
+    public void apply(HttpSecurity http, AuthenticationEventPublisher events, AuthenticationSuccessHandler success)
+            throws Exception {
         if (properties.getOidc().isEnabled() || properties.getSaml().isEnabled()) {
             // At startup, not at the first sign-in: a deployment without its public address
             // configured does not start with single sign-on half working.
@@ -143,18 +149,18 @@ public class SsoSignIn {
             }
         }
         if (properties.getOidc().isEnabled()) {
-            applyOidc(http);
+            applyOidc(http, success);
             log.info("Single sign-on: OpenID Connect from {}", properties.getOidc().getIssuerUri());
         }
         if (properties.getSaml().isEnabled()) {
-            applySaml(http, events);
+            applySaml(http, events, success);
             log.info("Single sign-on: SAML 2.0 from {}", properties.getSaml().getMetadataLocation());
         }
     }
 
     // --- OpenID Connect ------------------------------------------------------------------
 
-    private void applyOidc(HttpSecurity http) throws Exception {
+    private void applyOidc(HttpSecurity http, AuthenticationSuccessHandler success) throws Exception {
         SsoProperties.Oidc oidc = properties.getOidc();
         require(oidc.getIssuerUri(), "cert-alert.sso.oidc.issuer-uri");
         require(oidc.getClientId(), "cert-alert.sso.oidc.client-id");
@@ -171,6 +177,7 @@ public class SsoSignIn {
         http.oauth2Login(login -> login
                 .loginPage("/login")
                 .failureUrl(FAILURE_URL)
+                .successHandler(success)
                 .clientRegistrationRepository(registrations)
                 .authorizedClientRepository(new NothingKept())
                 .tokenEndpoint(token -> { })
@@ -272,7 +279,8 @@ public class SsoSignIn {
 
     // --- SAML 2.0 ------------------------------------------------------------------------
 
-    private void applySaml(HttpSecurity http, AuthenticationEventPublisher events) throws Exception {
+    private void applySaml(HttpSecurity http, AuthenticationEventPublisher events, AuthenticationSuccessHandler success)
+            throws Exception {
         SsoProperties.Saml saml = properties.getSaml();
         require(saml.getMetadataLocation(), "cert-alert.sso.saml.metadata-location");
         RelyingPartyRegistrationRepository registrations = lazyRelyingParty(saml);
@@ -295,7 +303,6 @@ public class SsoSignIn {
         ProviderManager manager = new ProviderManager(provider);
         manager.setAuthenticationEventPublisher(events);
 
-        SavedRequestAwareAuthenticationSuccessHandler standardSuccess = new SavedRequestAwareAuthenticationSuccessHandler();
         http.saml2Login(login -> login
                 .loginPage("/login")
                 .failureUrl(FAILURE_URL)
@@ -303,7 +310,7 @@ public class SsoSignIn {
                 .authenticationManager(manager)
                 .successHandler((request, response, authentication) -> {
                     carryConsent(request);
-                    standardSuccess.onAuthenticationSuccess(request, response, authentication);
+                    success.onAuthenticationSuccess(request, response, authentication);
                 }));
         http.saml2Metadata(metadata -> metadata.metadataUrl("/saml2/service-provider-metadata/{registrationId}"));
     }

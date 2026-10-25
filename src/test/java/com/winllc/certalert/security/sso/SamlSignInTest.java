@@ -33,6 +33,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
+import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockHttpSession;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -219,6 +221,32 @@ class SamlSignInTest {
         assertThat(roles(signedIn(answerWith(provider.respond(answer), started))))
                 .contains("ROLE_AUDITOR")
                 .doesNotContain("ROLE_ADMIN");
+    }
+
+    /**
+     * Back to the page that sent them to sign in, unless the person the provider named may
+     * not read it. The answer is posted here with the session that asked for the page, as
+     * it arrives wherever the session cookie goes with the provider's POST.
+     */
+    @Test
+    void signingInLandsOnAPageThatPersonMayRead() throws Exception {
+        assertThat(answerFrom("/admin").getResponse().getRedirectedUrl()).isEqualTo("/");
+        assertThat(answerFrom("/servers").getResponse().getRedirectedUrl())
+                .isEqualTo("http://localhost/servers?continue");
+    }
+
+    /** Sally's signed answer, from a browser that asked for this page and was sent to sign in. */
+    private MvcResult answerFrom(String page) throws Exception {
+        MockHttpSession session = (MockHttpSession) mockMvc.perform(get(page).accept(MediaType.TEXT_HTML))
+                .andExpect(status().is3xxRedirection())
+                .andReturn()
+                .getRequest()
+                .getSession(false);
+        Started started = signInStarted();
+        return answerWith(mockMvc, provider.respond(answer(started, "sally")), started, true, request -> {
+            request.setSession(session);
+            return request;
+        });
     }
 
     @Test

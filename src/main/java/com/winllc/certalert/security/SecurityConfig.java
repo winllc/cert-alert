@@ -238,12 +238,15 @@ public class SecurityConfig {
 
         authenticationProviders.forEach(http::authenticationProvider);
 
-        // OpenID Connect and SAML, each only where it is configured.
-        sso.apply(http, authenticationEvents);
+        // Not back to a page the person signing in may not read (see SignInSuccessHandler),
+        // whichever way they signed in.
+        SignInSuccessHandler signInSuccess = new SignInSuccessHandler(privileges);
 
-        // Not back to a page the person signing in may not read (see SignInSuccessHandler).
+        // OpenID Connect and SAML, each only where it is configured.
+        sso.apply(http, authenticationEvents, signInSuccess);
+
         http.formLogin(form -> form.loginPage("/login")
-                        .successHandler(new SignInSuccessHandler(privileges))
+                        .successHandler(signInSuccess)
                         .permitAll())
                 .logout(logout -> logout
                         .addLogoutHandler(sessionPolicy::loggingOut)

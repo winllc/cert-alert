@@ -14,9 +14,10 @@ import org.springframework.security.web.savedrequest.RequestCache;
 import org.springframework.security.web.savedrequest.SavedRequest;
 
 /**
- * Where a password sign-in lands: back on the page that sent somebody to the sign-in page,
- * as Spring's own handler does - unless the person who has just signed in may not read it,
- * in which case they start at {@code /} like anybody who came to the sign-in page directly.
+ * Where a sign-in lands - by password, OpenID Connect or SAML: back on the page that sent
+ * somebody to the sign-in page, as Spring's own handler does - unless the person who has
+ * just signed in may not read it, in which case they start at {@code /} like anybody who
+ * came to the sign-in page directly.
  *
  * <p>The page that was asked for need not be theirs. A session that ends on an
  * administration page leaves that page saved for whoever signs in next, and a demo invites
