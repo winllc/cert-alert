@@ -8,8 +8,8 @@
 #                                      by default the one in .env, else Docker if its
 #                                      daemon answers, else Podman
 #
-# Safe to run again. It never overwrites an .env, or a license already installed in the
-# application's license volume.
+# Safe to run again. It never overwrites an .env (except to set ENS_LICENSE from
+# license/license.lic), or a different license already installed.
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -215,39 +215,49 @@ check_port() {
 
 check_license() {
     if [ -f license/license.lic ]; then
-        say "License: license/license.lic found; it is installed once cert-alert has started."
+        say "License: license/license.lic found; it goes into .env as ENS_LICENSE, which cert-alert installs as it"
+        say "starts unless a different usable license, or a newer revision of it, is installed already."
     else
         say "License: no license/license.lic here. If none is installed yet, upload one on the"
         say "license screen once cert-alert is up (see below); until then only sign-in and that screen work."
     fi
 }
 
-# Where the application keeps its license, inside the ens-license volume.
-LICENSE_IN_VOLUME=/var/lib/ens/certalert/license.lic
-
-install_license() {
-    # Copies license/license.lic into the license volume, once the container exists. Never
-    # replaces a different license already there: that may be a newer one uploaded on the
-    # license screen, and an older revision put back over it is refused.
+license_to_env() {
+    # Gives license/license.lic to cert-alert as ENS_LICENSE in .env (the file, base64), before it
+    # starts. cert-alert keeps its license in the database and reads the license volume once, on
+    # its first license check while the database has no installation id, so a file copied into the
+    # volume once it runs would never be read. ENS_LICENSE is installed on the first license check
+    # after the start when no usable license is installed yet, or when it is a newer revision of
+    # the installed one; any other installed license (an upload on the license screen) is kept, so
+    # the value can stay. A newer file in license/ replaces it on the next run.
     [ -f license/license.lic ] || return 0
-    local id
-    id=$(service_container cert-alert)
-    [ -n "$id" ] || die "no cert-alert container to copy license/license.lic into."
-    if engine exec "$id" cat "$LICENSE_IN_VOLUME" 2> /dev/null | cmp -s - license/license.lic; then
-        say "License: license/license.lic is already installed."
+    if ! grep -q -- '-----BEGIN ENS LICENSE-----' license/license.lic; then
+        say "License: license/license.lic is not an ENS license file (download it again from the ENS licensing portal); not used."
         return 0
     fi
-    if engine exec "$id" test -s "$LICENSE_IN_VOLUME" 2> /dev/null; then
-        say "License: a different license is already installed (perhaps uploaded on the license screen); kept it."
-        say "         To replace it with license/license.lic, upload that file on the license screen."
+    local value current tmp
+    value=$(base64 < license/license.lic | tr -d '\n')
+    current=$(env_value ENS_LICENSE)
+    if [ "$current" = "$value" ]; then
+        say "License: .env already gives license/license.lic as ENS_LICENSE."
         return 0
     fi
-    engine cp license/license.lic "$id:$LICENSE_IN_VOLUME" \
-        || die "could not copy license/license.lic into the cert-alert container."
-    # cp writes it as root; make it the application's, like an uploaded one.
-    engine exec -u 0 "$id" sh -c "chown 185:0 '$LICENSE_IN_VOLUME' && chmod 0664 '$LICENSE_IN_VOLUME'" \
-        || say "License: could not change the copied file's owner; it is still readable."
-    say "License: copied license/license.lic into the license volume ($LICENSE_IN_VOLUME)."
+    # Rewritten in place (cat >), so .env keeps its owner and mode; awk -v is safe for base64.
+    tmp=$(mktemp .env.XXXXXX)
+    awk -v v="$value" '
+        /^[[:space:]]*ENS_LICENSE=/ { if (!done) print "ENS_LICENSE=" v; done = 1; next }
+        { print }
+        END {
+            if (!done) {
+                print ""
+                print "# The ENS license, from license/license.lic (base64), set by install.sh."
+                print "ENS_LICENSE=" v
+            }
+        }' .env > "$tmp"
+    cat "$tmp" > .env
+    rm -f "$tmp"
+    say "License: set ENS_LICENSE in .env from license/license.lic; cert-alert installs it as it starts."
 }
 
 newer_settings() {
@@ -348,9 +358,9 @@ wait_until_healthy() {
 }
 
 start() {
+    license_to_env
     compose config --quiet || die "the compose configuration is not valid with this .env."
     compose up -d --remove-orphans
-    install_license
     wait_until_healthy
 }
 

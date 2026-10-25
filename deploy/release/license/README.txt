@@ -7,22 +7,23 @@ There are two ways to install it:
 
          license.lic
 
-     and run ./install.sh (or ./upgrade.sh). Once cert-alert has started, the script
-     copies it into the application's license volume (ens-license, mounted at
-     /var/lib/ens/certalert). It never replaces a different license already installed
-     there - upload that one on the license screen instead.
+     and run ./install.sh (or ./upgrade.sh). Before starting cert-alert, the script puts
+     it into .env as ENS_LICENSE, and cert-alert installs it as it starts: when no usable
+     license is installed yet, or when it is a newer revision of the installed one. A
+     different license already installed is kept - upload that one on the license screen
+     instead.
 
   2. Upload it on the license screen: sign in as an administrator and open
      Administration -> License (/admin/license). An unlicensed cert-alert sends
      administrators there.
 
-Until a license is installed, only signing in and the license screen work. A license
+Until a license is installed, only signing in and the license screen work. An upload
 takes effect at once, with no restart.
 
 The license screen also shows this installation's id. Enter it on the ENS portal to
 bind a license to this installation; a bound license works here and nowhere else. The
-id is kept in the ens-license volume, so keep that volume: upgrades do. Deleting it
-(docker compose down -v) gives the installation a new id.
+id is kept in the database, with the license, so keep the database: upgrades do.
+Deleting it (docker compose down -v) gives the installation a new id.
 
 To check what is installed:
 

@@ -144,14 +144,18 @@ cert-alert needs an ENS license, from the ENS licensing portal: an evaluation, o
 license issued against your order (product `certalert`). Until one is installed, only
 signing in and the license screen work - administrators are sent there.
 
-- **Install it** by putting it at `license/license.lic` before running `./install.sh`, which
-  copies it into the application's license volume once it has started; or upload it on the
-  license screen, **Administration → License** (`/admin/license`). It takes effect at once.
-  `install.sh` never replaces a different license already installed (it may be a newer one
-  uploaded on the screen): upload the new file on the screen instead.
-- **The license volume** (`ens-license`, at `/var/lib/ens/certalert` in the container) holds
-  the license, this installation's id and the license revisions seen. Upgrades keep it.
-  `docker compose down -v` deletes it, and the installation gets a new id.
+- **Install it** by putting it at `license/license.lic` before running `./install.sh` (or
+  `./upgrade.sh`), which sets `ENS_LICENSE` in `.env` from it before starting cert-alert; or
+  upload it on the license screen, **Administration → License** (`/admin/license`), where it
+  takes effect at once. cert-alert installs `ENS_LICENSE` as it starts when no usable license
+  is installed yet, or when it is a newer revision of the installed one. A different license
+  already installed (it may be a newer one uploaded on the screen) is kept: upload the new file
+  on the screen instead.
+- **Where it is kept.** The license, this installation's id and the license revisions seen are
+  in the database (`ens_license_*`), so the database backup covers them and upgrades keep them.
+  The license volume (`ens-license`, at `/var/lib/ens/certalert` in the container) held them in
+  earlier releases; the first start of this release imports it, and it is not read after that.
+  `docker compose down -v` deletes the database, and the installation gets a new id.
 - **Binding.** The license screen shows this installation's id (e.g. `CA-7F3K-29QD`). Enter
   it on the ENS portal to bind a license to this installation.
 - **Expiry.** A subscription keeps full use through its grace period, with a reminder to
