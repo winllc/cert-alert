@@ -18,6 +18,7 @@ public final class AuditActions {
             "access.denied",
             // configuration
             "settings.changed", "server-attribute.defined", "server-attribute.changed", "server-attribute.retired",
+            "logging.level-changed",
             // license
             "license.installed", "license.rejected", "license.mode-changed", "license.limit-exceeded",
             // data
