@@ -224,6 +224,8 @@ API tokens and webhooks are created on **Admin > Integrations**; these values bo
 | `webhooks.blockPrivateNetworks` | `""` | `CERT_ALERT_WEBHOOKS_BLOCK_PRIVATE_NETWORKS`. Empty: private addresses refused for webhooks saved from now on, while one saved before this release keeps its address (startup warning) until its URL changes; `true`: refused for all; `false`: allowed for all, as before. A host in `allowedHosts` may be private |
 | `webhooks.secretKey` | `""` | `CERT_ALERT_WEBHOOKS_SECRET_KEY` (or `existingSecret` + `existingSecretKey`, `webhooks-secret-key`): a base64 AES key the signing secrets and URLs are encrypted with |
 | `webhooks.generateSecretKey` | `true` | With neither of the above, a new installation gets a random key in the chart's Secret, kept across upgrades (by `lookup`, like the generated database password). Never generated on an upgrade, nor when rendering without cluster access (`helm template`, Argo CD): give the key yourself there |
+| `webhooks.proxy.host` / `.port` | `""` / `3128` | `CERT_ALERT_WEBHOOKS_PROXY_HOST` / `_PORT`: an HTTP forward proxy webhooks go through (`CONNECT` to the address CertAlert checked, never to the name). Empty host: direct. Let the pod reach it with `networkPolicy.egress.extra` |
+| `webhooks.proxy.username` / `.password` (or `.existingSecret` + `.existingSecretKey`, `webhooks-proxy-password`) | `""` | `CERT_ALERT_WEBHOOKS_PROXY_USERNAME` / `CERT_ALERT_WEBHOOKS_PROXY_PASSWORD`: HTTP Basic credentials for the proxy, both or neither; never logged |
 
 Webhooks go out on https; with `networkPolicy.enabled`, `networkPolicy.egress.web` has to
 reach the receivers.

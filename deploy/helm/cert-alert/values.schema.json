@@ -1164,6 +1164,33 @@
         "generateSecretKey": {
           "type": "boolean",
           "description": "Generate secretKey on a new installation when none is given (kept across upgrades by lookup)."
+        },
+        "proxy": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "An HTTP forward proxy webhooks go through with CONNECT; empty host: direct.",
+          "properties": {
+            "host": {
+              "type": "string"
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "username": {
+              "type": "string"
+            },
+            "password": {
+              "type": "string"
+            },
+            "existingSecret": {
+              "type": "string"
+            },
+            "existingSecretKey": {
+              "type": "string"
+            }
+          }
         }
       }
     },

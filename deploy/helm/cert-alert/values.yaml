@@ -652,6 +652,21 @@ webhooks:
   # Argo CD) generates nothing: give the key yourself there. Unset, secrets are stored
   # unencrypted and a warning is logged.
   generateSecretKey: true
+  # An HTTP forward (egress) proxy webhooks go through, with CONNECT. Empty host: they connect
+  # directly (the pod's HTTPS_PROXY is not used). CertAlert still resolves and checks the
+  # receiver's address and asks the proxy for a tunnel to that address, never to the name.
+  # With networkPolicy.enabled, let the pod reach the proxy (networkPolicy.egress.extra).
+  proxy:
+    # CERT_ALERT_WEBHOOKS_PROXY_HOST and _PORT: a host name or address, and its port.
+    host: ""
+    port: 3128
+    # CERT_ALERT_WEBHOOKS_PROXY_USERNAME and CERT_ALERT_WEBHOOKS_PROXY_PASSWORD, if the proxy
+    # wants credentials (HTTP Basic; never logged). The password inline, or from a Secret of
+    # your own.
+    username: ""
+    password: ""
+    existingSecret: ""
+    existingSecretKey: webhooks-proxy-password
 
 # ---------------------------------------------------------------------------------------
 # Audit logging (ens-audit/1) - the ENS_AUDIT_* settings shared by every ENS product

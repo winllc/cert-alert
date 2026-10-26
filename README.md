@@ -2873,10 +2873,30 @@ hosts it lists. `cert-alert.webhooks.block-private-networks` decides the rest: u
 default), private addresses are refused for webhooks saved from now on, while a webhook saved
 before this default keeps its address until its URL is changed, and is named in a warning at
 every start; `true` refuses them for every webhook; `false` allows them for every webhook (what
-releases before did), with a warning at every start. Webhooks connect directly: an outbound
-HTTP proxy is not used. A watchdog closes the connection at `cert-alert.webhooks.delivery-timeout`
-(30 seconds) whatever it is waiting on - a handshake, a body the receiver does not read, an
-answer a byte at a time - so one receiver cannot hold the sender or its lock.
+releases before did), with a warning at every start. A watchdog closes the connection at
+`cert-alert.webhooks.delivery-timeout` (30 seconds) whatever it is waiting on - a handshake, a
+body the receiver does not read, an answer a byte at a time - so one receiver cannot hold the
+sender or its lock.
+
+**Through an egress proxy.** Webhooks connect directly unless
+`cert-alert.webhooks.proxy.host` and `cert-alert.webhooks.proxy.port` name an HTTP forward proxy
+(`CERT_ALERT_WEBHOOKS_PROXY_HOST` / `_PORT`; Helm `webhooks.proxy.host` / `.port`); the JVM's
+`https.proxyHost` and `HTTPS_PROXY` are not used. The rules above hold through it: the receiver's
+name is still resolved by CertAlert and every address checked, and the proxy is then asked for a
+tunnel (`CONNECT 203.0.113.10:443`) to the address that was checked - the address literal, never
+the name, so the proxy has nothing to resolve again - and TLS, with SNI and certificate
+verification against the URL's host, runs end to end through the tunnel. So CertAlert must still
+be able to resolve the receivers' names, and a proxy whose rules allow only names (Squid
+`dstdomain`) needs the receivers' addresses allowed instead (`dst`). Anything but a 2xx answer to
+`CONNECT` - a 407, a 403, a redirect - is a failed delivery, retried like any other. The proxy
+itself is yours and is not held to the address rules. Credentials, if the proxy wants them (HTTP
+Basic): `cert-alert.webhooks.proxy.username` with `cert-alert.webhooks.proxy.password-file` (a
+file holding the password, read at each connection, so it can be rotated) or
+`cert-alert.webhooks.proxy.password` (`CERT_ALERT_WEBHOOKS_PROXY_PASSWORD`, e.g. from a Kubernetes
+Secret; Helm `webhooks.proxy.existingSecret`). Never logged; they reach the proxy in clear, as with
+any HTTP proxy. A setting that cannot work - a host without a port, a password without a user,
+both a password and a file, an unreadable file - stops the application starting. A
+NetworkPolicy has to let the pod reach the proxy (`networkPolicy.egress.extra`).
 
 **The URL is a secret too.** A Slack or Teams webhook URL is its own credential, so only
 administrators see a webhook's whole URL; auditors, and the audit trail, see its scheme and

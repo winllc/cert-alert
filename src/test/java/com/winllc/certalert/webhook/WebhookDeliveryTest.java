@@ -261,6 +261,40 @@ class WebhookDeliveryTest {
         assertThat(log(target.endpoint()).getFirst().getLastError()).startsWith("Refused:").contains("169.254.169.254");
     }
 
+    /**
+     * With an egress proxy, the guard still decides first: a name resolving to a private or
+     * metadata address is refused here, and the proxy is never asked for a tunnel - neither to
+     * the address nor to the name. One the guard accepts goes through the proxy, to the address.
+     */
+    @Test
+    void throughAProxyTheGuardStillDecidesAndTheTunnelIsToTheCheckedAddress() throws Exception {
+        try (com.winllc.certalert.support.TestConnectProxy proxy = new com.winllc.certalert.support.TestConnectProxy()) {
+            WebhookProperties viaProxy = new WebhookProperties();
+            viaProxy.getProxy().setHost("127.0.0.1");
+            viaProxy.getProxy().setPort(proxy.port());
+            WebhookTransport transport = new WebhookTransport(viaProxy, clientTls.getSocketFactory());
+            Endpoint target = endpoint(WebhookEndpoint.Format.JSON, WebhookEvent.JOB_COMPLETED);
+
+            for (String refused : List.of("10.20.30.40", "169.254.169.254")) {
+                publisher.publish(WebhookEvent.JOB_COMPLETED, Map.of("job", refused), "done");
+                WebhookAddressGuard rebound = new WebhookAddressGuard(properties,
+                        host -> new InetAddress[] {InetAddress.getByName(refused)});
+                outbox(rebound, transport).deliverDue();
+                assertThat(proxy.connects()).isEmpty();
+                assertThat(log(target.endpoint()).getFirst().getLastError()).startsWith("Refused:").contains(refused);
+                jdbc.update("DELETE FROM webhook_delivery WHERE endpoint_id = ?", target.endpoint().getId());
+            }
+            assertThat(received).isEmpty();
+
+            publisher.publish(WebhookEvent.JOB_COMPLETED, Map.of("job", "x"), "done");
+            outbox(resolvingTo("127.0.0.1"), transport).deliverDue();
+            assertThat(received).hasSize(1);
+            assertThat(proxy.connects()).singleElement().satisfies(connect -> assertThat(connect.requestLine())
+                    .isEqualTo("CONNECT 127.0.0.1:" + receiver.getAddress().getPort() + " HTTP/1.1"));
+            assertThat(log(target.endpoint()).getFirst().getState()).isEqualTo(WebhookDelivery.State.DELIVERED);
+        }
+    }
+
     @Test
     void theTransportConnectsToTheCheckedAddressAndVerifiesTheNamedHost() {
         // hooks.example.test resolves nowhere in real DNS; the post still arrives, because the

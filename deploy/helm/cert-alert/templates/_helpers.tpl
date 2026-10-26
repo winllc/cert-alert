@@ -365,6 +365,14 @@ true
 {{- fail "x509.source=header needs x509.trustedCa.existingSecret (or .value): the CA certificates (PEM) a forwarded certificate must chain to." -}}
 {{- end -}}
 {{- end -}}
+{{- with .Values.webhooks.proxy -}}
+{{- if and .host (or (lt (int .port) 1) (gt (int .port) 65535)) -}}
+{{- fail "webhooks.proxy.port must be the proxy's port (1-65535) when webhooks.proxy.host is set." -}}
+{{- end -}}
+{{- if and .host (ne (not .username) (not (or .password .existingSecret))) -}}
+{{- fail "webhooks.proxy.username and a password (webhooks.proxy.password or webhooks.proxy.existingSecret) go together: set both or neither." -}}
+{{- end -}}
+{{- end -}}
 {{- if and .Values.license.existingSecret .Values.license.file -}}
 {{- fail "Set license.existingSecret or license.file, not both." -}}
 {{- end -}}

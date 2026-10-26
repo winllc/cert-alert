@@ -84,6 +84,9 @@ public class WebhookProperties {
     /** How long the delivery log keeps a delivery once it has gone or been given up on. */
     private Duration keep = Duration.ofDays(14);
 
+    /** An egress proxy webhooks go through; unset, they connect directly. */
+    private final Proxy proxy = new Proxy();
+
     public boolean isEnabled() {
         return enabled;
     }
@@ -218,5 +221,86 @@ public class WebhookProperties {
 
     public void setKeep(Duration keep) {
         this.keep = keep;
+    }
+
+    public Proxy getProxy() {
+        return proxy;
+    }
+
+    /**
+     * An HTTP forward proxy (an egress proxy) webhooks reach their receivers through, with
+     * {@code CONNECT}: {@code cert-alert.webhooks.proxy.host} and {@code .port}. The receiver's
+     * name is still resolved and checked here, and the proxy is asked for a tunnel to the
+     * checked address - never to the name, which the proxy would look up again - so the address
+     * rules hold through it; TLS still verifies the receiver's certificate for its name, end to
+     * end through the tunnel. The proxy itself is the operator's, and is not held to them.
+     *
+     * <p>Optional Basic credentials: {@code username}, and {@code password} or - better -
+     * {@code password-file}, read at every connection so it can be rotated. Neither is ever
+     * logged. They go to the proxy in clear (it is spoken to in plain HTTP), as with any HTTP
+     * proxy: keep it on a network you trust.
+     */
+    public static class Proxy {
+
+        private String host;
+
+        private int port;
+
+        private String username;
+
+        private String password;
+
+        private String passwordFile;
+
+        /** Whether webhooks go through a proxy. */
+        public boolean isConfigured() {
+            return host != null && !host.isBlank();
+        }
+
+        public String getHost() {
+            return host;
+        }
+
+        public void setHost(String host) {
+            this.host = host;
+        }
+
+        public int getPort() {
+            return port;
+        }
+
+        public void setPort(int port) {
+            this.port = port;
+        }
+
+        public String getUsername() {
+            return username;
+        }
+
+        public void setUsername(String username) {
+            this.username = username;
+        }
+
+        public String getPassword() {
+            return password;
+        }
+
+        public void setPassword(String password) {
+            this.password = password;
+        }
+
+        public String getPasswordFile() {
+            return passwordFile;
+        }
+
+        public void setPasswordFile(String passwordFile) {
+            this.passwordFile = passwordFile;
+        }
+
+        /** Never the credentials. */
+        @Override
+        public String toString() {
+            return isConfigured() ? host.trim() + ":" + port : "none";
+        }
     }
 }
