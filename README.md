@@ -3767,7 +3767,8 @@ git tag v1.2.3 && git push origin v1.2.3
 The `image` job builds and smoke-tests the image as on every push, publishes it (including
 `ghcr.io/winllc/cert-alert:1.2.3`), and then, from that same image, builds the bundle with
 `scripts/release-bundle.sh`, which also packages the Helm chart at the same version; the
-chart is then pushed to `oci://ghcr.io/winllc/charts`. A tag with a suffix (`v1.2.3-rc.1`) is a pre-release: built
+chart is then pushed to `oci://ghcr.io/winllc/charts`. The `release` job then signs the bundle
+and uploads it (below). A tag with a suffix (`v1.2.3-rc.1`) is a pre-release: built
 and uploaded the same way, but `latest.txt` does not move. Every pull request builds the
 bundle and the chart too, as `0.0.0-pr<number>`, kept for three days as a workflow
 artifact and never uploaded or pushed - so a change that breaks the bundle shows up before the tag does.
@@ -3783,28 +3784,94 @@ and uploaded to `s3://<bucket>/cert-alert/<version>/`:
 | `SHA256SUMS` | checksums of all of the above |
 | `SHA256SUMS.asc` | detached GPG signature of `SHA256SUMS`, when a signing key is configured |
 
-plus `s3://<bucket>/cert-alert/latest.txt` holding the newest final version. The job summary
-lists the files and sizes, and says whether it was signed and where it went - or why not.
+plus `s3://<bucket>/cert-alert/latest.txt` holding the newest final version. The `image` job's
+summary lists the files and sizes; the `release` job's says whether it was signed, with which
+credentials it was uploaded and where it went - or why not.
 
 **Releases are delivered from the S3 bucket**, not from GitHub Releases: nothing is attached to a
 GitHub Release, whose own "Source code" archives are not an installable package. On a release tag the
-`image` job first checks that `RELEASE_S3_BUCKET` and the AWS credentials below are set, and fails
-before anything is built or published if they aren't. Customers get the files from the bucket, for
-example through a presigned link (`aws s3 presign`, valid for up to 7 days) or a download site in front
-of it.
+`image` job first checks that `RELEASE_S3_BUCKET` is set, and fails before anything is built or
+published if it isn't. Customers get the files from the bucket, for example through a presigned link
+(`aws s3 presign`, valid for up to 7 days) or a download site in front of it.
 
-**Configuring it** (Settings → Secrets and variables → Actions). Without the GPG key signing is
-skipped and the summary says so; a release tag needs the bucket and its credentials (a pull
-request never uploads).
+**Signing and uploading happen in the `release` job**, which runs only for a `v*` tag, after
+`image`, in the GitHub environment `release`. It fetches the bundle `image` kept as a workflow
+artifact, checks it against `SHA256SUMS`, signs `SHA256SUMS` with the GPG key, uploads everything to
+the bucket, and replaces the workflow artifact with the signed one. Being its own job, the GPG key
+and the AWS credentials are never in a job that builds or runs anything, and the environment can
+hold them behind required reviewers. A pull request's dry run stops at the unsigned workflow
+artifact and never reaches this job.
+
+AWS credentials, in order of preference:
+
+1. **An IAM role assumed through GitHub's OIDC** (`aws-actions/configure-aws-credentials`, the
+   `release` job alone has `id-token: write`), named by the `AWS_RELEASE_ROLE_ARN` variable. No
+   stored key; the credentials last for the job.
+2. **Fallback: the long-lived `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` secrets**, used only
+   while `AWS_RELEASE_ROLE_ARN` is unset, with a warning in the job and its summary - so releases keep
+   working until the role exists. Delete the secrets once the role works. (Cloudflare R2 and MinIO
+   have no IAM roles: they stay on this path, with `RELEASE_S3_ENDPOINT` set.)
+
+**Configuring it** (Settings → Secrets and variables → Actions; secrets may be repository secrets or,
+better, secrets of the `release` environment). Without the GPG key signing is skipped and the summary
+says so; a release tag needs the bucket and one of the two kinds of credentials (a pull request never
+uploads).
 
 | Name | Kind | |
 |---|---|---|
-| `RELEASE_GPG_PRIVATE_KEY` | secret | ASCII-armoured private key that signs `SHA256SUMS` |
-| `RELEASE_GPG_PASSPHRASE` | secret | its passphrase, if it has one |
-| `RELEASE_S3_BUCKET` | variable | the private bucket releases go to |
-| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | secrets | credentials that may write to it |
+| `RELEASE_S3_BUCKET` | repository variable | the private bucket releases go to (checked by `image` before anything is published, so a repository variable, not an environment one) |
+| `AWS_RELEASE_ROLE_ARN` | variable | the release role below, e.g. `arn:aws:iam::123456789012:role/cert-alert-release` |
+| `RELEASE_GPG_PRIVATE_KEY` | secret (`release` environment) | ASCII-armoured private key that signs `SHA256SUMS` |
+| `RELEASE_GPG_PASSPHRASE` | secret (`release` environment) | its passphrase, if it has one |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | secrets | fallback only, while `AWS_RELEASE_ROLE_ARN` is unset |
 | `RELEASE_S3_ENDPOINT` | variable | for Cloudflare R2 or MinIO, e.g. `https://<account>.r2.cloudflarestorage.com`; empty for AWS S3 |
 | `RELEASE_S3_REGION` | variable | default `us-east-1` (`auto` for R2) |
+
+**What an administrator sets up**, once:
+
+1. **The `release` environment** (Settings → Environments → New environment, `release`):
+   - *Deployment branches and tags*: **Selected branches and tags**, one tag rule `v*`, so
+     nothing but a release tag can run in it.
+   - *Required reviewers*: the people who approve a release (and, if wanted, *Prevent
+     self-review*). The `release` job then waits for one of them after `image` has published.
+   - *Environment secrets*: move `RELEASE_GPG_PRIVATE_KEY` and `RELEASE_GPG_PASSPHRASE` here and
+     delete the repository copies.
+   Until it is created, GitHub creates it on the first tag with no protection, and releases work
+   as before.
+2. **GitHub's OIDC provider in AWS** (IAM → Identity providers), once per account:
+   provider URL `https://token.actions.githubusercontent.com`, audience `sts.amazonaws.com`.
+3. **The release role** (IAM → Roles → Web identity, that provider), allowed only this
+   repository's `release` environment - which only `v*` tags can reach (step 1):
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [{
+       "Effect": "Allow",
+       "Principal": { "Federated": "arn:aws:iam::<account>:oidc-provider/token.actions.githubusercontent.com" },
+       "Action": "sts:AssumeRoleWithWebIdentity",
+       "Condition": {
+         "StringEquals": {
+           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+           "token.actions.githubusercontent.com:sub": "repo:winllc/cert-alert:environment:release"
+         }
+       }
+     }]
+   }
+   ```
+
+   A job in an environment presents `repo:<owner>/<repo>:environment:<name>` as its subject, not
+   its ref. To have AWS check the tag as well, have GitHub put the ref in the subject (`gh api -X
+   PUT repos/winllc/cert-alert/actions/oidc/customization/sub -F use_default=false -f
+   'include_claim_keys[]=repo' -f 'include_claim_keys[]=context' -f 'include_claim_keys[]=ref'`)
+   and match `"StringLike": { "token.actions.githubusercontent.com:sub":
+   "repo:winllc/cert-alert:environment:release:ref:refs/tags/v*" }` instead.
+
+   Its permissions: `s3:PutObject` on `arn:aws:s3:::<bucket>/cert-alert/*` and nothing else
+   (add `kms:GenerateDataKey` on the bucket's key if it uses SSE-KMS).
+4. **The variable** `AWS_RELEASE_ROLE_ARN` = the role's ARN. Push a pre-release tag
+   (`v1.2.3-rc.1`) to try it; the summary says which credentials were used. Then delete the
+   `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` secrets and the IAM user's access key.
 
 **Building one locally** (release engineering, not an install route) - any image tagged
 with the product's name will do:
