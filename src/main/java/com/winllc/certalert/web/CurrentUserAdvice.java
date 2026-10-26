@@ -135,4 +135,16 @@ public class CurrentUserAdvice {
     public LicenseCheck license() {
         return licensing.current();
     }
+
+    /**
+     * {@code ENS_LICENSE_MENU_VISIBLE}: whether the way to the license screen is offered in
+     * the navigation (the administration page's "Manage the license" link). Only that link
+     * reads it; the license banners and the license-required page link to the screen
+     * whatever it says, because there it is the way out of a license problem.
+     */
+    @ModelAttribute("licenseMenuVisible")
+    public boolean licenseMenuVisible() {
+        com.winllc.certalert.security.EnsSecurityProperties properties = ens.getIfAvailable();
+        return properties == null || properties.isLicenseMenuVisible();
+    }
 }

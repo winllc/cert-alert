@@ -173,10 +173,16 @@
 
                 <!--/* What the license allows, in one line: for the administrator who is
                        wondering why a menu item is missing. The license screen has the rest,
-                       and is where a license is installed. */-->
+                       and is where a license is installed.
+
+                       The bar has no license entry, so the link here is the way to the screen
+                       in normal running, and ENS_LICENSE_MENU_VISIBLE=false takes it away. The
+                       line itself stays; so do the banners' links, which are how a license
+                       problem is put right. */-->
                 <p class="text-secondary small" id="license-status" th:if="${license != null}">
                     <span th:text="'License: ' + ${license.message()}">License: Licensed to Example Agency until 2027-10-14.</span>
-                    <a th:href="@{/admin/license}" class="ms-1">Manage the license</a>
+                    <a th:if="${licenseMenuVisible != false}" th:href="@{/admin/license}" class="ms-1"
+                       id="license-menu-link">Manage the license</a>
                 </p>
             </div>
         </div>

@@ -16,6 +16,17 @@ public class EnsSecurityProperties {
     private final ConsentBanner consentBanner = new ConsentBanner();
     private final Session session = new Session();
 
+    /**
+     * {@code ENS_LICENSE_MENU_VISIBLE}: whether the navigation offers the license screen.
+     * CertAlert's bar has no entry of its own for it; what plays that part is the "Manage the
+     * license" link on the administration page, and that is what this hides. Hiding it changes
+     * nothing else: the screen stays at {@code /admin/license} for whoever may open it, and the
+     * license banners, the license-required page and the redirect an administrator gets while
+     * nothing is licensed still lead there. A flat property on purpose: under {@code ens.license}
+     * it would share a name with {@code ENS_LICENSE}, the license token, which then fails to bind.
+     */
+    private boolean licenseMenuVisible = true;
+
     public Csp getCsp() {
         return csp;
     }
@@ -26,6 +37,14 @@ public class EnsSecurityProperties {
 
     public Session getSession() {
         return session;
+    }
+
+    public boolean isLicenseMenuVisible() {
+        return licenseMenuVisible;
+    }
+
+    public void setLicenseMenuVisible(boolean licenseMenuVisible) {
+        this.licenseMenuVisible = licenseMenuVisible;
     }
 
     /** The Content-Security-Policy every response carries. */

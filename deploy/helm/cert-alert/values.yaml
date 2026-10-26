@@ -825,6 +825,11 @@ license:
   # replicas, or one whose license volume is really gone (re-bind the license on the portal).
   # Unset it afterwards.
   allowNewInstallationId: false
+  # ENS_LICENSE_MENU_VISIBLE. Offer the license screen from the administration page (its
+  # "Manage the license" link; the bar has no license entry). false hides that link only:
+  # /admin/license still opens for administrators and auditors, and the expiry and read-only
+  # banners still link to it. Passed to the application only when false.
+  menuVisible: true
   # The init container's image. Empty uses the application image (it has a shell).
   initImage:
     repository: ""

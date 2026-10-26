@@ -174,6 +174,9 @@ signing in and the license screen work - administrators are sent there.
   The license volume (`ens-license`, at `/var/lib/ens/certalert` in the container) held them in
   earlier releases; the first start of this release imports it, and it is not read after that.
   `docker compose down -v` deletes the database, and the installation gets a new id.
+- **Hiding the link.** `ENS_LICENSE_MENU_VISIBLE=false` in `.env` takes the administration
+  page's link to the license screen away (there is no license entry in the menu bar). The
+  screen still opens at `/admin/license`, and the read-only and renewal banners still link to it.
 - **Binding.** The license screen shows this installation's id (e.g. `CA-7F3K-29QD`). Enter
   it on the ENS portal to bind a license to this installation.
 - **Expiry.** A subscription keeps full use through its grace period, with a reminder to
@@ -213,6 +216,8 @@ what is new in this release:
   stay unencrypted (a note says so): add one (`openssl rand -base64 32`) to encrypt them.
 - OpenID Connect: `CERT_ALERT_SSO_OIDC_PROVIDER_LOGOUT=true` signs out at the provider too
   (register `<public URL>/login?logout` there first); off unless you set it.
+- `ENS_LICENSE_MENU_VISIBLE=false` hides the administration page's "Manage the license" link;
+  optional, and unset it stays as it was. The license screen and the expiry banners' links stay.
 
 From earlier releases:
 

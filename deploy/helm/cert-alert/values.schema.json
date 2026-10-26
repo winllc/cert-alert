@@ -1376,6 +1376,10 @@
         },
         "allowNewInstallationId": {
           "type": "boolean"
+        },
+        "menuVisible": {
+          "type": "boolean",
+          "description": "ENS_LICENSE_MENU_VISIBLE: false hides the administration page's link to the license screen; the screen and the license banners stay."
         }
       }
     },

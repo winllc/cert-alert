@@ -13,6 +13,10 @@ data:
   SERVER_PORT: "8080"
   ENS_LICENSE_STATE_DIR: "/var/lib/ens/certalert"
   ENS_LICENSE_FILE: "/var/lib/ens/certalert/license.lic"
+  {{- if and (kindIs "bool" $v.license.menuVisible) (not $v.license.menuVisible) }}
+  # The administration page's link to the license screen, hidden; the screen stays.
+  ENS_LICENSE_MENU_VISIBLE: "false"
+  {{- end }}
   {{- if $v.metrics.enabled }}
   # The actuator on its own port, plain HTTP: health and Prometheus open there, and the
   # ingress never routes to it.
