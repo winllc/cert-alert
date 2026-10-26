@@ -37,6 +37,7 @@ sso:
     displayName: Sign in with ADFS
     metadataConfigMap: adfs-metadata
     signingSecret: cert-alert-saml-signing
+    singleLogout: true
     usernameAttribute: http://schemas.xmlsoap.org/claims/CommonName
     match: UID
     groupsAttribute: http://schemas.microsoft.com/ws/2008/06/identity/claims/groups

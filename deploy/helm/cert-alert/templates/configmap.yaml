@@ -83,6 +83,7 @@ data:
   CERT_ALERT_SSO_SAML_SIGNING_KEY_LOCATION: "file:/etc/cert-alert/saml/signing/tls.key"
   CERT_ALERT_SSO_SAML_SIGNING_CERTIFICATE_LOCATION: "file:/etc/cert-alert/saml/signing/tls.crt"
   {{- end }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SSO_SAML_SINGLE_LOGOUT" "value" (include "cert-alert.saml.singleLogout" $)) }}
   {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SSO_SAML_USERNAME_ATTRIBUTE" "value" .usernameAttribute) }}
   {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SSO_SAML_MATCH" "value" .match) }}
   {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SSO_SAML_GROUPS_ATTRIBUTE" "value" .groupsAttribute) }}

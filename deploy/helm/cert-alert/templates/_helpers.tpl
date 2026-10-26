@@ -261,6 +261,28 @@ true
 {{- end -}}
 {{- end }}
 
+{{/*
+CERT_ALERT_SSO_SAML_SINGLE_LOGOUT: sso.saml.singleLogout when set; otherwise true for a new
+installation (that can see the cluster), and for an upgrade whatever the last release had -
+which for a release from before the setting is the application's default, false: an upgrade
+signs out as it did.
+*/}}
+{{- define "cert-alert.saml.singleLogout" -}}
+{{- $set := .Values.sso.saml.singleLogout -}}
+{{- if not (and (kindIs "string" $set) (eq $set "")) -}}
+{{- toString $set -}}
+{{- else if include "cert-alert.clusterVisible" . -}}
+{{- if .Release.IsInstall -}}
+true
+{{- else -}}
+{{- $existing := lookup "v1" "ConfigMap" .Release.Namespace (include "cert-alert.fullname" .) -}}
+{{- if and $existing $existing.data (hasKey $existing.data "CERT_ALERT_SSO_SAML_SINGLE_LOGOUT") -}}
+{{- index $existing.data "CERT_ALERT_SSO_SAML_SINGLE_LOGOUT" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
 {{/* Whether a license is supplied to the chart. */}}
 {{- define "cert-alert.licenseSupplied" -}}
 {{- if or .Values.license.existingSecret .Values.license.file }}true{{ end }}

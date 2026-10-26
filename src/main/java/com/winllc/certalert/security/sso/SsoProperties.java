@@ -290,6 +290,18 @@ public class SsoProperties {
 
         private String signingCertificateLocation;
 
+        /**
+         * SAML single logout: signing out of CertAlert sends the identity provider a signed
+         * {@code LogoutRequest}, and a {@code LogoutRequest} from it (another application
+         * signing out) ends the session here, answered with a signed {@code LogoutResponse} - at
+         * {@code <public-url>/logout/saml2/slo}, HTTP-Redirect binding. Needs the signing key and
+         * certificate above, and works only with an identity provider whose metadata names a
+         * {@code SingleLogoutService}; without either, signing out stays local, as it does with
+         * this off. Off by default so an upgrade signs out as before; new installations'
+         * settings turn it on.
+         */
+        private boolean singleLogout;
+
         /** The attribute holding the uid or DN (see {@code match}); empty uses the NameID. */
         private String usernameAttribute = "";
 
@@ -326,6 +338,19 @@ public class SsoProperties {
 
         public void setSigningCertificateLocation(String signingCertificateLocation) {
             this.signingCertificateLocation = signingCertificateLocation;
+        }
+
+        public boolean isSingleLogout() {
+            return singleLogout;
+        }
+
+        public void setSingleLogout(boolean singleLogout) {
+            this.singleLogout = singleLogout;
+        }
+
+        /** Whether single logout is on and has the key it signs with. */
+        public boolean singleLogoutConfigured() {
+            return singleLogout && signingKeyLocation != null && !signingKeyLocation.isBlank();
         }
 
         public String getUsernameAttribute() {

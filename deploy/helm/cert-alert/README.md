@@ -122,6 +122,7 @@ The license screen shows the installation id; after the first sign-in it is also
 | `sso.saml.enabled` | `false` | `CERT_ALERT_SSO_SAML_ENABLED` | SAML 2.0 sign-in. SP metadata: `https://<host>/saml2/service-provider-metadata/saml` |
 | `sso.saml.metadataUrl` or `.metadataConfigMap` (+ `.metadataConfigMapKey`) | `""` | `CERT_ALERT_SSO_SAML_METADATA_LOCATION` | The identity provider's metadata, from a URL or a ConfigMap of your own |
 | `sso.saml.signingSecret` | `""` | `CERT_ALERT_SSO_SAML_SIGNING_*_LOCATION` | A Secret with `tls.key` (PKCS#8 PEM) and `tls.crt` to sign requests with |
+| `sso.saml.singleLogout` | `""` | `CERT_ALERT_SSO_SAML_SINGLE_LOGOUT` | SAML single logout at `<publicUrl>/logout/saml2/slo`, both ways. Needs `signingSecret` and an identity provider whose metadata names a SingleLogoutService. Empty: `true` on a new installation; an upgrade keeps what it had (off for a release from before it) |
 | `sso.saml.usernameAttribute` / `.match` / `.groupsAttribute` | `""` | `CERT_ALERT_SSO_SAML_*` | Default the NameID, `UID`, none |
 | `sso.saml.adminGroups` / `.auditorGroups` | `[]` | `CERT_ALERT_SSO_SAML_ADMIN_GROUPS_<n>` / `_AUDITOR_GROUPS_<n>` | As for OIDC |
 | `sso.saml.entityId` | `""` | `CERT_ALERT_SSO_SAML_ENTITY_ID` | An absolute URI; empty: `<publicUrl>/saml2/service-provider-metadata/saml` |
@@ -571,6 +572,8 @@ In particular:
 - `webhooks.generateSecretKey` gives new installations an encryption key for webhook secrets;
   an upgraded release without one is unchanged - set `webhooks.secretKey` to start encrypting.
 - `sso.oidc.providerLogout` is on for new installations only; an upgrade signs out as before.
+- `webhooks.proxy` is new and empty: webhooks keep connecting directly until it is set.
+- `sso.saml.singleLogout` is on for new installations only; an upgrade signs out as before.
 
 - `security.adminIdentifiers` now matches a uid or an entry DN only. An e-mail address there
   is ignored, and the NOTES and the startup log warn about it.

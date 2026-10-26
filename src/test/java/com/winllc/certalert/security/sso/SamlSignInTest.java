@@ -249,6 +249,33 @@ class SamlSignInTest {
         });
     }
 
+    /**
+     * Single logout is off unless configured: signing out ends the session here and lands on the
+     * sign-in page, the metadata names no logout service, and a LogoutRequest - even one the
+     * provider signed - is not acted on.
+     */
+    @Test
+    void withoutSingleLogoutSigningOutStaysHere() throws Exception {
+        mockMvc.perform(get("/saml2/service-provider-metadata/saml"))
+                .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("SingleLogoutService"))));
+
+        Started started = signInStarted();
+        MvcResult signedIn = answerWith(provider.respond(answer(started, "sally")), started);
+        assertThat(signedIn(signedIn)).isInstanceOf(org.springframework.security.saml2.provider.service.authentication.Saml2Authentication.class)
+                .isNotInstanceOf(org.springframework.security.saml2.provider.service.authentication.Saml2AssertionAuthentication.class);
+        MockHttpSession session = (MockHttpSession) signedIn.getRequest().getSession(false);
+
+        String request = provider.logoutRequestQuery(PUBLIC_URL + "/logout/saml2/slo", "sally", null, "_lr-off", false);
+        MvcResult ignored = mockMvc.perform(get(URI.create("/logout/saml2/slo?" + request)).session(session)).andReturn();
+        assertThat(session.isInvalid()).isFalse();
+        assertThat(String.valueOf(ignored.getResponse().getRedirectedUrl())).doesNotStartWith(TestSamlIdentityProvider.SLO_URL);
+
+        mockMvc.perform(post("/logout").session(session).with(
+                        org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf()))
+                .andExpect(result -> assertThat(result.getResponse().getRedirectedUrl()).isEqualTo("/login?logout"));
+        assertThat(session.isInvalid()).isTrue();
+    }
+
     @Test
     void theSameAnswerTwiceIsRefusedTheSecondTime() throws Exception {
         Started started = signInStarted();

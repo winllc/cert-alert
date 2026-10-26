@@ -442,6 +442,20 @@
             "signingSecret": {
               "type": "string"
             },
+            "singleLogout": {
+              "type": [
+                "boolean",
+                "string"
+              ],
+              "enum": [
+                true,
+                false,
+                "",
+                "true",
+                "false"
+              ],
+              "description": "SAML single logout. Empty: true on a new installation, kept on upgrade."
+            },
             "usernameAttribute": {
               "type": "string"
             },

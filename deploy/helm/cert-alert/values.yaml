@@ -266,8 +266,16 @@ sso:
     # <publicUrl>/saml2/service-provider-metadata/saml. A template ({baseUrl}) is refused.
     entityId: ""
     # A Secret with a PEM private key (tls.key) and certificate (tls.crt) to sign
-    # authentication requests with, for an identity provider that wants them signed.
+    # authentication requests with, for an identity provider that wants them signed - and
+    # single logout's messages.
     signingSecret: ""
+    # CERT_ALERT_SSO_SAML_SINGLE_LOGOUT: SAML single logout - signing out of CertAlert signs out
+    # at the identity provider, and signing out there ends the CertAlert session
+    # (<publicUrl>/logout/saml2/slo). Needs signingSecret and an identity provider whose
+    # metadata names a SingleLogoutService; without either, signing out stays local. Empty:
+    # true on a new installation; an upgrade keeps what it had (false for a release from before
+    # this setting, or when rendered without cluster access).
+    singleLogout: ""
     # The attribute naming the person (empty: the NameID), and uid or DN.
     usernameAttribute: ""
     match: ""

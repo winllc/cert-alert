@@ -3,11 +3,15 @@ package com.winllc.certalert.support;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.math.BigInteger;
+import java.net.URI;
+import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
+import java.security.Signature;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.time.Instant;
@@ -16,6 +20,8 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.zip.Deflater;
+import java.util.zip.DeflaterOutputStream;
 import java.util.zip.Inflater;
 import java.util.zip.InflaterInputStream;
 import javax.xml.namespace.QName;
@@ -38,8 +44,11 @@ import org.opensaml.saml.saml2.core.AuthnContextClassRef;
 import org.opensaml.saml.saml2.core.AuthnStatement;
 import org.opensaml.saml.saml2.core.Conditions;
 import org.opensaml.saml.saml2.core.Issuer;
+import org.opensaml.saml.saml2.core.LogoutRequest;
+import org.opensaml.saml.saml2.core.LogoutResponse;
 import org.opensaml.saml.saml2.core.NameID;
 import org.opensaml.saml.saml2.core.Response;
+import org.opensaml.saml.saml2.core.SessionIndex;
 import org.opensaml.saml.saml2.core.Status;
 import org.opensaml.saml.saml2.core.StatusCode;
 import org.opensaml.saml.saml2.core.Subject;
@@ -60,6 +69,9 @@ public final class TestSamlIdentityProvider {
 
     public static final String ENTITY_ID = "https://idp.test.example/saml";
     public static final String SSO_URL = "https://idp.test.example/sso";
+    public static final String SLO_URL = "https://idp.test.example/slo";
+    /** The redirect-binding signature algorithm, for every message here. */
+    public static final String SIG_ALG = SignatureConstants.ALGO_ID_SIGNATURE_RSA_SHA256;
 
     static {
         OpenSamlInitializationService.initialize();
@@ -85,6 +97,15 @@ public final class TestSamlIdentityProvider {
 
     /** Its metadata, written to a file of its own, for {@code metadata-location}. */
     public Path writeMetadata(Path directory) throws Exception {
+        return writeMetadata(directory, false);
+    }
+
+    /** Its metadata, naming a SingleLogoutService (HTTP-Redirect) when {@code singleLogout}. */
+    public Path writeMetadata(Path directory, boolean singleLogout) throws Exception {
+        String logout = singleLogout
+                ? "<md:SingleLogoutService Binding=\"urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect\" Location=\""
+                        + SLO_URL + "\"/>"
+                : "";
         String metadata = """
                 <md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" entityID="%s">
                   <md:IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
@@ -93,10 +114,11 @@ public final class TestSamlIdentityProvider {
                         <ds:X509Data><ds:X509Certificate>%s</ds:X509Certificate></ds:X509Data>
                       </ds:KeyInfo>
                     </md:KeyDescriptor>
+                    %s
                     <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="%s"/>
                   </md:IDPSSODescriptor>
                 </md:EntityDescriptor>
-                """.formatted(ENTITY_ID, Base64.getEncoder().encodeToString(certificate.getEncoded()), SSO_URL);
+                """.formatted(ENTITY_ID, Base64.getEncoder().encodeToString(certificate.getEncoded()), logout, SSO_URL);
         Path file = directory.resolve("idp-metadata.xml");
         Files.writeString(file, metadata);
         return file;
@@ -128,6 +150,8 @@ public final class TestSamlIdentityProvider {
         public Instant notOnOrAfter = Instant.now().plus(Duration.ofMinutes(5));
         public boolean signed = true;
         public boolean signedByAnotherKey;
+        /** The provider's session, in the AuthnStatement; none when null. */
+        public String sessionIndex;
     }
 
     /** The response, base64 as the browser posts it. */
@@ -181,6 +205,7 @@ public final class TestSamlIdentityProvider {
 
         AuthnStatement authn = build(builders, AuthnStatement.DEFAULT_ELEMENT_NAME);
         authn.setAuthnInstant(now);
+        authn.setSessionIndex(answer.sessionIndex);
         AuthnContext context = build(builders, AuthnContext.DEFAULT_ELEMENT_NAME);
         AuthnContextClassRef classRef = build(builders, AuthnContextClassRef.DEFAULT_ELEMENT_NAME);
         classRef.setURI(AuthnContext.PPT_AUTHN_CTX);
@@ -217,6 +242,140 @@ public final class TestSamlIdentityProvider {
         }
         Element element = XMLObjectProviderRegistrySupport.getMarshallerFactory().getMarshaller(response).marshall(response);
         return Base64.getEncoder().encodeToString(SerializeSupport.nodeToString(element).getBytes(StandardCharsets.UTF_8));
+    }
+
+    // --- single logout ----------------------------------------------------------------
+
+    /**
+     * A {@code LogoutRequest} from the provider - another application signed out - as the query
+     * string of an HTTP-Redirect: deflated, signed over the query (SAMLRequest, RelayState,
+     * SigAlg), with its key or, for a test, another.
+     */
+    public String logoutRequestQuery(String destination, String nameId, String sessionIndex, String id,
+            boolean signedByAnotherKey) throws Exception {
+        XMLObjectBuilderFactory builders = XMLObjectProviderRegistrySupport.getBuilderFactory();
+        LogoutRequest request = build(builders, LogoutRequest.DEFAULT_ELEMENT_NAME);
+        request.setID(id);
+        request.setVersion(SAMLVersion.VERSION_20);
+        request.setIssueInstant(Instant.now());
+        request.setDestination(destination);
+        request.setIssuer(issuer(builders, ENTITY_ID));
+        NameID name = build(builders, NameID.DEFAULT_ELEMENT_NAME);
+        name.setValue(nameId);
+        name.setFormat(NameID.UNSPECIFIED);
+        request.setNameID(name);
+        if (sessionIndex != null) {
+            SessionIndex index = build(builders, SessionIndex.DEFAULT_ELEMENT_NAME);
+            index.setValue(sessionIndex);
+            request.getSessionIndexes().add(index);
+        }
+        return redirectQuery("SAMLRequest", request, "idp-relay", signedByAnotherKey);
+    }
+
+    /** The provider's {@code LogoutResponse} to a request of the service provider's, as a redirect's query. */
+    public String logoutResponseQuery(String destination, String inResponseTo, String relayState,
+            boolean signedByAnotherKey) throws Exception {
+        XMLObjectBuilderFactory builders = XMLObjectProviderRegistrySupport.getBuilderFactory();
+        LogoutResponse response = build(builders, LogoutResponse.DEFAULT_ELEMENT_NAME);
+        response.setID("_" + UUID.randomUUID());
+        response.setVersion(SAMLVersion.VERSION_20);
+        response.setIssueInstant(Instant.now());
+        response.setDestination(destination);
+        response.setInResponseTo(inResponseTo);
+        response.setIssuer(issuer(builders, ENTITY_ID));
+        Status status = build(builders, Status.DEFAULT_ELEMENT_NAME);
+        StatusCode code = build(builders, StatusCode.DEFAULT_ELEMENT_NAME);
+        code.setValue(StatusCode.SUCCESS);
+        status.setStatusCode(code);
+        response.setStatus(status);
+        return redirectQuery("SAMLResponse", response, relayState, signedByAnotherKey);
+    }
+
+    private String redirectQuery(String parameter, org.opensaml.core.xml.XMLObject message, String relayState,
+            boolean signedByAnotherKey) throws Exception {
+        Element element = XMLObjectProviderRegistrySupport.getMarshallerFactory().getMarshaller(message).marshall(message);
+        byte[] xml = SerializeSupport.nodeToString(element).getBytes(StandardCharsets.UTF_8);
+        ByteArrayOutputStream deflated = new ByteArrayOutputStream();
+        try (DeflaterOutputStream out = new DeflaterOutputStream(deflated, new Deflater(Deflater.DEFLATED, true))) {
+            out.write(xml);
+        }
+        StringBuilder query = new StringBuilder(parameter).append('=')
+                .append(URLEncoder.encode(Base64.getEncoder().encodeToString(deflated.toByteArray()), StandardCharsets.UTF_8));
+        if (relayState != null) {
+            query.append("&RelayState=").append(URLEncoder.encode(relayState, StandardCharsets.UTF_8));
+        }
+        query.append("&SigAlg=").append(URLEncoder.encode(SIG_ALG, StandardCharsets.UTF_8));
+        Signature signer = Signature.getInstance("SHA256withRSA");
+        signer.initSign(signedByAnotherKey ? otherKeys.getPrivate() : keys.getPrivate());
+        signer.update(query.toString().getBytes(StandardCharsets.UTF_8));
+        return query.append("&Signature=")
+                .append(URLEncoder.encode(Base64.getEncoder().encodeToString(signer.sign()), StandardCharsets.UTF_8))
+                .toString();
+    }
+
+    /** A redirect's query parameters, decoded. */
+    public static Map<String, String> queryOf(String url) {
+        Map<String, String> values = new java.util.LinkedHashMap<>();
+        for (String pair : URI.create(url).getRawQuery().split("&")) {
+            int at = pair.indexOf('=');
+            values.put(URLDecoder.decode(pair.substring(0, at), StandardCharsets.UTF_8),
+                    URLDecoder.decode(pair.substring(at + 1), StandardCharsets.UTF_8));
+        }
+        return values;
+    }
+
+    /** The XML a redirect carries in {@code parameter} (SAMLRequest or SAMLResponse). */
+    public static String inflated(String url, String parameter) throws Exception {
+        byte[] deflated = Base64.getDecoder().decode(queryOf(url).get(parameter));
+        ByteArrayOutputStream xml = new ByteArrayOutputStream();
+        try (InflaterInputStream in = new InflaterInputStream(new ByteArrayInputStream(deflated), new Inflater(true))) {
+            in.transferTo(xml);
+        }
+        return xml.toString(StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Whether a redirect's message is signed - over its raw query, as the binding says - by
+     * {@code certificate}'s key with RSA-SHA256.
+     */
+    public static boolean signedBy(String url, X509Certificate certificate) throws Exception {
+        Map<String, String> raw = new java.util.LinkedHashMap<>();
+        for (String pair : URI.create(url).getRawQuery().split("&")) {
+            int at = pair.indexOf('=');
+            raw.put(pair.substring(0, at), pair.substring(at + 1));
+        }
+        if (!SIG_ALG.equals(URLDecoder.decode(raw.getOrDefault("SigAlg", ""), StandardCharsets.UTF_8))
+                || raw.get("Signature") == null) {
+            return false;
+        }
+        StringBuilder content = new StringBuilder();
+        for (String name : List.of("SAMLRequest", "SAMLResponse", "RelayState", "SigAlg")) {
+            if (raw.containsKey(name)) {
+                content.append(content.isEmpty() ? "" : "&").append(name).append('=').append(raw.get(name));
+            }
+        }
+        Signature verifier = Signature.getInstance("SHA256withRSA");
+        verifier.initVerify(certificate.getPublicKey());
+        verifier.update(content.toString().getBytes(StandardCharsets.UTF_8));
+        return verifier.verify(Base64.getDecoder().decode(URLDecoder.decode(raw.get("Signature"), StandardCharsets.UTF_8)));
+    }
+
+    /**
+     * A service provider's signing key and certificate, made fresh, written as PEM files
+     * ({@code sp-signing.key}, PKCS#8, and {@code sp-signing.crt}) into {@code directory} for
+     * {@code signing-key-location} and {@code signing-certificate-location}.
+     */
+    public static X509Certificate writeServiceProviderKey(Path directory) throws Exception {
+        KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+        generator.initialize(2048);
+        KeyPair pair = generator.generateKeyPair();
+        X509Certificate certificate = selfSigned(pair, "CN=CertAlert test SP");
+        Base64.Encoder pem = Base64.getMimeEncoder(64, "\n".getBytes(StandardCharsets.US_ASCII));
+        Files.writeString(directory.resolve("sp-signing.key"), "-----BEGIN PRIVATE KEY-----\n"
+                + pem.encodeToString(pair.getPrivate().getEncoded()) + "\n-----END PRIVATE KEY-----\n");
+        Files.writeString(directory.resolve("sp-signing.crt"), "-----BEGIN CERTIFICATE-----\n"
+                + pem.encodeToString(certificate.getEncoded()) + "\n-----END CERTIFICATE-----\n");
+        return certificate;
     }
 
     /** The same response with one value changed after it was signed. */
