@@ -145,6 +145,6 @@ public class CurrentUserAdvice {
     @ModelAttribute("licenseMenuVisible")
     public boolean licenseMenuVisible() {
         com.winllc.certalert.security.EnsSecurityProperties properties = ens.getIfAvailable();
-        return properties == null || properties.getLicense().isMenuVisible();
+        return properties == null || properties.isLicenseMenuVisible();
     }
 }

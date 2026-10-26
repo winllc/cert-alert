@@ -133,7 +133,7 @@ Where the screen is offered:
 
 | Environment | Property | Default | Purpose |
 |---|---|---|---|
-| `ENS_LICENSE_MENU_VISIBLE` | `ens.license.menu-visible` | `true` | Offer the license screen from the navigation. The menu bar has no license entry; the way there in normal running is the **Manage the license** link on the administration page, and `false` hides that link. Nothing else changes: `/admin/license` keeps its access rules (administrators install, auditors read), the `License: ...` status line on the administration page stays, and the read-only banner's **Install a license**, the renewal reminder's **Renew it**, the license-required page's link and the redirect an administrator gets while nothing is licensed all still lead there. `true` or `false`; a value that is not a boolean stops the start, as with every other boolean setting. Helm: `license.menuVisible` |
+| `ENS_LICENSE_MENU_VISIBLE` | `ens.license-menu-visible` | `true` | Offer the license screen from the navigation. The menu bar has no license entry; the way there in normal running is the **Manage the license** link on the administration page, and `false` hides that link. Nothing else changes: `/admin/license` keeps its access rules (administrators install, auditors read), the `License: ...` status line on the administration page stays, and the read-only banner's **Install a license**, the renewal reminder's **Renew it**, the license-required page's link and the redirect an administrator gets while nothing is licensed all still lead there. `true` or `false`; a value that is not a boolean stops the start, as with every other boolean setting. Helm: `license.menuVisible` |
 
 ### Where it is kept
 
@@ -3561,7 +3561,7 @@ Read these before upgrading. They apply to the compose bundle, the Helm chart an
 
 ### The license screen's link can be hidden
 
-New and optional: `ENS_LICENSE_MENU_VISIBLE` (`ens.license.menu-visible`, Helm
+New and optional: `ENS_LICENSE_MENU_VISIBLE` (`ens.license-menu-visible`, Helm
 `license.menuVisible`), default `true`, so nothing changes unless it is set. `false` hides the
 administration page's **Manage the license** link; the license screen, its access rules and the
 license banners' links stay. See [The license screen](#the-license-screen).

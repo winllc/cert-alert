@@ -688,9 +688,9 @@ ens:
   # it. Nothing else changes: /admin/license keeps its access rules, the status line on the
   # administration page stays, and the read-only and renewal banners, the license-required
   # page and the redirect while nothing is licensed still link to it. true or false; a value
-  # that is not a boolean stops the start.
-  license:
-    menu-visible: ${ENS_LICENSE_MENU_VISIBLE:true}
+  # that is not a boolean stops the start. Not under ens.license: ENS_LICENSE (the license
+  # token) maps there and would then fail to bind.
+  license-menu-visible: ${ENS_LICENSE_MENU_VISIBLE:true}
 
   # The DoD notice-and-consent banner, before any sign-in (DISA STIG). Empty title and text
   # mean the standard USG title and DoD text; a file wins over the text. Plain text: blank

@@ -13,6 +13,7 @@ import com.enssolutions.license.LicenseManager;
 import com.winllc.certalert.security.EnsSecurityProperties;
 import com.winllc.certalert.support.TestLicenses;
 import java.time.Duration;
+import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -21,6 +22,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.core.env.SystemEnvironmentPropertySource;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers;
@@ -48,27 +50,44 @@ class LicenseMenuVisibilityTest {
         private final ApplicationContextRunner runner = new ApplicationContextRunner()
                 .withUserConfiguration(Properties.class)
                 // As application.yml binds it.
-                .withPropertyValues("ens.license.menu-visible=${ENS_LICENSE_MENU_VISIBLE:true}");
+                .withPropertyValues("ens.license-menu-visible=${ENS_LICENSE_MENU_VISIBLE:true}");
 
         @Test
         void isOnUnlessSaidOtherwise() {
-            runner.run(context -> assertThat(context.getBean(EnsSecurityProperties.class).getLicense().isMenuVisible())
+            runner.run(context -> assertThat(context.getBean(EnsSecurityProperties.class).isLicenseMenuVisible())
                     .isTrue());
-            assertThat(new EnsSecurityProperties().getLicense().isMenuVisible()).isTrue();
+            assertThat(new EnsSecurityProperties().isLicenseMenuVisible()).isTrue();
         }
 
         @Test
         void falseTurnsItOff() {
             runner.withPropertyValues("ENS_LICENSE_MENU_VISIBLE=false")
-                    .run(context -> assertThat(context.getBean(EnsSecurityProperties.class).getLicense()
-                            .isMenuVisible()).isFalse());
+                    .run(context -> assertThat(context.getBean(EnsSecurityProperties.class).isLicenseMenuVisible()).isFalse());
         }
 
         @Test
         void somethingElseStopsTheStart() {
             runner.withPropertyValues("ENS_LICENSE_MENU_VISIBLE=maybe")
                     .run(context -> assertThat(context).hasFailed()
-                            .getFailure().hasStackTraceContaining("ens.license.menu-visible"));
+                            .getFailure().hasStackTraceContaining("ens.license-menu-visible"));
+        }
+
+        /**
+         * ENS_LICENSE, the license token (the release bundle sets it empty), maps to
+         * {@code ens.license} by relaxed binding: no setting of ours may live there, or the
+         * application does not start.
+         */
+        @Test
+        void theLicenseTokenVariableLeavesItAlone() {
+            for (String token : new String[] {"", "dGhlIGxpY2Vuc2UgdG9rZW4"}) {
+                runner.withInitializer(context -> context.getEnvironment().getPropertySources().addFirst(
+                                new SystemEnvironmentPropertySource("test-env",
+                                        Map.of("ENS_LICENSE", token, "ENS_LICENSE_MENU_VISIBLE", "false"))))
+                        .run(context -> {
+                            assertThat(context).as("ENS_LICENSE=" + token).hasNotFailed();
+                            assertThat(context.getBean(EnsSecurityProperties.class).isLicenseMenuVisible()).isFalse();
+                        });
+            }
         }
 
         @EnableConfigurationProperties(EnsSecurityProperties.class)
