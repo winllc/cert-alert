@@ -34,7 +34,11 @@ import org.springframework.security.core.context.SecurityContextImpl;
 import org.springframework.security.oauth2.client.authentication.OAuth2AuthenticationToken;
 import org.springframework.security.oauth2.core.endpoint.OAuth2AuthorizationRequest;
 import org.springframework.security.oauth2.core.oidc.OidcIdToken;
+import org.springframework.security.saml2.provider.service.authentication.Saml2AssertionAuthentication;
 import org.springframework.security.saml2.provider.service.authentication.Saml2Authentication;
+import org.springframework.security.saml2.provider.service.authentication.Saml2ResponseAssertion;
+import org.springframework.security.saml2.provider.service.authentication.logout.Saml2LogoutRequest;
+import org.springframework.security.saml2.provider.service.registration.RelyingPartyRegistration;
 import org.springframework.security.web.authentication.WebAuthenticationDetails;
 import org.springframework.security.web.authentication.preauth.PreAuthenticatedAuthenticationToken;
 import org.springframework.security.web.csrf.DefaultCsrfToken;
@@ -170,6 +174,58 @@ class StoredSessionAttributesTest {
         assertThat(roundTrip("at", now)).isEqualTo(now);
         assertThat(roundTrip("limit", Duration.ofMinutes(15))).isEqualTo(Duration.ofMinutes(15));
         assertThat(roundTrip("ended", "concurrent")).isEqualTo("concurrent");
+    }
+
+    /**
+     * With SAML single logout on, a SAML sign-in is kept with what a logout request names - the
+     * NameID and the provider's session - and signing out keeps the request it sent, to check
+     * the provider's answer against.
+     */
+    @Test
+    void singleLogoutsValuesComeBack() {
+        SamlDirectoryPrincipal samlPerson = new SamlDirectoryPrincipal(
+                person(DirectoryPrincipal.AuthenticationMethod.SAML), "alice");
+        Saml2ResponseAssertion assertion = Saml2ResponseAssertion.withResponseValue("<samlp:Response/>")
+                .nameId("alice")
+                .sessionIndexes(List.copyOf(List.of("_idp-session-1")))
+                .build();
+        Saml2AssertionAuthentication saml =
+                new Saml2AssertionAuthentication(samlPerson, assertion, authorities(), "saml");
+
+        Object back = roundTrip("SPRING_SECURITY_CONTEXT", new SecurityContextImpl(saml));
+        assertThat(back).isInstanceOfSatisfying(SecurityContextImpl.class, context -> {
+            assertThat(context.getAuthentication()).isInstanceOfSatisfying(Saml2AssertionAuthentication.class, read -> {
+                assertThat(read.getPrincipal()).isInstanceOf(SamlDirectoryPrincipal.class);
+                assertThat(read.getRelyingPartyRegistrationId()).isEqualTo("saml");
+                assertThat(read.getCredentials().getNameId()).isEqualTo("alice");
+                assertThat(read.getCredentials().getSessionIndexes()).containsExactly("_idp-session-1");
+                assertThat(read.getAuthorities()).hasSize(3);
+            });
+        });
+        assertThat(roundTrip("com.winllc.certalert.security.SessionPolicy.signedInAs", saml))
+                .isInstanceOf(Saml2AssertionAuthentication.class);
+
+        RelyingPartyRegistration registration = RelyingPartyRegistration.withRegistrationId("saml")
+                .entityId("https://certalert.example.gov/saml2/service-provider-metadata/saml")
+                .assertionConsumerServiceLocation("https://certalert.example.gov/login/saml2/sso/saml")
+                .assertingPartyMetadata(party -> party.entityId("https://idp.example.gov")
+                        .singleSignOnServiceLocation("https://idp.example.gov/sso")
+                        .singleLogoutServiceLocation("https://idp.example.gov/slo"))
+                .build();
+        Saml2LogoutRequest sent = Saml2LogoutRequest.withRelyingPartyRegistration(registration)
+                .id("LR-1")
+                .samlRequest("deflated-and-encoded")
+                .relayState("relay")
+                .parameters(parameters -> parameters.put("SigAlg", "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"))
+                .build();
+        assertThat(roundTrip(
+                        "org.springframework.security.saml2.provider.service.web.authentication.logout.HttpSessionLogoutRequestRepository.LOGOUT_REQUEST",
+                        sent))
+                .isInstanceOfSatisfying(Saml2LogoutRequest.class, read -> {
+                    assertThat(read.getId()).isEqualTo("LR-1");
+                    assertThat(read.getRelyingPartyRegistrationId()).isEqualTo("saml");
+                    assertThat(read.getLocation()).isEqualTo("https://idp.example.gov/slo");
+                });
     }
 
     /** Values that are not this application's are refused on the way back, and read as absent. */

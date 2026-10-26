@@ -1132,7 +1132,33 @@ Okta: a sign-out redirect URI). A provider that names no `end_session_endpoint` 
 Off by default so an upgrade signs out as before (a startup warning says so while OIDC is on);
 new installations' settings (the bundle's `env.template`, the chart on a new install) turn it
 on. Signing out at the provider does not sign the person out of CertAlert sessions in other
-browsers, and SAML single logout is not supported.
+browsers.
+
+With SAML, `cert-alert.sso.saml.single-logout: true` (`CERT_ALERT_SSO_SAML_SINGLE_LOGOUT`, Helm
+`sso.saml.singleLogout`) turns on SAML single logout, both ways, at
+`<public-url>/logout/saml2/slo` (HTTP-Redirect binding, named in the service provider metadata):
+
+- Signing out of CertAlert ends the session here and sends the browser to the identity
+  provider's `SingleLogoutService` with a `LogoutRequest` signed with the service provider's key,
+  naming the NameID and `SessionIndex` the person signed in with. The provider's signed
+  `LogoutResponse` comes back to `/logout/saml2/slo`, is checked (its signature by a key in the
+  provider's metadata, the issuer, the destination, and that it answers the request this browser
+  sent) and lands on `/login?logout`.
+- A `LogoutRequest` from the provider - the person signed out of another application - signed by
+  a key in its metadata, addressed to this service provider and naming the NameID this browser's
+  session signed in with, ends that session (with the same handlers and audit as signing out
+  here) and is answered with a signed `LogoutResponse`. One that is unsigned, signed by another
+  key, addressed elsewhere or naming somebody else ends nothing.
+
+It needs the signing key and certificate (`signing-key-location`, `signing-certificate-location`:
+PEM files mounted at run time, never in the image) and an identity provider whose metadata names
+a `SingleLogoutService`; with the setting on and either missing, signing out stays local (with a
+startup warning). After turning it on, give the provider this service provider's metadata again
+(`<public-url>/saml2/service-provider-metadata/saml`), which now names the logout service and the
+signing certificate. Only the redirect binding is offered: the provider's redirect is a top-level
+navigation that brings the session cookie (SameSite=Lax) with it, where a cross-site POST would
+not. Off by default so an upgrade signs out as before (a startup warning says so while SAML is on);
+new installations' settings (the bundle's `env.template`, the chart on a new install) turn it on.
 
 **Entra ID group overage.** For somebody in more groups than fit in a token (200 in a JWT),
 Entra ID leaves the groups claim out and points at Microsoft Graph instead
@@ -1171,6 +1197,7 @@ cert-alert:
       entity-id: ""                    # empty: <public-url>/saml2/service-provider-metadata/saml
       signing-key-location: file:/etc/cert-alert/saml/signing.key          # optional
       signing-certificate-location: file:/etc/cert-alert/saml/signing.crt
+      single-logout: true              # needs the signing key above
       username-attribute: ""           # empty: the NameID
       match: UID
       groups-attribute: http://schemas.microsoft.com/ws/2008/06/identity/claims/groups
@@ -1187,6 +1214,7 @@ Every setting has an environment variable (`CERT_ALERT_SSO_OIDC_ISSUER_URI`, ...
 | Redirect URI / assertion consumer | `<public-url>/login/oauth2/code/oidc` | `<public-url>/login/saml2/sso/saml` (HTTP-POST) |
 | Service provider metadata | | `<public-url>/saml2/service-provider-metadata/saml` |
 | Entity id | | `<public-url>/saml2/service-provider-metadata/saml` unless `entity-id` says otherwise |
+| Single logout (with `single-logout`) | `<public-url>/login?logout` (post-logout redirect URI, with `provider-logout`) | `<public-url>/logout/saml2/slo` (HTTP-Redirect) |
 
 #### Microsoft Entra ID (OIDC)
 
@@ -1228,6 +1256,10 @@ Every setting has an environment variable (`CERT_ALERT_SSO_OIDC_ISSUER_URI`, ...
    signed requests, give `signing-key-location` (PEM, PKCS#8) and `signing-certificate-location`.
 4. For an ADFS this application cannot reach, save the metadata and use
    `metadata-location: file:/path/to/metadata.xml` (Helm: `sso.saml.metadataConfigMap`).
+5. Single logout: give `signing-key-location` and `signing-certificate-location` and set
+   `single-logout: true`, then update the relying party trust from the metadata again (or, by
+   hand: Endpoints → Add SAML → SAML Logout, binding Redirect, URL
+   `https://<host>/logout/saml2/slo`, and the signing certificate on the Signature tab).
 
 ### Roles
 
@@ -2873,10 +2905,30 @@ hosts it lists. `cert-alert.webhooks.block-private-networks` decides the rest: u
 default), private addresses are refused for webhooks saved from now on, while a webhook saved
 before this default keeps its address until its URL is changed, and is named in a warning at
 every start; `true` refuses them for every webhook; `false` allows them for every webhook (what
-releases before did), with a warning at every start. Webhooks connect directly: an outbound
-HTTP proxy is not used. A watchdog closes the connection at `cert-alert.webhooks.delivery-timeout`
-(30 seconds) whatever it is waiting on - a handshake, a body the receiver does not read, an
-answer a byte at a time - so one receiver cannot hold the sender or its lock.
+releases before did), with a warning at every start. A watchdog closes the connection at
+`cert-alert.webhooks.delivery-timeout` (30 seconds) whatever it is waiting on - a handshake, a
+body the receiver does not read, an answer a byte at a time - so one receiver cannot hold the
+sender or its lock.
+
+**Through an egress proxy.** Webhooks connect directly unless
+`cert-alert.webhooks.proxy.host` and `cert-alert.webhooks.proxy.port` name an HTTP forward proxy
+(`CERT_ALERT_WEBHOOKS_PROXY_HOST` / `_PORT`; Helm `webhooks.proxy.host` / `.port`); the JVM's
+`https.proxyHost` and `HTTPS_PROXY` are not used. The rules above hold through it: the receiver's
+name is still resolved by CertAlert and every address checked, and the proxy is then asked for a
+tunnel (`CONNECT 203.0.113.10:443`) to the address that was checked - the address literal, never
+the name, so the proxy has nothing to resolve again - and TLS, with SNI and certificate
+verification against the URL's host, runs end to end through the tunnel. So CertAlert must still
+be able to resolve the receivers' names, and a proxy whose rules allow only names (Squid
+`dstdomain`) needs the receivers' addresses allowed instead (`dst`). Anything but a 2xx answer to
+`CONNECT` - a 407, a 403, a redirect - is a failed delivery, retried like any other. The proxy
+itself is yours and is not held to the address rules. Credentials, if the proxy wants them (HTTP
+Basic): `cert-alert.webhooks.proxy.username` with `cert-alert.webhooks.proxy.password-file` (a
+file holding the password, read at each connection, so it can be rotated) or
+`cert-alert.webhooks.proxy.password` (`CERT_ALERT_WEBHOOKS_PROXY_PASSWORD`, e.g. from a Kubernetes
+Secret; Helm `webhooks.proxy.existingSecret`). Never logged; they reach the proxy in clear, as with
+any HTTP proxy. A setting that cannot work - a host without a port, a password without a user,
+both a password and a file, an unreadable file - stops the application starting. A
+NetworkPolicy has to let the pod reach the proxy (`networkPolicy.egress.extra`).
 
 **The URL is a secret too.** A Slack or Teams webhook URL is its own credential, so only
 administrators see a webhook's whole URL; auditors, and the audit trail, see its scheme and
@@ -3501,6 +3553,32 @@ class SlackAlertNotifier implements AlertNotifier {
 Read these before upgrading. They apply to the compose bundle, the Helm chart and a plain
 `java -jar` alike.
 
+### Webhooks can go through an egress proxy
+
+New, and unset: webhooks keep connecting directly. `cert-alert.webhooks.proxy.host` and
+`cert-alert.webhooks.proxy.port` (`CERT_ALERT_WEBHOOKS_PROXY_HOST` / `_PORT`; Helm
+`webhooks.proxy.host` / `.port`, port default `3128`) send them through an HTTP forward proxy with
+`CONNECT` to the address CertAlert resolved and checked, never to the name; optional Basic
+credentials `cert-alert.webhooks.proxy.username` with `.password-file` or `.password`
+(`CERT_ALERT_WEBHOOKS_PROXY_USERNAME`, `CERT_ALERT_WEBHOOKS_PROXY_PASSWORD_FILE`,
+`CERT_ALERT_WEBHOOKS_PROXY_PASSWORD`; Helm `webhooks.proxy.username` and `.password` or
+`.existingSecret`/`.existingSecretKey`, key `webhooks-proxy-password`). A proxy setting that
+cannot work stops the start. See [Webhooks](#webhooks).
+
+### SAML single logout
+
+`cert-alert.sso.saml.single-logout` (`CERT_ALERT_SSO_SAML_SINGLE_LOGOUT`, Helm
+`sso.saml.singleLogout`) is new. Off on upgrade - signing out stays local, with a startup warning
+while SAML is on; on for new installations (the bundle's `env.template`; the chart's empty
+`sso.saml.singleLogout` means true on a new install and keeps what an upgraded release had). It
+takes effect only with the signing key (`CERT_ALERT_SSO_SAML_SIGNING_KEY_LOCATION` and
+`_CERTIFICATE_LOCATION`, Helm `sso.saml.signingSecret`) and an identity provider whose metadata
+names a `SingleLogoutService`; before turning it on, give the provider the service provider
+metadata again so it learns `<public-url>/logout/saml2/slo`. With it on, a SAML sign-in's session
+also keeps the NameID and `SessionIndex` (Spring Security's `Saml2AssertionAuthentication`), and
+signing out keeps the `LogoutRequest` in the new session until the provider answers; both are on
+the session allow-list.
+
 ### Release bundle: plain HTTP to other hosts is refused on new installs
 
 A new `.env` sets `CERT_ALERT_ALLOW_PLAIN_HTTP=false`, and `install.sh` will not start
@@ -3767,7 +3845,8 @@ git tag v1.2.3 && git push origin v1.2.3
 The `image` job builds and smoke-tests the image as on every push, publishes it (including
 `ghcr.io/winllc/cert-alert:1.2.3`), and then, from that same image, builds the bundle with
 `scripts/release-bundle.sh`, which also packages the Helm chart at the same version; the
-chart is then pushed to `oci://ghcr.io/winllc/charts`. A tag with a suffix (`v1.2.3-rc.1`) is a pre-release: built
+chart is then pushed to `oci://ghcr.io/winllc/charts`. The `release` job then signs the bundle
+and uploads it (below). A tag with a suffix (`v1.2.3-rc.1`) is a pre-release: built
 and uploaded the same way, but `latest.txt` does not move. Every pull request builds the
 bundle and the chart too, as `0.0.0-pr<number>`, kept for three days as a workflow
 artifact and never uploaded or pushed - so a change that breaks the bundle shows up before the tag does.
@@ -3783,28 +3862,94 @@ and uploaded to `s3://<bucket>/cert-alert/<version>/`:
 | `SHA256SUMS` | checksums of all of the above |
 | `SHA256SUMS.asc` | detached GPG signature of `SHA256SUMS`, when a signing key is configured |
 
-plus `s3://<bucket>/cert-alert/latest.txt` holding the newest final version. The job summary
-lists the files and sizes, and says whether it was signed and where it went - or why not.
+plus `s3://<bucket>/cert-alert/latest.txt` holding the newest final version. The `image` job's
+summary lists the files and sizes; the `release` job's says whether it was signed, with which
+credentials it was uploaded and where it went - or why not.
 
 **Releases are delivered from the S3 bucket**, not from GitHub Releases: nothing is attached to a
 GitHub Release, whose own "Source code" archives are not an installable package. On a release tag the
-`image` job first checks that `RELEASE_S3_BUCKET` and the AWS credentials below are set, and fails
-before anything is built or published if they aren't. Customers get the files from the bucket, for
-example through a presigned link (`aws s3 presign`, valid for up to 7 days) or a download site in front
-of it.
+`image` job first checks that `RELEASE_S3_BUCKET` is set, and fails before anything is built or
+published if it isn't. Customers get the files from the bucket, for example through a presigned link
+(`aws s3 presign`, valid for up to 7 days) or a download site in front of it.
 
-**Configuring it** (Settings → Secrets and variables → Actions). Without the GPG key signing is
-skipped and the summary says so; a release tag needs the bucket and its credentials (a pull
-request never uploads).
+**Signing and uploading happen in the `release` job**, which runs only for a `v*` tag, after
+`image`, in the GitHub environment `release`. It fetches the bundle `image` kept as a workflow
+artifact, checks it against `SHA256SUMS`, signs `SHA256SUMS` with the GPG key, uploads everything to
+the bucket, and replaces the workflow artifact with the signed one. Being its own job, the GPG key
+and the AWS credentials are never in a job that builds or runs anything, and the environment can
+hold them behind required reviewers. A pull request's dry run stops at the unsigned workflow
+artifact and never reaches this job.
+
+AWS credentials, in order of preference:
+
+1. **An IAM role assumed through GitHub's OIDC** (`aws-actions/configure-aws-credentials`, the
+   `release` job alone has `id-token: write`), named by the `AWS_RELEASE_ROLE_ARN` variable. No
+   stored key; the credentials last for the job.
+2. **Fallback: the long-lived `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` secrets**, used only
+   while `AWS_RELEASE_ROLE_ARN` is unset, with a warning in the job and its summary - so releases keep
+   working until the role exists. Delete the secrets once the role works. (Cloudflare R2 and MinIO
+   have no IAM roles: they stay on this path, with `RELEASE_S3_ENDPOINT` set.)
+
+**Configuring it** (Settings → Secrets and variables → Actions; secrets may be repository secrets or,
+better, secrets of the `release` environment). Without the GPG key signing is skipped and the summary
+says so; a release tag needs the bucket and one of the two kinds of credentials (a pull request never
+uploads).
 
 | Name | Kind | |
 |---|---|---|
-| `RELEASE_GPG_PRIVATE_KEY` | secret | ASCII-armoured private key that signs `SHA256SUMS` |
-| `RELEASE_GPG_PASSPHRASE` | secret | its passphrase, if it has one |
-| `RELEASE_S3_BUCKET` | variable | the private bucket releases go to |
-| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | secrets | credentials that may write to it |
+| `RELEASE_S3_BUCKET` | repository variable | the private bucket releases go to (checked by `image` before anything is published, so a repository variable, not an environment one) |
+| `AWS_RELEASE_ROLE_ARN` | variable | the release role below, e.g. `arn:aws:iam::123456789012:role/cert-alert-release` |
+| `RELEASE_GPG_PRIVATE_KEY` | secret (`release` environment) | ASCII-armoured private key that signs `SHA256SUMS` |
+| `RELEASE_GPG_PASSPHRASE` | secret (`release` environment) | its passphrase, if it has one |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | secrets | fallback only, while `AWS_RELEASE_ROLE_ARN` is unset |
 | `RELEASE_S3_ENDPOINT` | variable | for Cloudflare R2 or MinIO, e.g. `https://<account>.r2.cloudflarestorage.com`; empty for AWS S3 |
 | `RELEASE_S3_REGION` | variable | default `us-east-1` (`auto` for R2) |
+
+**What an administrator sets up**, once:
+
+1. **The `release` environment** (Settings → Environments → New environment, `release`):
+   - *Deployment branches and tags*: **Selected branches and tags**, one tag rule `v*`, so
+     nothing but a release tag can run in it.
+   - *Required reviewers*: the people who approve a release (and, if wanted, *Prevent
+     self-review*). The `release` job then waits for one of them after `image` has published.
+   - *Environment secrets*: move `RELEASE_GPG_PRIVATE_KEY` and `RELEASE_GPG_PASSPHRASE` here and
+     delete the repository copies.
+   Until it is created, GitHub creates it on the first tag with no protection, and releases work
+   as before.
+2. **GitHub's OIDC provider in AWS** (IAM → Identity providers), once per account:
+   provider URL `https://token.actions.githubusercontent.com`, audience `sts.amazonaws.com`.
+3. **The release role** (IAM → Roles → Web identity, that provider), allowed only this
+   repository's `release` environment - which only `v*` tags can reach (step 1):
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [{
+       "Effect": "Allow",
+       "Principal": { "Federated": "arn:aws:iam::<account>:oidc-provider/token.actions.githubusercontent.com" },
+       "Action": "sts:AssumeRoleWithWebIdentity",
+       "Condition": {
+         "StringEquals": {
+           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+           "token.actions.githubusercontent.com:sub": "repo:winllc/cert-alert:environment:release"
+         }
+       }
+     }]
+   }
+   ```
+
+   A job in an environment presents `repo:<owner>/<repo>:environment:<name>` as its subject, not
+   its ref. To have AWS check the tag as well, have GitHub put the ref in the subject (`gh api -X
+   PUT repos/winllc/cert-alert/actions/oidc/customization/sub -F use_default=false -f
+   'include_claim_keys[]=repo' -f 'include_claim_keys[]=context' -f 'include_claim_keys[]=ref'`)
+   and match `"StringLike": { "token.actions.githubusercontent.com:sub":
+   "repo:winllc/cert-alert:environment:release:ref:refs/tags/v*" }` instead.
+
+   Its permissions: `s3:PutObject` on `arn:aws:s3:::<bucket>/cert-alert/*` and nothing else
+   (add `kms:GenerateDataKey` on the bucket's key if it uses SSE-KMS).
+4. **The variable** `AWS_RELEASE_ROLE_ARN` = the role's ARN. Push a pre-release tag
+   (`v1.2.3-rc.1`) to try it; the summary says which credentials were used. Then delete the
+   `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` secrets and the IAM user's access key.
 
 **Building one locally** (release engineering, not an install route) - any image tagged
 with the product's name will do:

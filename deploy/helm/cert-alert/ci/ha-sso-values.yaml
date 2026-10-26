@@ -37,6 +37,7 @@ sso:
     displayName: Sign in with ADFS
     metadataConfigMap: adfs-metadata
     signingSecret: cert-alert-saml-signing
+    singleLogout: true
     usernameAttribute: http://schemas.xmlsoap.org/claims/CommonName
     match: UID
     groupsAttribute: http://schemas.microsoft.com/ws/2008/06/identity/claims/groups
@@ -47,5 +48,11 @@ api:
 webhooks:
   allowedHosts: ["hooks.slack.com", "*.webhook.office.com", "10.20.0.0/16"]
   blockPrivateNetworks: false
+  # Through an egress proxy, its password inline (into the chart's Secret).
+  proxy:
+    host: 10.20.0.15
+    port: 8080
+    username: cert-alert
+    password: not-a-real-password
 exports:
   reportRecipientDomains: ["example.gov", "*.mil"]

@@ -266,8 +266,16 @@ sso:
     # <publicUrl>/saml2/service-provider-metadata/saml. A template ({baseUrl}) is refused.
     entityId: ""
     # A Secret with a PEM private key (tls.key) and certificate (tls.crt) to sign
-    # authentication requests with, for an identity provider that wants them signed.
+    # authentication requests with, for an identity provider that wants them signed - and
+    # single logout's messages.
     signingSecret: ""
+    # CERT_ALERT_SSO_SAML_SINGLE_LOGOUT: SAML single logout - signing out of CertAlert signs out
+    # at the identity provider, and signing out there ends the CertAlert session
+    # (<publicUrl>/logout/saml2/slo). Needs signingSecret and an identity provider whose
+    # metadata names a SingleLogoutService; without either, signing out stays local. Empty:
+    # true on a new installation; an upgrade keeps what it had (false for a release from before
+    # this setting, or when rendered without cluster access).
+    singleLogout: ""
     # The attribute naming the person (empty: the NameID), and uid or DN.
     usernameAttribute: ""
     match: ""
@@ -652,6 +660,21 @@ webhooks:
   # Argo CD) generates nothing: give the key yourself there. Unset, secrets are stored
   # unencrypted and a warning is logged.
   generateSecretKey: true
+  # An HTTP forward (egress) proxy webhooks go through, with CONNECT. Empty host: they connect
+  # directly (the pod's HTTPS_PROXY is not used). CertAlert still resolves and checks the
+  # receiver's address and asks the proxy for a tunnel to that address, never to the name.
+  # With networkPolicy.enabled, let the pod reach the proxy (networkPolicy.egress.extra).
+  proxy:
+    # CERT_ALERT_WEBHOOKS_PROXY_HOST and _PORT: a host name or address, and its port.
+    host: ""
+    port: 3128
+    # CERT_ALERT_WEBHOOKS_PROXY_USERNAME and CERT_ALERT_WEBHOOKS_PROXY_PASSWORD, if the proxy
+    # wants credentials (HTTP Basic; never logged). The password from a Secret of your own
+    # (existingSecret), or inline - not set here, so that no password value ships by default:
+    #   password: <the proxy password>
+    username: ""
+    existingSecret: ""
+    existingSecretKey: webhooks-proxy-password
 
 # ---------------------------------------------------------------------------------------
 # Audit logging (ens-audit/1) - the ENS_AUDIT_* settings shared by every ENS product

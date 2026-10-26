@@ -12,6 +12,9 @@
   (dict "env" "ENS_AUDIT_SPLUNK_TOKEN" "ref" (include "cert-alert.secretRef" (dict "root" . "inline" $v.audit.splunk.token "existing" $v.audit.splunk.existingSecret "existingKey" $v.audit.splunk.existingSecretKey "key" "splunk-hec-token")))
   (dict "env" "CERT_ALERT_WEBHOOKS_SECRET_KEY" "ref" (include "cert-alert.secretRef" (dict "root" . "inline" (include "cert-alert.webhooks.secretKey" .) "existing" $v.webhooks.existingSecret "existingKey" $v.webhooks.existingSecretKey "key" "webhooks-secret-key")))
 -}}
+{{- if $v.webhooks.proxy.host -}}
+{{- $secretEnv = append $secretEnv (dict "env" "CERT_ALERT_WEBHOOKS_PROXY_PASSWORD" "ref" (include "cert-alert.secretRef" (dict "root" . "inline" $v.webhooks.proxy.password "existing" $v.webhooks.proxy.existingSecret "existingKey" $v.webhooks.proxy.existingSecretKey "key" "webhooks-proxy-password"))) -}}
+{{- end -}}
 {{- if $v.sso.oidc.enabled -}}
 {{- $secretEnv = append $secretEnv (dict "env" "CERT_ALERT_SSO_OIDC_CLIENT_SECRET" "ref" (include "cert-alert.secretRef" (dict "root" . "inline" $v.sso.oidc.clientSecret "existing" $v.sso.oidc.existingSecret "existingKey" $v.sso.oidc.existingSecretKey "key" "oidc-client-secret"))) -}}
 {{- end -}}

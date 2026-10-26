@@ -43,7 +43,26 @@ import org.springframework.security.saml2.core.Saml2Error;
 import org.springframework.security.saml2.core.Saml2ErrorCodes;
 import org.springframework.security.saml2.core.Saml2ResponseValidatorResult;
 import org.springframework.security.saml2.core.Saml2X509Credential;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.config.annotation.web.configurers.LogoutConfigurer;
 import org.springframework.security.saml2.provider.service.authentication.OpenSaml5AuthenticationProvider;
+import org.springframework.security.saml2.provider.service.authentication.Saml2AssertionAuthentication;
+import org.springframework.security.saml2.provider.service.authentication.Saml2ResponseAssertion;
+import org.springframework.security.saml2.provider.service.authentication.logout.OpenSaml5LogoutRequestValidator;
+import org.springframework.security.saml2.provider.service.authentication.logout.OpenSaml5LogoutResponseValidator;
+import org.springframework.security.saml2.provider.service.registration.Saml2MessageBinding;
+import org.springframework.security.saml2.provider.service.web.authentication.logout.OpenSaml5LogoutRequestResolver;
+import org.springframework.security.saml2.provider.service.web.authentication.logout.OpenSaml5LogoutRequestValidatorParametersResolver;
+import org.springframework.security.saml2.provider.service.web.authentication.logout.OpenSaml5LogoutResponseResolver;
+import org.springframework.security.saml2.provider.service.web.authentication.logout.Saml2LogoutRequestFilter;
+import org.springframework.security.saml2.provider.service.web.authentication.logout.Saml2LogoutResponseFilter;
+import org.springframework.security.saml2.provider.service.web.authentication.logout.Saml2LogoutResponseResolver;
+import org.springframework.security.saml2.provider.service.authentication.logout.Saml2LogoutResponse;
+import org.springframework.security.saml2.provider.service.web.authentication.logout.Saml2RelyingPartyInitiatedLogoutSuccessHandler;
+import org.springframework.security.web.authentication.logout.LogoutHandler;
+import org.springframework.security.web.csrf.CsrfFilter;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.security.saml2.provider.service.authentication.Saml2AuthenticatedPrincipal;
 import org.springframework.security.saml2.provider.service.authentication.Saml2Authentication;
 import org.springframework.security.saml2.provider.service.authentication.Saml2AuthenticationException;
@@ -77,6 +96,8 @@ import org.springframework.util.function.SingletonSupplier;
  * application made and has not seen answered (InResponseTo, see
  * {@link JdbcSaml2AuthenticationRequests}), for this service provider (audience and
  * destination), and be in date within {@code clock-skew}. Unsolicited responses are refused.
+ * With {@code cert-alert.sso.saml.single-logout} and a signing key, single logout as well (see
+ * {@link SsoProperties.Saml#isSingleLogout()}).
  *
  * <p>Either way the person is matched to a directory entry by {@link SsoIdentityResolver},
  * and refused when there is none. Sign-ins and refusals are recorded as {@code auth.login}
@@ -102,10 +123,18 @@ public class SsoSignIn {
     /** Where signing out lands, here or - by way of the provider - back here. */
     public static final String SIGNED_OUT_URL = "/login?logout";
 
+    /**
+     * This service provider's SAML single logout service: requests and responses from the
+     * identity provider, HTTP-Redirect binding.
+     */
+    public static final String SAML_LOGOUT_PATH = "/logout/saml2/slo";
+
     private final SsoProperties properties;
     private final SsoIdentityResolver identities;
     /** The OpenID Connect registration, once {@link #apply} has added it. */
     private ClientRegistrationRepository oidcRegistrations;
+    /** The SAML relying party, once {@link #apply} has added it with single logout on. */
+    private RelyingPartyRegistrationRepository samlLogoutRegistrations;
 
     public SsoSignIn(SsoProperties properties, SsoIdentityResolver identities) {
         this.properties = properties;
@@ -179,6 +208,20 @@ public class SsoSignIn {
         if (properties.getSaml().isEnabled()) {
             applySaml(http, events, success);
             log.info("Single sign-on: SAML 2.0 from {}", properties.getSaml().getMetadataLocation());
+            SsoProperties.Saml saml = properties.getSaml();
+            if (saml.singleLogoutConfigured()) {
+                log.info("SAML single logout at {}{} (HTTP-Redirect), with an identity provider whose metadata "
+                        + "names a SingleLogoutService", properties.requirePublicUrl(), SAML_LOGOUT_PATH);
+            } else if (saml.isSingleLogout()) {
+                log.warn("cert-alert.sso.saml.single-logout is on, but SAML single logout needs a key to sign with: set "
+                        + "CERT_ALERT_SSO_SAML_SIGNING_KEY_LOCATION and CERT_ALERT_SSO_SAML_SIGNING_CERTIFICATE_LOCATION."
+                        + " Signing out ends the session here only");
+            } else {
+                log.warn("Signing out of CertAlert does not sign out at the SAML identity provider, nor the reverse: set "
+                        + "CERT_ALERT_SSO_SAML_SINGLE_LOGOUT=true (cert-alert.sso.saml.single-logout) with a signing key, "
+                        + "and give the provider this service provider's metadata again (it then names {}{})",
+                        properties.requirePublicUrl(), SAML_LOGOUT_PATH);
+            }
         }
     }
 
@@ -320,8 +363,9 @@ public class SsoSignIn {
         SimpleUrlLogoutSuccessHandler here =
                 new SimpleUrlLogoutSuccessHandler();
         here.setDefaultTargetUrl(SIGNED_OUT_URL);
+        LogoutSuccessHandler local = samlLogoutRegistrations == null ? here : samlLogout(here);
         if (oidcRegistrations == null) {
-            return here;
+            return local;
         }
         OidcClientInitiatedLogoutSuccessHandler atProvider =
                 new OidcClientInitiatedLogoutSuccessHandler(
@@ -334,9 +378,104 @@ public class SsoSignIn {
             if (properties.getOidc().isProviderLogout()) {
                 atProvider.onLogoutSuccess(request, response, authentication);
             } else {
+                local.onLogoutSuccess(request, response, authentication);
+            }
+        };
+    }
+
+    /**
+     * Somebody signed in by SAML, with single logout on, is sent on to the identity provider's
+     * {@code SingleLogoutService} with a signed {@code LogoutRequest} naming their NameID and
+     * session; the provider's {@code LogoutResponse} comes back to {@link #SAML_LOGOUT_PATH} and
+     * lands on the sign-in page. Anybody else - and everybody where the provider's metadata names
+     * no such service - lands there straight away.
+     */
+    private LogoutSuccessHandler samlLogout(LogoutSuccessHandler here) {
+        RelyingPartyRegistrationRepository registrations = samlLogoutRegistrations;
+        Saml2RelyingPartyInitiatedLogoutSuccessHandler atProvider =
+                new Saml2RelyingPartyInitiatedLogoutSuccessHandler(new OpenSaml5LogoutRequestResolver(registrations));
+        return (request, response, authentication) -> {
+            if (authentication instanceof Saml2AssertionAuthentication saml
+                    && providerLogsOut(registrations.findByRegistrationId(saml.getRelyingPartyRegistrationId()))) {
+                atProvider.onLogoutSuccess(request, response, authentication);
+            } else {
                 here.onLogoutSuccess(request, response, authentication);
             }
         };
+    }
+
+    /**
+     * Our {@code LogoutResponse} by HTTP-Redirect, signed over its parameters in the order the
+     * binding prescribes - SAMLResponse, RelayState, SigAlg. Spring Security 7.1 signs them in a
+     * hash map's order, which puts RelayState first, so a provider that sent a RelayState (most
+     * do) would find the signature bad. Re-signed here, with the same key and algorithm; anything
+     * without a RelayState, or by POST, is left as it is.
+     */
+    static final class SignedInBindingOrder implements Saml2LogoutResponseResolver {
+
+        private static final Map<String, String> JCA = Map.of(
+                "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256", "SHA256withRSA",
+                "http://www.w3.org/2001/04/xmldsig-more#rsa-sha384", "SHA384withRSA",
+                "http://www.w3.org/2001/04/xmldsig-more#rsa-sha512", "SHA512withRSA");
+
+        private final Saml2LogoutResponseResolver delegate;
+        private final RelyingPartyRegistrationRepository registrations;
+
+        SignedInBindingOrder(Saml2LogoutResponseResolver delegate, RelyingPartyRegistrationRepository registrations) {
+            this.delegate = delegate;
+            this.registrations = registrations;
+        }
+
+        @Override
+        public Saml2LogoutResponse resolve(HttpServletRequest request, Authentication authentication) {
+            return inOrder(delegate.resolve(request, authentication));
+        }
+
+        @Override
+        public Saml2LogoutResponse resolve(HttpServletRequest request, Authentication authentication,
+                Saml2AuthenticationException failure) {
+            return inOrder(delegate.resolve(request, authentication, failure));
+        }
+
+        private Saml2LogoutResponse inOrder(Saml2LogoutResponse response) {
+            if (response == null || response.getBinding() != Saml2MessageBinding.REDIRECT
+                    || response.getRelayState() == null) {
+                return response;
+            }
+            String algorithm = response.getParameter("SigAlg");
+            RelyingPartyRegistration registration = registrations.findByRegistrationId(SsoProperties.Saml.REGISTRATION_ID);
+            if (algorithm == null || !JCA.containsKey(algorithm) || registration == null
+                    || registration.getSigningX509Credentials().isEmpty()) {
+                return response;
+            }
+            Map<String, String> ordered = new java.util.LinkedHashMap<>();
+            ordered.put("SAMLResponse", response.getSamlResponse());
+            ordered.put("RelayState", response.getRelayState());
+            ordered.put("SigAlg", algorithm);
+            StringBuilder content = new StringBuilder();
+            ordered.forEach((name, value) -> content.append(content.isEmpty() ? "" : "&").append(name).append('=')
+                    .append(org.springframework.web.util.UriUtils.encode(value, java.nio.charset.StandardCharsets.ISO_8859_1)));
+            try {
+                java.security.Signature signer = java.security.Signature.getInstance(JCA.get(algorithm));
+                signer.initSign(registration.getSigningX509Credentials().iterator().next().getPrivateKey());
+                signer.update(content.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                ordered.put("Signature", java.util.Base64.getEncoder().encodeToString(signer.sign()));
+            } catch (java.security.GeneralSecurityException e) {
+                throw new IllegalStateException("Could not sign the SAML LogoutResponse", e);
+            }
+            return Saml2LogoutResponse.withRelyingPartyRegistration(registration)
+                    .location(response.getResponseLocation())
+                    .binding(Saml2MessageBinding.REDIRECT)
+                    .parameters(parameters -> {
+                        parameters.clear();
+                        parameters.putAll(ordered);
+                    })
+                    .build();
+        }
+    }
+
+    private static boolean providerLogsOut(RelyingPartyRegistration registration) {
+        return registration != null && registration.getAssertingPartyMetadata().getSingleLogoutServiceLocation() != null;
     }
 
     /** No access or refresh token is kept: the sign-in is all this application wants of the provider. */
@@ -401,6 +540,57 @@ public class SsoSignIn {
                     success.onAuthenticationSuccess(request, response, authentication);
                 }));
         http.saml2Metadata(metadata -> metadata.metadataUrl("/saml2/service-provider-metadata/{registrationId}"));
+        if (saml.singleLogoutConfigured()) {
+            samlLogoutRegistrations = registrations;
+            http.with(new SamlSingleLogout(registrations), configurer -> { });
+        }
+    }
+
+    /**
+     * The identity provider's side of single logout, at {@link #SAML_LOGOUT_PATH}: its
+     * {@code LogoutRequest} - signed by a key in its metadata, addressed here, naming the NameID
+     * the person signed in with - ends their session with the same handlers as signing out here,
+     * and is answered with a signed {@code LogoutResponse}; its {@code LogoutResponse} to a
+     * request of ours - checked against the request kept in the session - lands on the sign-in
+     * page. Both ahead of the CSRF filter: the provider's messages are authenticated by their
+     * signatures, and arrive by redirect.
+     *
+     * <p>Spring Security's own {@code saml2Logout()} is not used because, signed in by a provider
+     * whose metadata names no {@code SingleLogoutService}, it answers signing out with a 401.
+     */
+    private static final class SamlSingleLogout extends AbstractHttpConfigurer<SamlSingleLogout, HttpSecurity> {
+
+        private final RelyingPartyRegistrationRepository registrations;
+
+        SamlSingleLogout(RelyingPartyRegistrationRepository registrations) {
+            this.registrations = registrations;
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public void configure(HttpSecurity http) {
+            LogoutConfigurer<HttpSecurity> logout = http.getConfigurer(LogoutConfigurer.class);
+            LogoutHandler[] handlers = logout.getLogoutHandlers().toArray(new LogoutHandler[0]);
+            RequestMatcher path = PathPatternRequestMatcher.withDefaults().matcher(SAML_LOGOUT_PATH);
+            RequestMatcher requests = request -> path.matches(request) && request.getParameter("SAMLRequest") != null;
+            RequestMatcher responses = request -> path.matches(request) && request.getParameter("SAMLResponse") != null;
+
+            OpenSaml5LogoutRequestValidatorParametersResolver parameters =
+                    new OpenSaml5LogoutRequestValidatorParametersResolver(registrations);
+            parameters.setRequestMatcher(requests);
+            Saml2LogoutRequestFilter fromProvider = new Saml2LogoutRequestFilter(parameters,
+                    new OpenSaml5LogoutRequestValidator(),
+                    new SignedInBindingOrder(new OpenSaml5LogoutResponseResolver(registrations), registrations), handlers);
+
+            SimpleUrlLogoutSuccessHandler signedOut = new SimpleUrlLogoutSuccessHandler();
+            signedOut.setDefaultTargetUrl(SIGNED_OUT_URL);
+            Saml2LogoutResponseFilter answered =
+                    new Saml2LogoutResponseFilter(registrations, new OpenSaml5LogoutResponseValidator(), signedOut);
+            answered.setLogoutRequestMatcher(responses);
+
+            http.addFilterBefore(fromProvider, CsrfFilter.class);
+            http.addFilterBefore(answered, CsrfFilter.class);
+        }
     }
 
     /**
@@ -430,6 +620,15 @@ public class SsoSignIn {
                                 + describe(StringUtils.hasText(saml.getUsernameAttribute()) ? saml.getUsernameAttribute() : "NameID", name)
                                 + ", whom the directory does not hold")));
         SamlDirectoryPrincipal principal = new SamlDirectoryPrincipal(person, asserted.getName());
+        if (saml.singleLogoutConfigured()) {
+            // What a LogoutRequest names, either way: the NameID and the provider's session.
+            Saml2ResponseAssertion assertion = Saml2ResponseAssertion.withResponseValue(standard.getSaml2Response())
+                    .nameId(asserted.getName())
+                    .sessionIndexes(List.copyOf(asserted.getSessionIndexes()))
+                    .build();
+            return new Saml2AssertionAuthentication(principal, assertion, principal.getAuthorities(),
+                    SsoProperties.Saml.REGISTRATION_ID);
+        }
         return new Saml2Authentication(principal, standard.getSaml2Response(), principal.getAuthorities());
     }
 
@@ -449,18 +648,40 @@ public class SsoSignIn {
                 Saml2X509Credential signing = signingCredential(saml);
                 builder.signingX509Credentials(credentials -> credentials.add(signing));
             }
-            return builder.build();
-        });
-        return registrationId -> {
-            if (!SsoProperties.Saml.REGISTRATION_ID.equals(registrationId)) {
-                return null;
+            if (saml.singleLogoutConfigured()) {
+                // Pinned like the assertion consumer. Redirect only: the provider's redirect is a
+                // top-level navigation, which brings the session cookie (SameSite=Lax) with it.
+                builder.singleLogoutServiceLocation(publicUrl + SAML_LOGOUT_PATH)
+                        .singleLogoutServiceResponseLocation(publicUrl + SAML_LOGOUT_PATH)
+                        .singleLogoutServiceBinding(Saml2MessageBinding.REDIRECT);
             }
-            try {
-                return registration.get();
-            } catch (RuntimeException e) {
-                log.error("Could not read the SAML identity provider's metadata from {}: {}",
-                        saml.getMetadataLocation(), e.toString());
-                return null;
+            RelyingPartyRegistration built = builder.build();
+            if (saml.singleLogoutConfigured() && !providerLogsOut(built)) {
+                log.warn("SAML single logout is on, but the identity provider's metadata ({}) names no "
+                        + "SingleLogoutService: signing out ends the session here only", saml.getMetadataLocation());
+            }
+            return built;
+        });
+        return new RelyingPartyRegistrationRepository() {
+            @Override
+            public RelyingPartyRegistration findByRegistrationId(String registrationId) {
+                if (!SsoProperties.Saml.REGISTRATION_ID.equals(registrationId)) {
+                    return null;
+                }
+                try {
+                    return registration.get();
+                } catch (RuntimeException e) {
+                    log.error("Could not read the SAML identity provider's metadata from {}: {}",
+                            saml.getMetadataLocation(), e.toString());
+                    return null;
+                }
+            }
+
+            /** The provider's own logout request, arriving with no session to name the registration. */
+            @Override
+            public RelyingPartyRegistration findUniqueByAssertingPartyEntityId(String entityId) {
+                RelyingPartyRegistration found = findByRegistrationId(SsoProperties.Saml.REGISTRATION_ID);
+                return found != null && found.getAssertingPartyMetadata().getEntityId().equals(entityId) ? found : null;
             }
         };
     }

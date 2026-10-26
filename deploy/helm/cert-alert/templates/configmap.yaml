@@ -83,6 +83,7 @@ data:
   CERT_ALERT_SSO_SAML_SIGNING_KEY_LOCATION: "file:/etc/cert-alert/saml/signing/tls.key"
   CERT_ALERT_SSO_SAML_SIGNING_CERTIFICATE_LOCATION: "file:/etc/cert-alert/saml/signing/tls.crt"
   {{- end }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SSO_SAML_SINGLE_LOGOUT" "value" (include "cert-alert.saml.singleLogout" $)) }}
   {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SSO_SAML_USERNAME_ATTRIBUTE" "value" .usernameAttribute) }}
   {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SSO_SAML_MATCH" "value" .match) }}
   {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SSO_SAML_GROUPS_ATTRIBUTE" "value" .groupsAttribute) }}
@@ -161,6 +162,14 @@ data:
   CERT_ALERT_WEBHOOKS_ALLOWED_HOSTS: {{ join "," $v.webhooks.allowedHosts | quote }}
   {{- /* Unset: the application's default (see values.yaml). */}}
   {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_WEBHOOKS_BLOCK_PRIVATE_NETWORKS" "value" $v.webhooks.blockPrivateNetworks) }}
+  {{- with $v.webhooks.proxy }}
+  {{- if .host }}
+  # Webhooks through an egress proxy; its password is in a Secret.
+  CERT_ALERT_WEBHOOKS_PROXY_HOST: {{ .host | quote }}
+  CERT_ALERT_WEBHOOKS_PROXY_PORT: {{ .port | toString | quote }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_WEBHOOKS_PROXY_USERNAME" "value" .username) }}
+  {{- end }}
+  {{- end }}
   # Audit logging (ens-audit/1); the Splunk token is in a Secret.
   ENS_AUDIT_STDOUT: {{ $v.audit.stdout | quote }}
   ENS_AUDIT_FILE: {{ ternary "/var/log/ens/certalert/audit.jsonl" "" $v.audit.file.enabled | quote }}

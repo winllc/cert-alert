@@ -261,6 +261,28 @@ true
 {{- end -}}
 {{- end }}
 
+{{/*
+CERT_ALERT_SSO_SAML_SINGLE_LOGOUT: sso.saml.singleLogout when set; otherwise true for a new
+installation (that can see the cluster), and for an upgrade whatever the last release had -
+which for a release from before the setting is the application's default, false: an upgrade
+signs out as it did.
+*/}}
+{{- define "cert-alert.saml.singleLogout" -}}
+{{- $set := .Values.sso.saml.singleLogout -}}
+{{- if not (and (kindIs "string" $set) (eq $set "")) -}}
+{{- toString $set -}}
+{{- else if include "cert-alert.clusterVisible" . -}}
+{{- if .Release.IsInstall -}}
+true
+{{- else -}}
+{{- $existing := lookup "v1" "ConfigMap" .Release.Namespace (include "cert-alert.fullname" .) -}}
+{{- if and $existing $existing.data (hasKey $existing.data "CERT_ALERT_SSO_SAML_SINGLE_LOGOUT") -}}
+{{- index $existing.data "CERT_ALERT_SSO_SAML_SINGLE_LOGOUT" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
 {{/* Whether a license is supplied to the chart. */}}
 {{- define "cert-alert.licenseSupplied" -}}
 {{- if or .Values.license.existingSecret .Values.license.file }}true{{ end }}
@@ -363,6 +385,14 @@ true
 {{- end -}}
 {{- if not (include "cert-alert.x509CaConfigured" .) -}}
 {{- fail "x509.source=header needs x509.trustedCa.existingSecret (or .value): the CA certificates (PEM) a forwarded certificate must chain to." -}}
+{{- end -}}
+{{- end -}}
+{{- with .Values.webhooks.proxy -}}
+{{- if and .host (or (lt (int .port) 1) (gt (int .port) 65535)) -}}
+{{- fail "webhooks.proxy.port must be the proxy's port (1-65535) when webhooks.proxy.host is set." -}}
+{{- end -}}
+{{- if and .host (ne (not .username) (not (or .password .existingSecret))) -}}
+{{- fail "webhooks.proxy.username and a password (webhooks.proxy.password or webhooks.proxy.existingSecret) go together: set both or neither." -}}
 {{- end -}}
 {{- end -}}
 {{- if and .Values.license.existingSecret .Values.license.file -}}

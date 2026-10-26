@@ -652,6 +652,14 @@ cert-alert:
     # block-private-networks:
     # A base64 AES key the signing secrets are encrypted with in the database.
     # secret-key: ${CERT_ALERT_WEBHOOKS_SECRET_KEY:}
+    # An HTTP forward (egress) proxy webhooks go through with CONNECT, to the address the
+    # guard checked. Unset: direct. Basic credentials optional; the password from a file
+    # (read at each connection) or from CERT_ALERT_WEBHOOKS_PROXY_PASSWORD. Never logged.
+    # proxy:
+    #   host: proxy.example.gov
+    #   port: 3128
+    #   username:
+    #   password-file: /run/secrets/webhook-proxy-password
     connect-timeout: 5s
     read-timeout: 10s
     # All of one delivery, handshake and slow receivers included; the connection is closed at it.
