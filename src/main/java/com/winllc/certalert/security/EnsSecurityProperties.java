@@ -15,6 +15,7 @@ public class EnsSecurityProperties {
     private final Csp csp = new Csp();
     private final ConsentBanner consentBanner = new ConsentBanner();
     private final Session session = new Session();
+    private final License license = new License();
 
     public Csp getCsp() {
         return csp;
@@ -26,6 +27,10 @@ public class EnsSecurityProperties {
 
     public Session getSession() {
         return session;
+    }
+
+    public License getLicense() {
+        return license;
     }
 
     /** The Content-Security-Policy every response carries. */
@@ -163,6 +168,28 @@ public class EnsSecurityProperties {
 
         public void setMaxPerUser(int maxPerUser) {
             this.maxPerUser = Math.max(0, maxPerUser);
+        }
+    }
+
+    /** How the license screen is offered. Where the license is kept is not here: see {@code LicensingConfiguration}. */
+    public static class License {
+
+        /**
+         * {@code ENS_LICENSE_MENU_VISIBLE}: whether the navigation offers the license screen.
+         * CertAlert's bar has no entry of its own for it; what plays that part is the "Manage
+         * the license" link on the administration page, and that is what this hides. Hiding it
+         * changes nothing else: the screen stays at {@code /admin/license} for whoever may open
+         * it, and the license banners, the license-required page and the redirect an
+         * administrator gets while nothing is licensed still lead there.
+         */
+        private boolean menuVisible = true;
+
+        public boolean isMenuVisible() {
+            return menuVisible;
+        }
+
+        public void setMenuVisible(boolean menuVisible) {
+            this.menuVisible = menuVisible;
         }
     }
 }
