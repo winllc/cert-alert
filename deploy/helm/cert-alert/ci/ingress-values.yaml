@@ -1,6 +1,7 @@
 # Behind ingress-nginx with TLS at the ingress (password sign-in), mail, banner, audit to
 # Splunk and syslog with a persisted audit file, a Prometheus Operator ServiceMonitor, and a
-# NetworkPolicy that admits the monitoring namespace to the metrics port.
+# NetworkPolicy that admits the monitoring namespace to the metrics port; the license screen's
+# link hidden.
 ldap:
   url: ldaps://directory.example.gov:636
   base: dc=example,dc=gov
@@ -62,6 +63,8 @@ audit:
 license:
   file: |
     not-a-real-license
+  # No link to the license screen on the administration page (ENS_LICENSE_MENU_VISIBLE).
+  menuVisible: false
 ingress:
   enabled: true
   className: nginx

@@ -256,6 +256,7 @@ See [Backups and upgrades](#backups-and-upgrades) for why it is off by default.
 | `persistence.license.readWriteMany` | `false` | Says the license volume is ReadWriteMany, so it stays mounted above one replica (only needed to import from it while scaled up) |
 | `license.existingSecret` / `.existingSecretKey` | `""` / `license.lic` | A Secret holding the license |
 | `license.file` | `""` | `--set-file license.file=./license.lic` |
+| `license.menuVisible` | `true` | `ENS_LICENSE_MENU_VISIBLE`. `false` hides the administration page's "Manage the license" link (the bar has no license entry); `/admin/license` and the expiry and read-only banners' links stay |
 | `license.initImage.*` | the application image | The init container's image (it needs `sh`, `cp`, `mv`) |
 
 ### Anything else

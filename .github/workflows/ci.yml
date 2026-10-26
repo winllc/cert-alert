@@ -165,6 +165,18 @@ jobs:
           echo "$pvc" | grep -q 'helm.sh/resource-policy: keep'
           echo "$pvc" | grep -q 'argocd.argoproj.io/sync-options: Prune=false'
 
+      - name: The license menu setting is passed only when it is false
+        run: |
+          # Unset or true leaves the application's default (shown); false is passed on.
+          # (An if, not "! cmd": bash -e does not stop on a negated command.)
+          if helm template cert-alert "$CHART" -f "$CHART/ci/default-values.yaml" \
+              | grep -q 'ENS_LICENSE_MENU_VISIBLE'; then
+            echo "::error::ENS_LICENSE_MENU_VISIBLE rendered with the default values"
+            exit 1
+          fi
+          helm template cert-alert "$CHART" -f "$CHART/ci/ingress-values.yaml" \
+            | grep -q 'ENS_LICENSE_MENU_VISIBLE: "false"'
+
       - name: Render and validate
         run: |
           for values in "$CHART"/ci/*.yaml; do
