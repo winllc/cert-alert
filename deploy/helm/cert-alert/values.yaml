@@ -669,10 +669,10 @@ webhooks:
     host: ""
     port: 3128
     # CERT_ALERT_WEBHOOKS_PROXY_USERNAME and CERT_ALERT_WEBHOOKS_PROXY_PASSWORD, if the proxy
-    # wants credentials (HTTP Basic; never logged). The password inline, or from a Secret of
-    # your own.
+    # wants credentials (HTTP Basic; never logged). The password from a Secret of your own
+    # (existingSecret), or inline - not set here, so that no password value ships by default:
+    #   password: <the proxy password>
     username: ""
-    password: ""
     existingSecret: ""
     existingSecretKey: webhooks-proxy-password
 
