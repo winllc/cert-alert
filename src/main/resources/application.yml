@@ -687,8 +687,8 @@ ens:
   # "Manage the license" link on the administration page is what leads there, and false hides
   # it. Nothing else changes: /admin/license keeps its access rules, the status line on the
   # administration page stays, and the read-only and renewal banners, the license-required
-  # page and the redirect while nothing is licensed still link to it. true or false; anything
-  # else stops the start.
+  # page and the redirect while nothing is licensed still link to it. true or false; a value
+  # that is not a boolean stops the start.
   license:
     menu-visible: ${ENS_LICENSE_MENU_VISIBLE:true}
 
