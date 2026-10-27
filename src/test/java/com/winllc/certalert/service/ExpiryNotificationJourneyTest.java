@@ -7,9 +7,12 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.jayway.jsonpath.Configuration;
 import com.jayway.jsonpath.JsonPath;
+import com.jayway.jsonpath.Option;
 import com.winllc.certalert.domain.AuditAction;
 import com.winllc.certalert.domain.AuditEvent;
+import com.winllc.certalert.domain.Notification;
 import com.winllc.certalert.domain.OwnerType;
 import com.winllc.certalert.repository.AuditEventRepository;
 import com.winllc.certalert.repository.DirectoryServerRepository;
@@ -26,6 +29,7 @@ import jakarta.mail.Part;
 import jakarta.mail.internet.MimeMessage;
 import jakarta.mail.internet.MimeMultipart;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -320,13 +324,7 @@ class ExpiryNotificationJourneyTest {
         projectService.addServer(project.getId(), serverId("web01"));
         projectService.addAdmin(project.getId(), userId("quinn"));
 
-        MockHttpSession admin = signIn("admin");
-        JobRunsAwait.finished(mockMvc,
-                mockMvc.perform(post("/api/v1/notifications/digest").session(admin).with(csrf())),
-                request -> {
-                    request.setSession(admin);
-                    return request;
-                });
+        runTheRoundUp();
 
         List<MimeMessage> olives = to("olive@example.gov");
         assertThat(olives).hasSize(1);
@@ -364,11 +362,90 @@ class ExpiryNotificationJourneyTest {
                 .startsWith("1 credential(s) expired (web01 - CN=web01.example.gov - expired 2 day(s) ago, on ")
                 .doesNotContain("Olive");
         assertThat(JsonPath.<String>read(page, "$.content[0].emailedAt")).isNotNull();
+        // What it is about is the server it reports on, linked like any notification about
+        // an entry - not the person reading it.
+        assertThat(JsonPath.<String>read(page, "$.content[0].subjectType")).isEqualTo("SERVER");
+        assertThat(JsonPath.<String>read(page, "$.content[0].subjectName")).isEqualTo("web01");
+        assertThat(JsonPath.<String>read(page, "$.content[0].link")).isEqualTo("/servers/" + serverId("web01"));
+        assertThat(page).doesNotContain("Pat Contact");
 
         String hers = notificationsOf(signIn("olive"));
         assertThat(JsonPath.<String>read(hers, "$.content[0].message"))
                 .startsWith("1 credential(s) expiring (Olive Owner - CN=olive - expires in 10 day(s), on ")
                 .doesNotContain("web01");
+        // Her own certificate: the entry it is about is hers, and it says so.
+        assertThat(JsonPath.<String>read(hers, "$.content[0].subjectName")).isEqualTo("Olive Owner");
+        assertThat(JsonPath.<String>read(hers, "$.content[0].link")).isEqualTo("/users/" + userId("olive"));
+    }
+
+    /**
+     * A round-up covering several entries is about all of them: the page says how many, and
+     * names nobody - least of all the person reading it.
+     */
+    @Test
+    void aRoundUpCoveringSeveralEntriesSaysHowManyAndNamesNobody() throws Exception {
+        person("admin", "Ada Admin", "ada@example.gov");
+        person("pat", "Pat Contact", "pat@example.gov");
+        server("web01", new String[] {"pat@example.gov"},
+                TestCertificates.expired("web01.example.gov", Duration.ofDays(2).plusHours(12)));
+        server("web02", new String[] {"pat@example.gov"},
+                TestCertificates.expiringIn("web02.example.gov", Duration.ofDays(5).plusHours(12)));
+        syncService.syncUsers();
+        syncService.syncServers();
+
+        runTheRoundUp();
+
+        String page = notificationsOf(signIn("pat"));
+        assertThat(JsonPath.<Integer>read(page, "$.content.length()")).isEqualTo(1);
+        assertThat(JsonPath.<String>read(page, "$.content[0].message"))
+                .isEqualTo("1 credential(s) expired and 1 expiring across 2 directory entries");
+        assertThat(JsonPath.<String>read(page, "$.content[0].subjectName")).isEqualTo("2 directory entries");
+        assertThat(absentOrNull(page, "$.content[0].link")).isNull();
+        assertThat(page).doesNotContain("Pat Contact");
+    }
+
+    /**
+     * A round-up saved before round-ups named their entry has the reader as its subject. The
+     * page must not show that, and must not break on it; the next run names the entry, and -
+     * having nothing new to say - leaves it read.
+     */
+    @Test
+    void aRoundUpSavedBeforeTheUpgradeNamesNobodyUntilTheNextRunNamesTheEntry() throws Exception {
+        person("admin", "Ada Admin", "ada@example.gov");
+        person("pat", "Pat Contact", "pat@example.gov");
+        server("web01", new String[] {"pat@example.gov"},
+                TestCertificates.expired("web01.example.gov", Duration.ofDays(2).plusHours(12)));
+        syncService.syncUsers();
+        syncService.syncServers();
+        runTheRoundUp();
+
+        // As the previous release stored it: about the reader, by a placeholder DN - and read.
+        Long pat = userId("pat");
+        Notification stored = notifications.findAll().stream()
+                .filter(notification -> pat.equals(notification.getRecipientUserId()))
+                .findFirst()
+                .orElseThrow();
+        stored.about(new AuditEvent.SubjectRef(
+                OwnerType.USER, pat, NotificationService.LEGACY_ROUND_UP_DN, "Pat Contact"));
+        stored.markRead(Instant.now());
+        notifications.save(stored);
+
+        MockHttpSession patSession = signIn("pat");
+        String before = notificationsOf(patSession);
+        assertThat(JsonPath.<String>read(before, "$.content[0].kind")).isEqualTo("EXPIRY_DIGEST");
+        assertThat(absentOrNull(before, "$.content[0].subjectName")).isNull();
+        assertThat(absentOrNull(before, "$.content[0].link")).isNull();
+        assertThat(before).doesNotContain("Pat Contact");
+        // The page itself still renders for them.
+        mockMvc.perform(get("/notifications").session(patSession)).andExpect(status().isOk());
+
+        runTheRoundUp();
+
+        String after = notificationsOf(patSession);
+        assertThat(JsonPath.<Integer>read(after, "$.content.length()")).isEqualTo(1);
+        assertThat(JsonPath.<String>read(after, "$.content[0].subjectName")).isEqualTo("web01");
+        assertThat(JsonPath.<String>read(after, "$.content[0].link")).isEqualTo("/servers/" + serverId("web01"));
+        assertThat(JsonPath.<Boolean>read(after, "$.content[0].unread")).as("nothing new to say").isFalse();
     }
 
     /**
@@ -422,6 +499,24 @@ class ExpiryNotificationJourneyTest {
 
     private void server(String cn, String[] pocs, byte[]... certificates) {
         added.add(directory.addServer(cn, "https://" + cn + ".example.gov", pocs, certificates));
+    }
+
+    /** Null for a field the API leaves out because it has no value, as it does for null. */
+    private static Object absentOrNull(String json, String path) {
+        return JsonPath.using(Configuration.defaultConfiguration().addOptions(Option.SUPPRESS_EXCEPTIONS))
+                .parse(json)
+                .read(path);
+    }
+
+    /** The round-up, run by an administrator from the notifications page, waited for. */
+    private void runTheRoundUp() throws Exception {
+        MockHttpSession admin = signIn("admin");
+        JobRunsAwait.finished(mockMvc,
+                mockMvc.perform(post("/api/v1/notifications/digest").session(admin).with(csrf())),
+                request -> {
+                    request.setSession(admin);
+                    return request;
+                });
     }
 
     private Long userId(String uid) {

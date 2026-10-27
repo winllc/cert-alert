@@ -4,6 +4,7 @@ import com.winllc.certalert.domain.Notification;
 import com.winllc.certalert.domain.NotificationKind;
 import com.winllc.certalert.domain.OwnerType;
 import com.winllc.certalert.domain.Severity;
+import com.winllc.certalert.service.NotificationService;
 import java.time.Instant;
 
 /**
@@ -37,7 +38,7 @@ public record NotificationRow(
                 notification.getMessage(),
                 notification.getSubjectType(),
                 notification.getSubjectId(),
-                notification.getSubjectName(),
+                legacyRoundUp(notification) ? null : notification.getSubjectName(),
                 link(notification),
                 notification.isUnread(),
                 notification.getCreatedAt(),
@@ -45,11 +46,20 @@ public record NotificationRow(
                 notification.getEmailedAt());
     }
 
-    /** A round-up is about many entries at once, so it links to none of them. */
+    /**
+     * A round-up saved before round-ups named their entry: its subject is the person reading
+     * it, which is not what it is about, so it names and links to nothing until the next
+     * round-up brings it up to date. One naming several entries has no id, and links nowhere.
+     */
     private static String link(Notification notification) {
-        if (notification.getKind() == NotificationKind.EXPIRY_DIGEST || notification.getSubjectId() == null) {
+        if (legacyRoundUp(notification) || notification.getSubjectId() == null) {
             return null;
         }
         return (notification.getSubjectType() == OwnerType.USER ? "/users/" : "/servers/") + notification.getSubjectId();
+    }
+
+    private static boolean legacyRoundUp(Notification notification) {
+        return notification.getKind() == NotificationKind.EXPIRY_DIGEST
+                && NotificationService.LEGACY_ROUND_UP_DN.equals(notification.getSubjectDn());
     }
 }
