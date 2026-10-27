@@ -2299,6 +2299,10 @@ done.
 The email is unchanged by any of that — the round-up is a daily report and goes out daily.
 It is the page that holds one message per person rather than one per run.
 
+On the page, a round-up's **About** column names what it reports on: the one directory entry
+it covers, linked to that entry's page like any other notification, or "N directory entries"
+where it covers several. It never names the person reading it unless the entry is their own.
+
 **How many days before expiry the round-up writes** is set on the notifications page, not in
 the configuration file. It is the number that gets argued about once a deployment is real -
 thirty days is too late for a certificate whose renewal needs a change request raised, and a
@@ -3558,6 +3562,13 @@ class SlackAlertNotifier implements AlertNotifier {
 
 Read these before upgrading. They apply to the compose bundle, the Helm chart and a plain
 `java -jar` alike.
+
+### The round-up's "About" column names the entry
+
+A fix: the notifications page showed the reader's own name in the **About** column of their
+expiry round-up, whatever it reported on. It now names the entry the round-up covers, linked
+to its page, or says how many it covers. Round-ups saved before the upgrade show no subject
+until the next daily run brings them up to date; that run does not mark them unread.
 
 ### The license screen's link can be hidden
 

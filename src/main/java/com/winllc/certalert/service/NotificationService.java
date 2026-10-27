@@ -474,6 +474,10 @@ public class NotificationService {
         if (!held.getMessage().equals(fresh.getMessage())) {
             held.refresh(fresh.getSeverity(), fresh.getMessage(), now);
         }
+        // What it is about follows what it says; it alone changing - a round-up saved before
+        // it named its entry - is not news, so it leaves the read state alone.
+        held.about(new AuditEvent.SubjectRef(
+                fresh.getSubjectType(), fresh.getSubjectId(), fresh.getSubjectDn(), fresh.getSubjectName()));
         return held;
     }
 
@@ -820,6 +824,19 @@ public class NotificationService {
                 : AuditEvent.SubjectRef.of(server);
     }
 
+    /**
+     * The subject DN of a round-up naming several entries, which no one entry stands for.
+     * Round-ups saved before they named their entry carry {@link #LEGACY_ROUND_UP_DN} instead.
+     */
+    public static final String SEVERAL_ENTRIES_DN = "digest:entries";
+
+    /**
+     * The subject DN round-ups were saved with when they named their reader as what they
+     * were about. Such a row says nothing true about its subject, so the page names none
+     * until the next round-up brings it up to date.
+     */
+    public static final String LEGACY_ROUND_UP_DN = "digest";
+
     /** One person's round-up, built up as the expiring certificates are walked. */
     private static final class Round {
 
@@ -863,13 +880,20 @@ public class NotificationService {
                 where = "across " + named + " directory entries";
             }
             String message = "%s %s".formatted(summary(), where);
+            // What the page shows it is about: the one entry it names, linked like any other
+            // notification about an entry, or how many it names. Never the reader - this is
+            // their notification, not one about them, unless the entry happens to be theirs.
+            ExpiryDigest.Entry first = entries.getFirst();
+            AuditEvent.SubjectRef about = named == 1
+                    ? new AuditEvent.SubjectRef(
+                            first.getOwnerType(), first.getOwnerId(), first.getOwnerDn(), first.getOwnerName())
+                    : new AuditEvent.SubjectRef(
+                            OwnerType.USER, null, SEVERAL_ENTRIES_DN, named + " directory entries");
             return new Notification(
                     recipient.userId(),
                     recipient.address(),
                     NotificationKind.EXPIRY_DIGEST,
-                    // A round-up is about everything it names, so it hangs off none of them
-                    // in particular; the entries say what.
-                    new AuditEvent.SubjectRef(OwnerType.USER, recipient.userId(), "digest", recipient.name()),
+                    about,
                     null,
                     severity,
                     truncate(message),

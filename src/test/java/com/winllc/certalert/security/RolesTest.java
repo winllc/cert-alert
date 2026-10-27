@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.winllc.certalert.audit.AccessDenials;
@@ -212,6 +213,74 @@ class RolesTest {
         MockHttpSession olga = signIn("olga");
         assertThat(rolesIn(olga)).containsExactly("ROLE_USER");
         assertThat(as(olga, get("/admin"))).isEqualTo(403);
+    }
+
+    /**
+     * A reader - signed in, in the directory, in no role - reads the inventory and their own
+     * notifications, and reaches nothing an administrator or auditor does: no administration
+     * page or API, no job, no change to what everybody else is written to about. Each refusal
+     * is a 403, recorded, and changes nothing.
+     */
+    @Test
+    void aReaderReadsTheirOwnAndReachesNoAdministration() throws Exception {
+        MockHttpSession olga = signIn("olga");
+        assertThat(rolesIn(olga)).containsExactly("ROLE_USER");
+        long head = auditStore.headSeq();
+
+        // What any reader may read.
+        for (String page : List.of("/users", "/servers", "/certificates", "/notifications",
+                "/api/v1/notifications", "/api/v1/notifications/settings", "/api/v1/license")) {
+            assertThat(as(olga, get(page))).as("GET " + page).isEqualTo(200);
+        }
+        mockMvc.perform(get("/api/v1/notifications/settings").session(olga))
+                .andExpect(jsonPath("$.editable")
+                        .value(false));
+        mockMvc.perform(get("/api/v1/license").session(olga))
+                .andExpect(jsonPath("$.installationId")
+                        .doesNotExist());
+
+        // Administration, read or written, is not theirs.
+        List<MockHttpServletRequestBuilder> refused = List.of(
+                get("/admin"),
+                get("/admin/audit"),
+                get("/admin/license"),
+                get("/admin/integrations"),
+                get("/api/v1/audit/summary"),
+                get("/api/v1/admin/audit/events"),
+                get("/api/v1/admin/audit/delivery"),
+                get("/api/v1/admin/audit/tokens"),
+                get("/api/v1/admin/webhooks"),
+                get("/api/v1/admin/api-tokens"),
+                get("/api/v1/jobs"),
+                post("/api/v1/admin/audit/verify"),
+                post("/api/v1/sync"),
+                post("/api/v1/sync/users"),
+                post("/api/v1/sync/refresh"),
+                post("/api/v1/revocation/check"),
+                post("/api/v1/notifications/digest"),
+                post("/api/v1/notifications/digest").param("dryRun", "true"),
+                put("/api/v1/notifications/settings").contentType(MediaType.APPLICATION_JSON).content("{\"leadDays\":3}"),
+                post("/api/v1/admin/webhooks").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"x\",\"url\":\"https://hooks.example.gov/x\"}"),
+                post("/api/v1/admin/api-tokens").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"x\"}"),
+                post("/api/v1/admin/audit/tokens").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"x\"}"),
+                post("/api/v1/admin/server-attributes").contentType(MediaType.APPLICATION_JSON).content("{}"),
+                post("/api/v1/projects/1/admins/1"),
+                delete("/api/v1/projects/1/admins/1"),
+                post("/admin/license").param("text", "x"));
+        for (MockHttpServletRequestBuilder request : refused) {
+            var built = request.buildRequest(context.getServletContext());
+            assertThat(as(olga, request)).as(built.getMethod() + " " + built.getRequestURI()).isEqualTo(403);
+        }
+
+        // The refused change did not happen, and the refusals are on the record.
+        mockMvc.perform(get("/api/v1/notifications/settings").session(olga))
+                .andExpect(jsonPath("$.leadDays")
+                        .value(30));
+        denials.flush();
+        assertThat(auditStore.after(head, 1000))
+                .filteredOn(event -> event.action().equals("access.denied"))
+                .isNotEmpty();
     }
 
     @Test

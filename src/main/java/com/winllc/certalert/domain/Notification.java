@@ -132,6 +132,18 @@ public class Notification {
         this.readAt = null;
     }
 
+    /**
+     * Points a round-up at what it now reports on, without making it read as new: what it is
+     * about is worked out afresh each run, and changes only with the wording - except on a
+     * round-up saved before it named its entry, which this brings up to date.
+     */
+    public void about(AuditEvent.SubjectRef subject) {
+        this.subjectType = subject.type();
+        this.subjectId = subject.id();
+        this.subjectDn = subject.dn();
+        this.subjectName = subject.name();
+    }
+
     public void markRead(Instant when) {
         if (readAt == null) {
             this.readAt = when;

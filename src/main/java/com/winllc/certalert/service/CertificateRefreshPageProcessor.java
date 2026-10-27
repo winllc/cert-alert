@@ -12,6 +12,7 @@ import com.winllc.certalert.domain.OwnerType;
 import com.winllc.certalert.repository.CachedCertificateRepository;
 import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.DirectoryUserRepository;
+import com.winllc.certalert.repository.ServerContactRepository;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -33,6 +34,7 @@ public class CertificateRefreshPageProcessor {
     private final CachedCertificateRepository certificateRepository;
     private final DirectoryUserRepository userRepository;
     private final DirectoryServerRepository serverRepository;
+    private final ServerContactRepository contactRepository;
     private final CertificateStatusEvaluator evaluator;
     private final AlertDispatcher alertDispatcher;
     private final AuditService auditService;
@@ -41,12 +43,14 @@ public class CertificateRefreshPageProcessor {
             CachedCertificateRepository certificateRepository,
             DirectoryUserRepository userRepository,
             DirectoryServerRepository serverRepository,
+            ServerContactRepository contactRepository,
             CertificateStatusEvaluator evaluator,
             AlertDispatcher alertDispatcher,
             AuditService auditService) {
         this.certificateRepository = certificateRepository;
         this.userRepository = userRepository;
         this.serverRepository = serverRepository;
+        this.contactRepository = contactRepository;
         this.evaluator = evaluator;
         this.alertDispatcher = alertDispatcher;
         this.auditService = auditService;
@@ -136,7 +140,8 @@ public class CertificateRefreshPageProcessor {
                     server.getId(),
                     server.getCommonName() == null ? server.getDn() : server.getCommonName(),
                     server.getDn(),
-                    server.getServerPocDisplay(),
+                    // Who a sweep would have named: the published contacts and the ones added here.
+                    DirectoryPersistenceService.contactsFor(server, contactRepository),
                     certificate,
                     evaluator.severityFor(status, daysUntilExpiry),
                     daysUntilExpiry,

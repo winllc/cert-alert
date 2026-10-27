@@ -255,6 +255,30 @@ class RevocationServiceTest {
                 .isNotEmpty();
     }
 
+    /**
+     * Who is told, and what they read: the holder of the revoked certificate - nobody whose
+     * certificates are fine - with the serial that was revoked and when, about their own entry.
+     */
+    @Test
+    void theRevokedCertificatesHolderAloneIsToldWhichCertificateAndWhen() {
+        revocationService.checkAll();
+
+        Long stolen = users.findByDn(dn("stolen")).orElseThrow().getId();
+        List<com.winllc.certalert.domain.Notification> told = notifications.findAll().stream()
+                .filter(notification -> notification.getKind() == NotificationKind.CERTIFICATE_REVOKED)
+                .toList();
+        assertThat(told).singleElement().satisfies(notification -> {
+            assertThat(notification.getRecipientUserId()).isEqualTo(stolen);
+            assertThat(notification.getRecipientAddress()).isEqualTo("stolen.key@example.gov");
+            assertThat(notification.getSubjectType()).isEqualTo(OwnerType.USER);
+            assertThat(notification.getSubjectId()).isEqualTo(stolen);
+            assertThat(notification.getSubjectName()).isEqualTo("Stolen Key");
+            assertThat(notification.getMessage())
+                    .startsWith("Certificate " + revokedSerial.toString(16) + " was revoked on ")
+                    .doesNotContain("Fine Person");
+        });
+    }
+
     @Test
     void aSecondRunDoesNotTellEverybodyAgain() {
         revocationService.checkAll();

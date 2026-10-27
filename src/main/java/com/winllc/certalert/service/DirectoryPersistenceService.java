@@ -314,6 +314,15 @@ public class DirectoryPersistenceService {
      * servers that raises four alerts issues four of these queries.
      */
     private String contactsFor(DirectoryServer server) {
+        return contactsFor(server, contactRepository);
+    }
+
+    /**
+     * The same answer for the hourly refresh, which notices most expiries - a certificate
+     * crosses into a bad state because time passed far more often than because the
+     * directory changed - and has to name the same people.
+     */
+    static String contactsFor(DirectoryServer server, ServerContactRepository contactRepository) {
         List<String> contacts = new ArrayList<>();
         if (server.getServerPocDisplay() != null && !server.getServerPocDisplay().isBlank()) {
             contacts.add(server.getServerPocDisplay());
