@@ -114,7 +114,13 @@ class ExpiryNotificationJourneyTest {
     private DirectorySyncService syncService;
 
     @Autowired
+    private CertificateRefreshService refreshService;
+
+    @Autowired
     private ProjectService projectService;
+
+    @Autowired
+    private ServerContactService contactService;
 
     @Autowired
     private MailOutbox outbox;
@@ -363,6 +369,49 @@ class ExpiryNotificationJourneyTest {
         assertThat(JsonPath.<String>read(hers, "$.content[0].message"))
                 .startsWith("1 credential(s) expiring (Olive Owner - CN=olive - expires in 10 day(s), on ")
                 .doesNotContain("web01");
+    }
+
+    /**
+     * Most certificates cross into expiry because time passes, not because the directory
+     * changed - so it is the hourly refresh, not a sweep, that usually notices. A server
+     * whose only contacts were added here (it publishes no serverPOC) must still have them
+     * told, and the operators' email and the audit trail must still say who they are.
+     */
+    @Test
+    void theHourlyRefreshTellsAServersAddedContactsAndNamesThemToTheOperators() throws Exception {
+        person("rhea", "Rhea Added", "rhea@example.gov");
+        server("db01", new String[0], TestCertificates.expiringIn("db01.example.gov", Duration.ofSeconds(2)));
+        syncService.syncUsers();
+        syncService.syncServers();
+        Long db01 = serverId("db01");
+        contactService.addUser(db01, userId("rhea"), "admin");
+        contactService.addEmail(db01, "dba-team@example.gov", "admin");
+
+        Thread.sleep(Duration.ofSeconds(3).toMillis());
+        refreshService.refresh();
+
+        String page = notificationsOf(signIn("rhea"));
+        assertThat(JsonPath.<Integer>read(page, "$.content.length()")).isEqualTo(1);
+        assertThat(JsonPath.<String>read(page, "$.content[0].message"))
+                .startsWith("[CRITICAL] Certificate for server db01 expired on ");
+        assertThat(JsonPath.<String>read(page, "$.content[0].link")).isEqualTo("/servers/" + db01);
+        assertThat(notifications.findAll())
+                .as("the unclaimed address is a recipient too")
+                .extracting(notification -> notification.getRecipientAddress())
+                .containsExactlyInAnyOrder("rhea@example.gov", "dba-team@example.gov");
+
+        outbox.deliverDue();
+        List<MimeMessage> operators = to(OPERATORS);
+        assertThat(operators).extracting(this::subject).containsExactly("[cert-alert] db01 - EXPIRED");
+        assertThat(text(operators.getFirst()))
+                .contains("Contact:   ")
+                .contains("rhea@example.gov")
+                .contains("dba-team@example.gov");
+        assertThat(alertsSentAbout(OwnerType.SERVER, db01))
+                .isNotEmpty()
+                .allSatisfy(event -> assertThat(event.getTarget())
+                        .contains("rhea@example.gov")
+                        .contains("dba-team@example.gov"));
     }
 
     // ---------------------------------------------------------------------------------
