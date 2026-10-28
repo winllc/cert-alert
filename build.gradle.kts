@@ -37,6 +37,15 @@ extra["tomcat.version"] = "11.0.27"
 extra["jackson-bom.version"] = "3.1.7"
 extra["jackson-2-bom.version"] = "2.21.8"
 
+// Guava, which OpenSAML (SAML sign-in) brings in at 33.0.0-jre: CVE-2026-102554, fixed in
+// 33.7.2. Spring Boot does not manage Guava, so it is managed here; drop once OpenSAML
+// depends on it or a later one.
+dependencyManagement {
+    dependencies {
+        dependency("com.google.guava:guava:33.7.2-jre")
+    }
+}
+
 val bouncyCastle = "1.86"
 
 dependencies {
