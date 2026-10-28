@@ -30,9 +30,9 @@ as `cert-alert-@VERSION@.tgz`).
 
 - Either **Docker** Engine 24+ with the Compose plugin v2 (`docker compose version`; a
   standalone `docker-compose` v2 works too, v1 does not), or **Podman** 4.0+ with
-  **podman-compose 1.3.0+** (`pip install podman-compose`, or your distribution's package if
-  it is that new; `podman compose` is used when podman-compose is not on `PATH`). Rootful or
-  rootless - see [Podman](#podman) below. About 3 GB of disk.
+  **podman-compose 1.0.6+** (your distribution's package - EPEL's 1.0.6 on RHEL 8 and 9 - or
+  `pip install podman-compose`; `podman compose` is used when podman-compose is not on
+  `PATH`). Rootful or rootless - see [Podman](#podman) below. About 3 GB of disk.
 - A service account on your directory that can read people, servers and their
   certificates. If the directory's certificate comes from a private CA, see `JAVA_OPTS`
   in `env.template`.
@@ -71,6 +71,9 @@ reached** - `install.sh` will not start it serving plain HTTP to other hosts (se
 - `CERT_ALERT_ALLOW_PLAIN_HTTP=true` - plain HTTP on every interface, for a lab or a network
   that encrypts for you (warned about every time).
 
+Write values in `.env` without quotes - everything after the `=` is the value, spaces
+included - and comments on lines of their own; the top of `.env` says why.
+
 The first run also generates the database password and `CERT_ALERT_WEBHOOKS_SECRET_KEY` (the
 key webhook secrets are encrypted with): keep a copy of `.env` with your backups.
 
@@ -97,7 +100,8 @@ start it on any address but `127.0.0.1` unless `.env` says `CERT_ALERT_ALLOW_PLA
   to `http://cert-alert:8080`, and publish nothing on the host:
   `cp docker-compose.no-ports.yml docker-compose.override.yml`, then `./install.sh`. Both
   compose commands read that override file on their own, and upgrades carry it over. It
-  needs Docker Compose 2.24+ or podman-compose 1.4.0+ (for `!reset`).
+  needs Docker Compose 2.24+ or podman-compose 1.4.0+ (for `!reset`); the scripts refuse it
+  with an older podman-compose, such as RHEL's 1.0.6 - publish on `127.0.0.1` there instead.
 - **Accept plain HTTP** - a lab, or a network that encrypts for you:
   `CERT_ALERT_ALLOW_PLAIN_HTTP=true`. `install.sh` still warns every time.
 
@@ -127,14 +131,22 @@ a new install plus a database restore (the volumes are the engine's own), not an
 
 ## Podman
 
-The same files work with Podman 4.0+ and podman-compose 1.3.0+, rootful (`sudo`) or rootless
+The same files work with Podman 4.0+ and podman-compose 1.0.6+, rootful (`sudo`) or rootless
 (your own user). `install.sh` loads the images into Podman's store, and the compose file
 names them fully (`docker.io/library/postgres`, `ghcr.io/winllc/cert-alert`), as Podman has
 no default registry.
 
-- **Health checks run from systemd timers.** The database must report healthy before
-  cert-alert starts, so the host needs systemd: as root, nothing to do; rootless, your user
-  needs a systemd session - log in normally (not `su`), and see linger below.
+- **Health checks run from systemd timers**, so the host needs systemd: as root, nothing to
+  do; rootless, your user needs a systemd session - log in normally (not `su`), and see linger
+  below.
+- **podman-compose 1.0.x** (EPEL's 1.0.6 on RHEL 8 and 9) works, with three differences.
+  `.env` values must not be quoted - it passes them to Podman as they are, quotes included -
+  and `install.sh` refuses quoted ones. `docker-compose.no-ports.yml` needs 1.4.0+. And it
+  starts services without waiting for the database to be healthy: `install.sh` and
+  `restore.sh` start the database and wait for it themselves, but a plain
+  `podman-compose up -d` (after a reboot, say) starts both at once, and cert-alert restarts
+  until the database answers. It also reports containers that already exist as errors
+  (`name ... is already in use`) and then starts them; that is expected.
 - **Rootless: ports from 1024 up.** An unprivileged user cannot publish 80 or 443 unless
   `net.ipv4.ip_unprivileged_port_start` is lowered; keep `CERT_ALERT_PORT` at 8080 (or any
   port from 1024), and put a proxy on 443 if you want it. `install.sh` checks this.
@@ -218,6 +230,9 @@ what is new in this release:
   (register `<public URL>/login?logout` there first); off unless you set it.
 - `ENS_LICENSE_MENU_VISIBLE=false` hides the administration page's "Manage the license" link;
   optional, and unset it stays as it was. The license screen and the expiry banners' links stay.
+- Podman: podman-compose 1.0.6 or later is enough (it was 1.3.0), so RHEL 8 and 9 can use
+  EPEL's. `env.template` no longer quotes values; quotes in your `.env` still work with Docker
+  and podman-compose 1.1+, and `install.sh` asks you to remove them with 1.0.x.
 
 From earlier releases:
 
