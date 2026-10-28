@@ -49,6 +49,7 @@ case "$header" in
 esac
 
 select_engine
+check_compose_files
 user=$(_engine_env_value CERT_ALERT_DB_USER); user=${user:-certalert}
 db=$(_engine_env_value CERT_ALERT_DB_NAME); db=${db:-certalert}
 
@@ -62,16 +63,7 @@ fi
 
 # The database up and answering; cert-alert stopped, so nothing writes while it is replaced.
 compose up -d postgres
-id=""
-for _ in $(seq 1 60); do
-    id=$(service_container postgres 2> /dev/null || true)
-    if [ -n "$id" ] && engine exec "$id" pg_isready -U "$user" -d "$db" > /dev/null 2>&1; then
-        break
-    fi
-    id=""
-    sleep 2
-done
-[ -n "$id" ] || die "the database did not start (${COMPOSE_CMD[*]} logs postgres)."
+id=$(wait_for_database "$user" "$db")
 compose stop cert-alert || true
 
 say "Restoring $FILE into database $db ..."

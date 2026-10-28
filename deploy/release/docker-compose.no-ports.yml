@@ -7,8 +7,9 @@
 #
 #   cp docker-compose.no-ports.yml docker-compose.override.yml && ./install.sh
 #
-# Needs Docker Compose 2.24 or later, or podman-compose 1.4.0 or later, for !reset. A proxy
-# on the host itself needs none of this: CERT_ALERT_BIND_ADDRESS=127.0.0.1 in .env.
+# Needs Docker Compose 2.24 or later, or podman-compose 1.4.0 or later, for !reset; the
+# scripts refuse it with an older podman-compose (1.0.6 on RHEL 8 and 9), which cannot read it.
+# A proxy on the host itself needs none of this: CERT_ALERT_BIND_ADDRESS=127.0.0.1 in .env.
 services:
   cert-alert:
     ports: !reset []

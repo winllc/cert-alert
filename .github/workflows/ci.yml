@@ -199,13 +199,15 @@ jobs:
 
   release-bundle:
     # The customer bundle's files (deploy/release), without building anything: shellcheck on
-    # its scripts, and its compose files rendered by docker compose and by podman-compose in
-    # every combination its README documents; and that docker-compose.demo.yml publishes no
-    # port. The image job below installs the built bundle.
+    # its scripts, and its compose files rendered by docker compose and by podman-compose - the
+    # oldest the bundle supports (1.0.6, EPEL's on RHEL 8 and 9) and the newest - in every
+    # combination its README documents; and that docker-compose.demo.yml publishes no port.
+    # The image job below installs the built bundle.
     runs-on: ubuntu-latest
 
     env:
       PODMAN_COMPOSE_VERSION: 1.6.0
+      PODMAN_COMPOSE_OLDEST: 1.0.6
       SHELLCHECK_VERSION: 0.11.0.1
 
     steps:
@@ -217,6 +219,9 @@ jobs:
           "$RUNNER_TEMP/tools/bin/pip" install -q "podman-compose==$PODMAN_COMPOSE_VERSION" \
             "shellcheck-py==$SHELLCHECK_VERSION"
           echo "$RUNNER_TEMP/tools/bin" >> "$GITHUB_PATH"
+          # The oldest podman-compose, in a venv of its own.
+          python3 -m venv "$RUNNER_TEMP/pc-oldest"
+          "$RUNNER_TEMP/pc-oldest/bin/pip" install -q "podman-compose==$PODMAN_COMPOSE_OLDEST"
 
       - name: Check the bundle
         env:
@@ -224,8 +229,10 @@ jobs:
         run: |
           docker compose version
           podman version
+          "$RUNNER_TEMP/pc-oldest/bin/podman-compose" version
           podman-compose version
-          scripts/check-release-bundle.sh
+          PODMAN_COMPOSE="$RUNNER_TEMP/pc-oldest/bin/podman-compose $RUNNER_TEMP/tools/bin/podman-compose" \
+            scripts/check-release-bundle.sh
 
       - name: The demo compose file publishes no port
         run: |
@@ -463,44 +470,55 @@ jobs:
 
       - name: Install the bundle with Podman
         # The bundle as a customer unpacks it, installed and upgraded with rootful Podman and
-        # podman-compose (systemd runs Podman's health checks), from the images it ships. No
-        # directory here, so LDAP reports DOWN, which the liveness check ignores. Checks that a
-        # new .env refuses plain HTTP on 0.0.0.0 until CERT_ALERT_ALLOW_PLAIN_HTTP=true, that the
-        # UI is then published on 0.0.0.0:8080 of the host, and that a backup restores.
+        # podman-compose (systemd runs Podman's health checks), from the images it ships - with
+        # the oldest podman-compose the bundle supports (1.0.6, EPEL's on RHEL 8 and 9) and the
+        # newest, each on a fresh copy. No directory here, so LDAP reports DOWN, which the
+        # liveness check ignores. Checks that a new .env refuses plain HTTP on 0.0.0.0 until
+        # CERT_ALERT_ALLOW_PLAIN_HTTP=true, that the UI is then published on 0.0.0.0:8080 of the
+        # host, that a backup restores, and that the installer used that podman-compose.
         if: steps.release.outputs.enabled == 'true'
-        timeout-minutes: 15
+        timeout-minutes: 30
         env:
           VERSION: ${{ steps.release.outputs.version }}
           OUT_DIR: ${{ steps.release.outputs.out_dir }}
-          PODMAN_COMPOSE_VERSION: 1.6.0
+          PODMAN_COMPOSE_VERSIONS: 1.0.6 1.6.0
         run: |
-          python3 -m venv "$RUNNER_TEMP/podman-compose"
-          "$RUNNER_TEMP/podman-compose/bin/pip" install -q "podman-compose==$PODMAN_COMPOSE_VERSION"
-          as_root() { sudo env "PATH=$RUNNER_TEMP/podman-compose/bin:$PATH" "$@"; }
-          dir="$RUNNER_TEMP/podman-smoke"
-          mkdir -p "$dir"
-          tar -xzf "$OUT_DIR/$PRODUCT_ID-$VERSION.tar.gz" -C "$dir"
-          cd "$dir/$PRODUCT_ID-$VERSION"
-          as_root ./install.sh --engine podman
-          sudo grep -qx 'CONTAINER_ENGINE=podman' .env
-          sudo sed -i -e 's|^CERT_ALERT_LDAP_URL=.*|CERT_ALERT_LDAP_URL=ldap://127.0.0.1:1|' \
-            -e 's|=CHANGE_ME$|=ci|' .env
-          sudo grep -qE '^CERT_ALERT_WEBHOOKS_SECRET_KEY=.{44}$' .env
-          if as_root ./install.sh; then
-            echo "::error::install.sh started plain HTTP on 0.0.0.0 without CERT_ALERT_ALLOW_PLAIN_HTTP=true"
-            exit 1
-          fi
-          sudo sed -i -e 's|^CERT_ALERT_ALLOW_PLAIN_HTTP=.*|CERT_ALERT_ALLOW_PLAIN_HTTP=true|' .env
-          as_root ./install.sh
-          curl -fsS http://127.0.0.1:8080/livez
-          ss -ltnH 'sport = :8080' | tee /dev/stderr | grep -q '0\.0\.0\.0:8080'
-          as_root ./upgrade.sh
-          curl -fsS http://127.0.0.1:8080/livez
-          as_root ./backup.sh --out backups/ci.sql.gz
-          as_root ./restore.sh backups/ci.sql.gz --yes
-          for _ in $(seq 1 60); do curl -fsS http://127.0.0.1:8080/livez && break; sleep 5; done
-          curl -fsS http://127.0.0.1:8080/livez
-          as_root podman-compose down -v
+          set -o pipefail
+          for pc in $PODMAN_COMPOSE_VERSIONS; do
+            echo "::group::podman-compose $pc"
+            venv="$RUNNER_TEMP/podman-compose-$pc"
+            python3 -m venv "$venv"
+            "$venv/bin/pip" install -q "podman-compose==$pc"
+            as_root() { sudo env "PATH=$venv/bin:$PATH" "$@"; }
+            dir="$RUNNER_TEMP/podman-smoke-$pc"
+            mkdir -p "$dir"
+            tar -xzf "$OUT_DIR/$PRODUCT_ID-$VERSION.tar.gz" -C "$dir"
+            cd "$dir/$PRODUCT_ID-$VERSION"
+            as_root ./install.sh --engine podman 2>&1 | tee "$RUNNER_TEMP/install-$pc.log"
+            grep -qF "(podman-compose $pc)" "$RUNNER_TEMP/install-$pc.log" \
+              || { echo "::error::install.sh did not report podman-compose $pc"; exit 1; }
+            sudo grep -qx 'CONTAINER_ENGINE=podman' .env
+            sudo sed -i -e 's|^CERT_ALERT_LDAP_URL=.*|CERT_ALERT_LDAP_URL=ldap://127.0.0.1:1|' \
+              -e 's|=CHANGE_ME$|=ci|' .env
+            sudo grep -qE '^CERT_ALERT_WEBHOOKS_SECRET_KEY=.{44}$' .env
+            if as_root ./install.sh; then
+              echo "::error::install.sh started plain HTTP on 0.0.0.0 without CERT_ALERT_ALLOW_PLAIN_HTTP=true (podman-compose $pc)"
+              exit 1
+            fi
+            sudo sed -i -e 's|^CERT_ALERT_ALLOW_PLAIN_HTTP=.*|CERT_ALERT_ALLOW_PLAIN_HTTP=true|' .env
+            as_root ./install.sh
+            curl -fsS http://127.0.0.1:8080/livez
+            ss -ltnH 'sport = :8080' | tee /dev/stderr | grep -q '0\.0\.0\.0:8080'
+            as_root ./upgrade.sh
+            curl -fsS http://127.0.0.1:8080/livez
+            as_root ./backup.sh --out backups/ci.sql.gz
+            as_root ./restore.sh backups/ci.sql.gz --yes
+            for _ in $(seq 1 60); do curl -fsS http://127.0.0.1:8080/livez && break; sleep 5; done
+            curl -fsS http://127.0.0.1:8080/livez
+            as_root podman-compose down -v
+            cd "$GITHUB_WORKSPACE"
+            echo "::endgroup::"
+          done
 
       - name: Publish the Helm chart
         # Releases only: a pull request's 0.0.0-pr<n> chart is packaged above and kept as an

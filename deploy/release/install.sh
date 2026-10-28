@@ -392,7 +392,23 @@ wait_until_healthy() {
 
 start() {
     license_to_env
-    compose config --quiet || die "the compose configuration is not valid with this .env."
+    check_compose_files
+    # Not --quiet, which podman-compose 1.0.x does not have.
+    compose config > /dev/null || die "the compose configuration is not valid with this .env."
+    # The database first, ready before cert-alert starts: podman-compose before 1.3 ignores
+    # depends_on's service_healthy, and cert-alert does not wait for its database. Create (and
+    # recreate, on new images) everything, start the database and wait for it, then the rest.
+    if podman_compose_before 1.1.0; then
+        say "(podman-compose $PODMAN_COMPOSE_VERSION reports containers that already exist as errors -"
+        say " \"name ... is already in use\" - and then starts them; that is expected.)"
+    fi
+    compose up --no-start --remove-orphans
+    compose start postgres
+    local user db
+    user=$(env_value CERT_ALERT_DB_USER); user=${user:-certalert}
+    db=$(env_value CERT_ALERT_DB_NAME); db=${db:-certalert}
+    say "Waiting for the database ..."
+    wait_for_database "$user" "$db" > /dev/null
     compose up -d --remove-orphans
     wait_until_healthy
 }
