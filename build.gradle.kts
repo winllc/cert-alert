@@ -1,6 +1,6 @@
 plugins {
     java
-    id("org.springframework.boot") version "4.1.1"
+    id("org.springframework.boot") version "4.1.2"
     id("io.spring.dependency-management") version "1.1.7"
 }
 
@@ -89,7 +89,7 @@ dependencies {
     implementation("net.javacrumbs.shedlock:shedlock-provider-jdbc-template:7.10.1")
 
     // Maps DataTables' paging/ordering/search request straight onto a JPA query.
-    implementation("com.github.darrachequesne:spring-data-jpa-datatables:8.0.0")
+    implementation("com.github.darrachequesne:spring-data-jpa-datatables:8.0.1")
 
     implementation("org.springframework.boot:spring-boot-starter-flyway")
     runtimeOnly("org.flywaydb:flyway-database-postgresql")
@@ -104,7 +104,7 @@ dependencies {
     // Tabler (MIT) is the admin template the UI is built on; it bundles the Bootstrap 5
     // it is built from, so no separate Bootstrap dependency. Its icon package is 6.8MB of
     // individual SVGs, so the handful of glyphs used here are inlined as a sprite instead.
-    runtimeOnly("org.webjars.npm:tabler__core:1.6.1")
+    runtimeOnly("org.webjars.npm:tabler__core:1.7.1")
 
     developmentOnly("org.springframework.boot:spring-boot-devtools")
     // Backs the dev profile's embedded sample directory and the demo's generated one.
