@@ -23,7 +23,7 @@
 # ---------------------------------------------------------------------------------------
 # 1. Build
 # ---------------------------------------------------------------------------------------
-FROM registry.access.redhat.com/ubi9/openjdk-21:1.24@sha256:bd995811a45eb587f97a105796f8f43df466a4269411a2a1642f0f9799f885db AS build
+FROM registry.access.redhat.com/ubi9/openjdk-21:1.24@sha256:66175ec6c53f655a24c1c3f81c52b3e281c6918c917435b1014eb75cd11fbe75 AS build
 
 # These images run as uid 185 and their home is not writable for a Gradle build; nothing
 # built here is shipped, so the build stage is root and the runtime stage is not.
@@ -71,7 +71,7 @@ RUN set -eu; \
 # ---------------------------------------------------------------------------------------
 # 2. Split into layers
 # ---------------------------------------------------------------------------------------
-FROM registry.access.redhat.com/ubi9/openjdk-21:1.24@sha256:bd995811a45eb587f97a105796f8f43df466a4269411a2a1642f0f9799f885db AS extract
+FROM registry.access.redhat.com/ubi9/openjdk-21:1.24@sha256:66175ec6c53f655a24c1c3f81c52b3e281c6918c917435b1014eb75cd11fbe75 AS extract
 
 USER root
 WORKDIR /extract
