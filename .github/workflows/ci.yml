@@ -498,6 +498,9 @@ jobs:
             grep -qF "(podman-compose $pc)" "$RUNNER_TEMP/install-$pc.log" \
               || { echo "::error::install.sh did not report podman-compose $pc"; exit 1; }
             sudo grep -qx 'CONTAINER_ENGINE=podman' .env
+            # Every bundled image is there under its own name, so nothing is pulled: Podman 5 loads
+            # docker save's short names as localhost/..., and install.sh tags them.
+            while read -r ref; do sudo podman image exists "$ref"; done < images/IMAGES
             sudo sed -i -e 's|^CERT_ALERT_LDAP_URL=.*|CERT_ALERT_LDAP_URL=ldap://127.0.0.1:1|' \
               -e 's|=CHANGE_ME$|=ci|' .env
             sudo grep -qE '^CERT_ALERT_WEBHOOKS_SECRET_KEY=.{44}$' .env
