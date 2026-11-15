@@ -12,3 +12,24 @@
 CVE-2026-103111 exp:2026-11-17
 CVE-2026-86145 exp:2026-11-17
 CVE-2026-89161 exp:2026-11-17
+
+# krb5-libs 1.21.1-10.el9_8.1 in the runtime base image (ubi9/openjdk-21-runtime); fixed in
+# 1.21.1-10.el9_9.2, which is not in the public UBI 9 BaseOS repository yet, so the Dockerfile's
+# microdnf update cannot take it. Every one is in the KDC (krb5kdc) or the admin server (kadmind):
+# the image has neither krb5-server nor any Kerberos daemon, only the client library the
+# operating system's tools link, and the JVM does its own Kerberos. Remove these once UBI
+# publishes el9_9.2.
+CVE-2026-107364 exp:2026-12-15
+CVE-2026-112315 exp:2026-12-15
+CVE-2026-112316 exp:2026-12-15
+CVE-2026-112317 exp:2026-12-15
+CVE-2026-112318 exp:2026-12-15
+CVE-2026-112319 exp:2026-12-15
+CVE-2026-112320 exp:2026-12-15
+CVE-2026-112321 exp:2026-12-15
+CVE-2026-112322 exp:2026-12-15
+CVE-2026-112323 exp:2026-12-15
+CVE-2026-118380 exp:2026-12-15
+CVE-2026-119079 exp:2026-12-15
+CVE-2026-71199 exp:2026-12-15
+CVE-2026-71200 exp:2026-12-15
