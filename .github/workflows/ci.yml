@@ -494,9 +494,7 @@ jobs:
         env:
           VERSION: ${{ steps.release.outputs.version }}
           OUT_DIR: ${{ steps.release.outputs.out_dir }}
-          # Each install takes minutes, so pull requests run the oldest supported podman-compose only;
-          # main and release tags also run the latest.
-          PODMAN_COMPOSE_VERSIONS: ${{ github.event_name == 'pull_request' && '1.0.6' || '1.0.6 1.6.0' }}
+          PODMAN_COMPOSE_VERSIONS: 1.0.6 1.6.0
         run: |
           set -o pipefail
           for pc in $PODMAN_COMPOSE_VERSIONS; do
