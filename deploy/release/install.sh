@@ -64,6 +64,29 @@ load_images() {
         say "Loading images from $f (this takes a minute) ..."
         engine load -i "$f"
     done
+    tag_loaded_images
+}
+
+# docker save writes a Docker Hub image under its short name (postgres:17.11-alpine), and Podman 5
+# loads a short name as localhost/postgres:17.11-alpine, not as the docker.io/library/... the compose
+# file runs: Podman then pulled that image from Docker Hub after all, which an offline host cannot and
+# Docker Hub's anonymous pull limit refuses. So each docker.io image of images/IMAGES that is missing
+# under that name after loading, but there under localhost/, is tagged with its own name. Docker loads
+# it under that name already.
+tag_loaded_images() {
+    local ref short
+    [ -f images/IMAGES ] || return 0
+    while read -r ref; do
+        case "$ref" in docker.io/*:*) ;; *) continue ;; esac
+        case "$ref" in *@*) continue ;; esac
+        engine image inspect "$ref" > /dev/null 2>&1 && continue
+        short=${ref#docker.io/}
+        short=${short#library/}
+        if engine image inspect "localhost/$short" > /dev/null 2>&1; then
+            engine tag "localhost/$short" "$ref"
+            say "Tagged localhost/$short as $ref, the name the compose file runs."
+        fi
+    done < images/IMAGES
 }
 
 make_directories() {
