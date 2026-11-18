@@ -310,18 +310,19 @@ java -jar build/libs/cert-alert-0.0.1-SNAPSHOT.jar
 
 ### As a container
 
-Every push builds the image and, once it has been started and answered its health probe,
-publishes it to the GitHub Container Registry:
+Every push to `main` or a `v*` tag builds the image and, once it has been started and answered
+its health probe, publishes it to the GitHub Container Registry:
 
 ```bash
 docker pull ghcr.io/winllc/cert-alert:latest          # the default branch
 docker pull ghcr.io/winllc/cert-alert:sha-1a2b3c4     # one commit, forever
 ```
 
-Four kinds of tag. `sha-<short>` on every push, which is the one to test a commit with — it
-never moves.
-The branch name, which does. `latest`, only from the default branch. And on a `v*` tag, the
-version and its major.minor. Nothing is published from a pull request.
+Four kinds of tag. `sha-<short>` on every such push, which is the one to test a commit with —
+it never moves. The branch name (`main`), which does. `latest`, only from the default branch.
+And on a `v*` tag, the version and its major.minor. Nothing is published from a pull request,
+and other branches are not built on push (their pull request's run tests them; a branch with
+none can be run by hand from the Actions tab).
 
 What is published is the image that was tested, not a rebuild of it: the one that answered
 the probe and passed the vulnerability scan is the one that goes to the registry.
@@ -329,7 +330,7 @@ the probe and passed the vulnerability scan is the one that goes to the registry
 **Every image is scanned** with Trivy (`--severity HIGH,CRITICAL --ignore-unfixed`), on every
 push and pull request, and a finding fails the build. Accepted risks are listed in
 `.trivyignore`, each with its reason and a date to look at it again. CodeQL analyses the Java
-and the page scripts on every push and weekly. Dependabot proposes updates weekly for the
+and the page scripts on every pull request, push to `main` and weekly. Dependabot proposes updates weekly for the
 Gradle dependencies, the base images and the workflow actions — all of which are pinned, the
 images by digest and the actions by commit.
 

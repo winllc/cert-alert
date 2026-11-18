@@ -1,10 +1,14 @@
 name: CI
 
 on:
+  # Pushes to main and release tags, and pull requests. Branch pushes are left out: a pull
+  # request's run covers its branch, and running both doubled every pull request's minutes.
+  # A branch without a pull request can be run by hand (workflow_dispatch).
   push:
-    branches: ["**"]
+    branches: [main]
     tags: ["v*"]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -16,6 +20,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -38,6 +43,7 @@ jobs:
         with:
           name: test-results
           path: build/reports/tests/test
+          retention-days: 7
 
   test-postgres:
     # The whole test suite again, on PostgreSQL rather than the in-memory H2 the build uses:
@@ -45,6 +51,7 @@ jobs:
     # and holds the queries to its dialect. The test profile's datasource is replaced from
     # the environment, which outranks it.
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     services:
       postgres:
@@ -87,6 +94,7 @@ jobs:
         with:
           name: test-results-postgres
           path: build/reports/tests/test
+          retention-days: 7
 
   a11y:
     # Accessibility (Section 508 / WCAG 2.1 AA): every page - signed out, and signed in as an
@@ -98,6 +106,7 @@ jobs:
     # browser ("Playwright does not support chromium on ubuntu26.04-x64"). Move this to ubuntu-latest again together
     # with a Playwright release that supports 26.04.
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -125,11 +134,13 @@ jobs:
         with:
           name: a11y-report
           path: build/reports/a11y
+          retention-days: 7
 
   helm:
     # The Helm chart (deploy/helm/cert-alert): linted strictly and rendered with every example
     # values file in ci/, and the output validated against the Kubernetes 1.29 schemas.
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     env:
       CHART: deploy/helm/cert-alert
@@ -204,6 +215,7 @@ jobs:
     # combination its README documents; and that docker-compose.demo.yml publishes no port.
     # The image job below installs the built bundle.
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     env:
       PODMAN_COMPOSE_VERSION: 1.6.0
@@ -252,6 +264,7 @@ jobs:
     # (keyless, by this workflow's GitHub identity), and the image's SBOM and its SLSA build
     # provenance attached as attestations.
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     needs: build
 
     # For the release job, which signs and uploads what this one built.
@@ -642,6 +655,7 @@ jobs:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && needs.image.outputs.release == 'true'
     needs: image
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment: release
 
     permissions:
