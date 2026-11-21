@@ -119,8 +119,9 @@ public class NotificationMailer {
         boolean sent = false;
         for (ExpiryDigest digest : ExpiryDigest.split(greeting(recipient), entries)) {
             if (run.sent >= settings.getMaxPerRun()) {
-                run.warnOnce("Notification email stopped at " + settings.getMaxPerRun() + " messages for this run");
-                break;
+                // Counted, not built: the run reports how many the cap held back.
+                run.overCap++;
+                continue;
             }
             sent |= send(run, settings, recipient.address(), digest, notificationId);
         }
@@ -162,6 +163,7 @@ public class NotificationMailer {
 
         private final boolean dryRun;
         private int sent;
+        private int overCap;
         private boolean warned;
         /** What a dry run built, in the order it built it. Empty on a run that really sent. */
         private final List<Rendered> rendered = new ArrayList<>();
@@ -188,6 +190,11 @@ public class NotificationMailer {
          */
         public int sent() {
             return sent;
+        }
+
+        /** Messages this run did not build because it had reached {@code max-per-run}. */
+        public int overCap() {
+            return overCap;
         }
 
         /** Whether messages are being built and thrown away rather than sent. */

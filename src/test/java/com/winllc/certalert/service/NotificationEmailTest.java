@@ -2,6 +2,7 @@ package com.winllc.certalert.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.winllc.certalert.config.NotificationProperties;
 import com.winllc.certalert.domain.CachedCertificate;
 import com.winllc.certalert.domain.CertificateStatus;
 import com.winllc.certalert.domain.DirectoryServer;
@@ -85,6 +86,9 @@ class NotificationEmailTest {
 
     @Autowired
     private DirectoryServerRepository servers;
+
+    @Autowired
+    private NotificationProperties properties;
 
     @BeforeEach
     void seed() {
@@ -247,6 +251,36 @@ class NotificationEmailTest {
         assertThat(mailSender.sent).hasSize(3);
         assertThat(real.emailsSent()).isEqualTo(3);
         assertThat(notifications.count()).as("one notification per person").isEqualTo(2);
+    }
+
+    /**
+     * Where max-per-run binds, what is about to expire goes first and the long-lapsed wait -
+     * and the run says how many it held back, every time.
+     */
+    @Test
+    void theCapSendsUpcomingExpiriesFirstAndSaysWhatItHeldBack() {
+        // Nobody renews this one, and it is the first thing the reads come back with.
+        servers.save(server("cn=old01,ou=servers", "old01", "legacy@example.gov",
+                certificate("CN=old01.example.gov", Instant.now().minus(Duration.ofDays(60)),
+                        CertificateStatus.EXPIRED, Instant.now())));
+        int cap = properties.getEmail().getMaxPerRun();
+        properties.getEmail().setMaxPerRun(1);
+        try {
+            NotificationService.DigestResult result = notificationService.digest();
+
+            assertThat(mailSender.sent).hasSize(1);
+            assertThat(subject(to("alice@example.gov").getFirst()))
+                    .isEqualTo("[cert-alert] 1 of your credential(s) expiring soon");
+            assertThat(to("legacy@example.gov")).isEmpty();
+            // Alice's server message, ops@ and legacy@.
+            assertThat(result.notMailed()).isEqualTo(3);
+            assertThat(result.note()).contains("1 message cap").contains("3 message(s) were not sent");
+
+            // And again the next day: the cap is reported on every run, not once.
+            assertThat(notificationService.digest().notMailed()).isEqualTo(3);
+        } finally {
+            properties.getEmail().setMaxPerRun(cap);
+        }
     }
 
     private List<MimeMessage> to(String address) {

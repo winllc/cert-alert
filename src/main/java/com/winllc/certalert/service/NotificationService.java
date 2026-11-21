@@ -20,6 +20,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
@@ -254,10 +255,18 @@ public class NotificationService {
                 prepared.rehearsing() ? " (dry run)" : "", prepared.expiring(), prepared.leadDays(),
                 prepared.superseded(), prepared.told(), emailed,
                 unsent.isEmpty() ? "" : ", " + unsent.size() + " queued to try again");
+        if (prepared.overCap() > 0) {
+            // Every run, not once per process: a cap that binds today binds tomorrow too.
+            log.warn("Expiry digest{}: stopped at the {} message cap for one run; {} message(s) were not {} "
+                            + "this run. Upcoming expiries went first, the longest expired last. Raise "
+                            + "cert-alert.notifications.email.max-per-run to send them all",
+                    prepared.rehearsing() ? " (dry run)" : "", properties.getEmail().getMaxPerRun(),
+                    prepared.overCap(), prepared.rehearsing() ? "built" : "sent");
+        }
         List<NotificationMailer.Failure> failures = new ArrayList<>(prepared.failures());
         failures.addAll(unsent);
         String note = emailed > 0 && failures.isEmpty()
-                ? null
+                ? capped(prepared.overCap())
                 : whyNothingWasBuilt(
                         prepared.expiring(),
                         prepared.superseded(),
@@ -267,6 +276,7 @@ public class NotificationService {
                         prepared.leadDays(),
                         prepared.failures(),
                         unsent,
+                        prepared.overCap(),
                         prepared.rehearsing());
         List<NotificationMailer.Rendered> built = prepared.messages();
         return new DigestResult(
@@ -277,7 +287,17 @@ public class NotificationService {
                 properties.getEmail().isEnabled(),
                 note,
                 failures,
-                built.size() > DRY_RUN_PREVIEW_LIMIT ? built.subList(0, DRY_RUN_PREVIEW_LIMIT) : built);
+                built.size() > DRY_RUN_PREVIEW_LIMIT ? built.subList(0, DRY_RUN_PREVIEW_LIMIT) : built,
+                prepared.overCap());
+    }
+
+    /** What the run says when the per-run cap held messages back, or null where it did not. */
+    private String capped(int overCap) {
+        return overCap == 0
+                ? null
+                : "Stopped at the " + properties.getEmail().getMaxPerRun() + " message cap for one run "
+                        + "(cert-alert.notifications.email.max-per-run); " + overCap
+                        + " message(s) were not sent this run, the longest expired among them";
     }
 
     /**
@@ -295,12 +315,13 @@ public class NotificationService {
             int unaddressed,
             int leadDays,
             int built,
+            int overCap,
             List<Long> queued,
             List<NotificationMailer.Failure> failures,
             List<NotificationMailer.Rendered> messages) {
 
         static Prepared finished(DigestResult result) {
-            return new Prepared(result, result.dryRun(), 0, 0, 0, 0, 0, 0, 0, List.of(), List.of(), List.of());
+            return new Prepared(result, result.dryRun(), 0, 0, 0, 0, 0, 0, 0, 0, List.of(), List.of(), List.of());
         }
     }
 
@@ -407,6 +428,7 @@ public class NotificationService {
         Set<Long> standing = new HashSet<>();
         NotificationMailer.Run run = mailer.beginRun(dryRun);
         boolean rehearsing = run.isDryRun();
+        List<Mail> mail = new ArrayList<>(rounds.size());
         for (Round round : rounds.values()) {
             told++;
             if (round.recipient.address() == null || round.recipient.address().isBlank()) {
@@ -415,14 +437,20 @@ public class NotificationService {
             if (rehearsing) {
                 // Nothing saved and nothing marked: a rehearsal that left notifications
                 // behind would be answering the question by doing the thing.
-                mailer.send(run, round.recipient, round.entries);
+                mail.add(new Mail(round, null));
                 continue;
             }
             // The notification first, so the message knows which one it delivers: it is
             // marked emailed when the message actually goes, not when it is queued.
             Notification notification = roundUpFor(round, now);
             standing.add(notification.getId());
-            mailer.send(run, round.recipient, round.entries, notification.getId());
+            mail.add(new Mail(round, notification.getId()));
+        }
+        // Most urgent first, so that where max-per-run binds it is the long-lapsed that wait
+        // rather than everybody with something about to expire.
+        mail.sort(Comparator.comparing(item -> item.round().urgency()));
+        for (Mail item : mail) {
+            mailer.send(run, item.round().recipient, item.round().entries, item.notificationId());
         }
         if (!rehearsing) {
             clearRoundUpsExcept(standing, complete);
@@ -439,6 +467,7 @@ public class NotificationService {
                 unaddressed,
                 leadDays,
                 run.sent(),
+                run.overCap(),
                 run.queued(),
                 run.failures(),
                 rehearsing ? run.rendered() : List.of());
@@ -525,6 +554,7 @@ public class NotificationService {
             int leadDays,
             List<NotificationMailer.Failure> failures,
             List<NotificationMailer.Failure> unsent,
+            int overCap,
             boolean rehearsing) {
 
         // First, because it is the answer that means somebody has something to fix, and the
@@ -565,9 +595,8 @@ public class NotificationService {
             return "Email is switched on but there is no mail server configured to send with "
                     + "(spring.mail.host)";
         }
-        if (told >= email.getMaxPerRun()) {
-            return "Stopped at the " + email.getMaxPerRun() + " message cap for one run "
-                    + "(cert-alert.notifications.email.max-per-run)";
+        if (overCap > 0) {
+            return capped(overCap);
         }
         return "Nothing was built, and nothing here says why - the log will have it";
     }
@@ -756,6 +785,9 @@ public class NotificationService {
      * @param note why no messages were built, where none were; null where some were
      * @param failures messages that could not be built or sent, and what went wrong
      * @param messages on a rehearsal, the messages as they would have gone out
+     * @param notMailed messages not built this run because it reached
+     *     {@code cert-alert.notifications.email.max-per-run}; those people are still told
+     *     on the page
      */
     public record DigestResult(
             int certificates,
@@ -765,13 +797,17 @@ public class NotificationService {
             boolean emailEnabled,
             String note,
             List<NotificationMailer.Failure> failures,
-            List<NotificationMailer.Rendered> messages) {
+            List<NotificationMailer.Rendered> messages,
+            int notMailed) {
 
         /** A run with nothing to do, which is still a run of one kind or the other. */
         static DigestResult nothing(boolean dryRun, boolean emailEnabled, String note) {
-            return new DigestResult(0, 0, 0, dryRun, emailEnabled, note, List.of(), List.of());
+            return new DigestResult(0, 0, 0, dryRun, emailEnabled, note, List.of(), List.of(), 0);
         }
     }
+
+    /** One round-up's message to send, and the notification it delivers (none on a rehearsal). */
+    private record Mail(Round round, Long notificationId) {}
 
     private List<NotificationRecipients.Recipient> resolve(OwnerType type, Long ownerId) {
         if (ownerId == null) {
@@ -848,6 +884,23 @@ public class NotificationService {
 
         private Round(NotificationRecipients.Recipient recipient) {
             this.recipient = recipient;
+        }
+
+        /**
+         * How soon this round-up wants sending, lowest first: whatever is next to expire, by
+         * days to go, and only then what has lapsed, most recently first.
+         */
+        private long urgency() {
+            long soonest = Long.MAX_VALUE;
+            long latestLapsed = Long.MAX_VALUE;
+            for (ExpiryDigest.Entry entry : entries) {
+                if (entry.isExpired()) {
+                    latestLapsed = Math.min(latestLapsed, Math.abs(entry.getDays()));
+                } else {
+                    soonest = Math.min(soonest, entry.getDays());
+                }
+            }
+            return soonest != Long.MAX_VALUE ? soonest : Integer.MAX_VALUE + Math.min(latestLapsed, Integer.MAX_VALUE);
         }
 
         private void add(

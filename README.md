@@ -2422,6 +2422,11 @@ A round-up run while the mail server is down says so on the notifications page â
 be sent and are queued to try again", with the reason â€” rather than reporting them as sent.
 An alert is recorded as `alert.sent` once it is safely queued.
 
+**The per-run cap.** A round-up sends at most `cert-alert.notifications.email.max-per-run`
+(500) messages. Where that binds, whatever is next to expire is mailed first and what has
+lapsed longest waits; everybody is still told on the page. The run says how many it held back
+(`notMailed`, and the note on the card), and logs a warning every run the cap binds.
+
 #### A dry run
 
 What a round-up would do, asked without doing it. **Dry run** on the notifications page
