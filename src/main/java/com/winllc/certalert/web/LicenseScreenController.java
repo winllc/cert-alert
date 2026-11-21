@@ -109,7 +109,7 @@ public class LicenseScreenController {
         try {
             LicenseCheck check = licensing.manager().install(license);
             boolean refused = switch (check.state()) {
-                case WRONG_PRODUCT, WRONG_INSTALLATION, SUPERSEDED -> true;
+                case WRONG_PRODUCT, WRONG_INSTALLATION, SUPERSEDED, NOT_IN_EFFECT -> true;
                 default -> false;
             };
             if (refused) {

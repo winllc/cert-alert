@@ -126,7 +126,8 @@ installation's id** (e.g. `CA-7F3K-29QD`, with a copy button): enter it on the p
 bind a license to this installation. Upload a `.lic` file, or paste one, to install it; it
 takes effect at once. A file for another product, bound to another installation, or an
 older revision of a license already seen here is refused with the reason, and the
-installed one stays. `GET /api/v1/license` returns the same as JSON to anyone signed in —
+installed one stays; so is one not yet valid or already expired while the installed license
+is in full effect (upload next term's license on or after its start date). `GET /api/v1/license` returns the same as JSON to anyone signed in —
 the installation id and the file's path to administrators only.
 
 Where the screen is offered:
