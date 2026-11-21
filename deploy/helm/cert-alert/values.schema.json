@@ -1102,6 +1102,13 @@
     "javaOpts": {
       "type": "string"
     },
+    "schedulerThreads": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
     "exports": {
       "type": "object",
       "additionalProperties": false,

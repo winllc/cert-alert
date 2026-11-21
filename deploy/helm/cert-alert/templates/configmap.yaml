@@ -35,6 +35,7 @@ data:
   CERT_ALERT_DB_NAME: {{ $v.database.name | quote }}
   CERT_ALERT_DB_USER: {{ $v.database.username | quote }}
   {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_DB_POOL_SIZE" "value" $v.database.poolSize) }}
+  {{- include "cert-alert.envLine" (dict "name" "CERT_ALERT_SCHEDULER_THREADS" "value" $v.schedulerThreads) }}
   # Directory.
   CERT_ALERT_LDAP_URL: {{ required "ldap.url is required: the directory to read, e.g. ldaps://directory.example.gov:636" $v.ldap.url | quote }}
   CERT_ALERT_LDAP_BASE: {{ required "ldap.base is required: the search base, e.g. dc=example,dc=gov" $v.ldap.base | quote }}

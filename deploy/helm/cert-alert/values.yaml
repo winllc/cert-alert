@@ -612,6 +612,11 @@ logFormat: json
 # -Djavax.net.ssl.* options to whatever is here.
 javaOpts: "-XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError"
 
+# CERT_ALERT_SCHEDULER_THREADS (default 8): the threads the scheduled jobs share (sweeps,
+# refresh, revocation, round-up, cleanups, outboxes). Raising it may need a larger
+# database.poolSize too.
+schedulerThreads: null
+
 # ---------------------------------------------------------------------------------------
 # Inventory exports and scheduled reports (Certificates page)
 # ---------------------------------------------------------------------------------------

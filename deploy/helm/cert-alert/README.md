@@ -187,6 +187,7 @@ The chart refuses to render `x509.source=header` without a proxy secret and a CA
 | `banner.enabled` / `.text` / `.textColor` / `.background` / `.height` | unset | `CERT_ALERT_BANNER_*` |
 | `thresholds.warningDays` / `.criticalDays` | `null` | `CERT_ALERT_WARNING_THRESHOLD_DAYS` / `CERT_ALERT_CRITICAL_THRESHOLD_DAYS` |
 | `javaOpts` | `-XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError` | `JAVA_OPTS` |
+| `schedulerThreads` | `null` (8) | `CERT_ALERT_SCHEDULER_THREADS` |
 
 ### Audit logging (ens-audit/1)
 

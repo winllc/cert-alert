@@ -14,6 +14,7 @@ database:
   password: change-me
   params: sslmode=require
   poolSize: 20
+schedulerThreads: 12
 security:
   adminIdentifiers: [pki-admin, jdoe]
   ldap:
