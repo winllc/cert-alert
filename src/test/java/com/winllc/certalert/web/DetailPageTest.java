@@ -245,6 +245,16 @@ class DetailPageTest {
                 .andExpect(status().isBadRequest());
     }
 
+    /** The whole of a history in one response is not something the table can ask for. */
+    @Test
+    void anEntrysHistoryIsNotReadAllAtOnce() throws Exception {
+        mockMvc.perform(post(AUDIT + "?subjectType=USER&subjectId=" + userId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request().replace("\"length\":10", "\"length\":-1"))
+                        .with(csrf()))
+                .andExpect(status().isBadRequest());
+    }
+
     private String request() {
         return request("");
     }

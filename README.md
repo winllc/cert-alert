@@ -1594,7 +1594,10 @@ DataTables columns rather than dropped, so the global search still reaches them.
 DataTables owns paging, ordering, the global search box and the per-column search inputs in
 the table footer; all of it posts as the request body and the library turns it into a JPA
 query. The filters this application adds ride along as query parameters and become an
-additional `Specification`, so the two never have to know about each other.
+additional `Specification`, so the two never have to know about each other. A page asks for
+at least one row and gets at most `cert-alert.api.max-page-size` (500); "all rows" (`-1`) is
+refused with a 400. A query the library cannot run is a plain 500, logged, rather than a 200
+carrying the exception's text.
 
 Both tables open **soonest to expire first**, which is the order the work is in. An entry
 publishing no certificate has no expiry to sort on, and where a NULL sorts is left
