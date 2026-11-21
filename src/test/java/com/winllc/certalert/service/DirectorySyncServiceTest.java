@@ -62,6 +62,9 @@ class DirectorySyncServiceTest {
     @Autowired
     private ServerContactService contactService;
 
+    @Autowired
+    private com.winllc.certalert.ldap.LdapProperties ldapProperties;
+
     @BeforeAll
     static void startDirectory() {
         directory = new EmbeddedDirectory();
@@ -505,6 +508,43 @@ class DirectorySyncServiceTest {
         assertThat(user.getCertificateStatus()).isEqualTo(CertificateStatus.NONE);
         assertThat(user.getEarliestExpiry()).isNull();
         assertThat(user.getLastSyncedAt()).isNotNull();
+    }
+
+    /** A value longer than its column is cut to fit, rather than failing its whole batch. */
+    @Test
+    void anOverLongAttributeIsCutToFit() {
+        String dn = directory.addUser("wordy", "Wordy Holder", "wordy@example.gov",
+                TestCertificates.expiringIn("wordy", Duration.ofDays(200)));
+        directory.modify(dn, "title", "T".repeat(300));
+
+        DirectorySyncResult result = syncService.syncUsers();
+
+        assertThat(result.errors()).isZero();
+        assertThat(userByDn(dn).getTitle()).hasSize(255);
+    }
+
+    /**
+     * An entry that cannot be written at all - here a DN longer than the column - costs
+     * itself, not the batch it arrived in.
+     */
+    @Test
+    void anEntryThatCannotBeWrittenCostsOnlyItself() {
+        String neighbour = directory.addUser("neighbour", "Neigh Bour", "neighbour@example.gov",
+                TestCertificates.expiringIn("neighbour", Duration.ofDays(200)));
+        String unwritable = directory.addUser("x".repeat(520), "Too Long", "toolong@example.gov");
+        int batchSize = ldapProperties.getBatchSize();
+        // One batch for the whole directory, so the two are certainly in it together.
+        ldapProperties.setBatchSize(1_000);
+        try {
+            DirectorySyncResult result = syncService.syncUsers();
+
+            assertThat(result.errors()).isEqualTo(1);
+            assertThat(userRepository.findByDn(neighbour)).isPresent();
+            assertThat(userRepository.findByDn(unwritable)).isEmpty();
+        } finally {
+            ldapProperties.setBatchSize(batchSize);
+            directory.delete(unwritable);
+        }
     }
 
     /** Runs both sweeps, as the schedule does. */

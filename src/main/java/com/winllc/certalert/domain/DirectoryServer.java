@@ -209,7 +209,11 @@ public class DirectoryServer extends DirectoryEntry {
             this.serverPocs.clear();
             this.serverPocs.addAll(refreshed);
         }
-        this.serverPocDisplay = refreshed.isEmpty() ? null : String.join(", ", refreshed);
+        String display = String.join(", ", refreshed);
+        // A long list still fits its column; the rows themselves hold every contact.
+        this.serverPocDisplay = refreshed.isEmpty()
+                ? null
+                : display.length() <= 2000 ? display : display.substring(0, 1997) + "...";
     }
 
     public String getServerPocDisplay() {
