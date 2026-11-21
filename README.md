@@ -848,6 +848,13 @@ The ENS platform baseline, the same in every ENS product:
   `Secure` cookie follow the browser's request, and the audit trail records the client's
   address rather than the proxy's. Only with a proxy in front that sets those headers itself.
   The Helm chart sets it whenever its ingress or an edge or reencrypt Route terminates TLS.
+  The client's address is the rightmost `X-Forwarded-For` hop that is not a trusted proxy:
+  starting from the connection's own address, the header is followed leftwards only while
+  the address in hand is in `ENS_X509_TRUSTED_PROXIES` (the same list header-mode
+  certificates use; `127.0.0.1/32,::1/128` by default, private ranges in the Helm chart). A
+  connection from anywhere else is the client, whatever it says. Behind the release bundle,
+  where a proxy on the host reaches the container from the Docker network's gateway, set
+  `ENS_X509_TRUSTED_PROXIES` to that network (e.g. `172.16.0.0/12`).
 - **The release bundle** publishes on every interface (`0.0.0.0`) by default
   (`CERT_ALERT_BIND_ADDRESS`, `CERT_ALERT_PORT`). With TLS off on any address but
   `127.0.0.1`, `install.sh` refuses to start it unless `.env` sets
@@ -1029,7 +1036,7 @@ TLS, verifies the client certificate, and forwards it:
 |---|---|---|
 | `ENS_X509_SOURCE` | `servlet` | `servlet` or `header` |
 | `ENS_X509_HEADER` | `X-SSL-Client-Cert` | The header, URL-encoded PEM as nginx's `$ssl_client_escaped_cert` sends it (ingress-nginx: `ssl-client-cert`) |
-| `ENS_X509_TRUSTED_PROXIES` | `127.0.0.1/32,::1/128` | Addresses (CIDRs) the header is accepted from: the proxy's |
+| `ENS_X509_TRUSTED_PROXIES` | `127.0.0.1/32,::1/128` | Addresses (CIDRs) the header is accepted from: the proxy's. Also the proxies whose `X-Forwarded-For` hops are followed to find the client's address |
 | `ENS_X509_PROXY_SECRET_FILE` / `ENS_X509_PROXY_SECRET` | — | At least 32 characters, which the proxy sends in `X-ENS-Proxy-Secret`; compared in constant time. The file wins |
 | `ENS_X509_TRUSTED_CA_FILE` | — | PEM certificates of the CAs a forwarded certificate must chain to |
 
@@ -1102,10 +1109,10 @@ absolute URI) and the assertion consumer are built from it, never from the reque
 `Forwarded` or `X-Forwarded-Host` header a client sets cannot change what address a response
 must be addressed to, and the application refuses to start with a missing or templated one.
 With `SERVER_FORWARD_HEADERS_STRATEGY=framework` (which the chart sets behind an ingress) the
-application believes only `X-Forwarded-Proto`, `-Port` and `-For`; `Forwarded`,
-`X-Forwarded-Host` and `X-Forwarded-Prefix` are ignored. Have the proxy overwrite
-`X-Forwarded-For` and `X-Forwarded-Proto` with its own values rather than append to a
-client's.
+application believes only `X-Forwarded-Proto` and `-Port`, and `X-Forwarded-For` hop by
+hop from trusted proxies (see "Behind a proxy that terminates TLS"); `Forwarded`, `X-Forwarded-Host` and
+`X-Forwarded-Prefix` are ignored. Have the proxy overwrite `X-Forwarded-Proto` with its own
+value rather than pass on a client's.
 
 **What is checked.**
 
@@ -3347,7 +3354,8 @@ the documentation site: [audit-logging.md](https://github.com/winllc/ens-apps-do
 Secrets are never recorded: passwords, tokens, keys, license text, session ids and codes are
 written as `"[redacted]"`. `session` is the first 16 hex characters of the SHA-256 of the
 session id. `source.ip` is the request's remote address; this application does not trust
-`X-Forwarded-For` unless `server.forward-headers-strategy` is set.
+`X-Forwarded-For` unless `server.forward-headers-strategy` is set, and then only the hops
+that trusted proxies (`ENS_X509_TRUSTED_PROXIES`) added.
 
 ### Where it is kept
 
@@ -3807,8 +3815,12 @@ Certificate and password sign-in work as before. Turning single sign-on on needs
 
 With `SERVER_FORWARD_HEADERS_STRATEGY=framework` (the chart's setting behind an ingress or
 an edge route), `Forwarded`, `X-Forwarded-Host` and `X-Forwarded-Prefix` are no longer
-believed; `X-Forwarded-Proto`, `-Port` and `-For` still are. A proxy that publishes CertAlert
+believed; `X-Forwarded-Proto` and `-Port` still are. A proxy that publishes CertAlert
 under a path prefix through `X-Forwarded-Prefix` must rewrite paths itself instead.
+`X-Forwarded-For` is followed from the right only through addresses in
+`ENS_X509_TRUSTED_PROXIES`: where the proxy in front is not in that list (by default only
+loopback), the audit trail and a token's last-used address now record the proxy's address
+until it is added.
 
 ### Administrators are matched by uid or DN only
 
