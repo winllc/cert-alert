@@ -309,7 +309,7 @@ public class AuditDeliveryService implements SmartLifecycle {
                 int delivered = deliverOnce(name);
                 backoff = Duration.ZERO;
                 if (delivered == 0) {
-                    pause(properties.getPollInterval());
+                    pause(properties.getPollInterval(), false);
                 }
             } catch (Exception e) {
                 backoff = backoff.isZero() ? Duration.ofSeconds(1) : backoff.multipliedBy(2);
@@ -317,15 +317,26 @@ public class AuditDeliveryService implements SmartLifecycle {
                     backoff = MAX_BACKOFF;
                 }
                 log.warn("Audit output {} failed ({}); retrying in {}s", name, e.getMessage(), backoff.toSeconds());
-                pause(backoff);
+                pause(backoff, true);
             }
         }
     }
 
-    private void pause(Duration duration) {
+    /**
+     * Waits, or until woken by new events; a backoff is waited out in full whatever arrives
+     * meanwhile, so a failing output is not retried at the rate events are recorded.
+     */
+    void pause(Duration duration, boolean backingOff) {
+        long deadline = System.nanoTime() + Math.max(1, duration.toMillis()) * 1_000_000;
         synchronized (signal) {
             try {
-                signal.wait(Math.max(1, duration.toMillis()));
+                long left;
+                while ((left = (deadline - System.nanoTime()) / 1_000_000) > 0) {
+                    signal.wait(left);
+                    if (!backingOff) {
+                        break;
+                    }
+                }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 running = false;
