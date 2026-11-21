@@ -1210,6 +1210,7 @@ cert-alert:
       enabled: true
       display-name: Sign in with ADFS
       metadata-location: https://adfs.example.gov/FederationMetadata/2007-06/FederationMetadata.xml
+      metadata-refresh: 1h             # read again this often; 0: once, until restart
       entity-id: ""                    # empty: <public-url>/saml2/service-provider-metadata/saml
       signing-key-location: file:/etc/cert-alert/saml/signing.key          # optional
       signing-certificate-location: file:/etc/cert-alert/saml/signing.crt
@@ -1268,7 +1269,10 @@ Every setting has an environment variable (`CERT_ALERT_SSO_OIDC_ISSUER_URI`, ...
    `groups-attribute`, and list the ones that grant a role in `cert-alert.sso.saml.admin-groups`
    / `auditor-groups`.
 3. ADFS signs the assertion with its token-signing certificate, which is in its metadata
-   (`https://<adfs>/FederationMetadata/2007-06/FederationMetadata.xml`). Where ADFS requires
+   (`https://<adfs>/FederationMetadata/2007-06/FederationMetadata.xml`). The metadata is
+   read again every `metadata-refresh` (an hour), and at once - at most every five minutes -
+   when a response's signature does not verify, so a rolled certificate is picked up without
+   a restart; a read that fails keeps the copy that last worked. Where ADFS requires
    signed requests, give `signing-key-location` (PEM, PKCS#8) and `signing-certificate-location`.
 4. For an ADFS this application cannot reach, save the metadata and use
    `metadata-location: file:/path/to/metadata.xml` (Helm: `sso.saml.metadataConfigMap`).
