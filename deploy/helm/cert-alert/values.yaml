@@ -330,7 +330,10 @@ x509:
   # "ssl-client-cert" (URL-encoded PEM).
   header: ""
   # ENS_X509_TRUSTED_PROXIES: the addresses (CIDRs) the header is accepted from - the
-  # ingress controller's pods, so the pod network.
+  # ingress controller's pods, so the pod network. Also, in any source mode, the proxies
+  # whose X-Forwarded-For hops are followed to find the client's address for the audit
+  # trail. Narrow it to the controller's pod network where users' own addresses are
+  # private: a client inside the list is passed over for a hop it can write itself.
   trustedProxies: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
   # The shared secret the proxy sends in X-ENS-Proxy-Secret (ENS_X509_PROXY_SECRET_FILE):
   # at least 32 characters, e.g. openssl rand -hex 32. A Secret of your own, or the value

@@ -147,7 +147,7 @@ The license screen shows the installation id; after the first sign-in it is also
 | `caTruststore.password` | `""` | | Or `passwordExistingSecret` + `passwordExistingSecretKey` (`ca-truststore-password`) |
 | `x509.source` | `servlet` | `ENS_X509_SOURCE` | `servlet`: from the pod's TLS handshake. `header`: forwarded by a TLS-terminating ingress |
 | `x509.header` | `""` (`X-SSL-Client-Cert`) | `ENS_X509_HEADER` | ingress-nginx sends `ssl-client-cert` |
-| `x509.trustedProxies` | private ranges | `ENS_X509_TRUSTED_PROXIES` | Where the header is accepted from: the ingress controller's pods |
+| `x509.trustedProxies` | private ranges | `ENS_X509_TRUSTED_PROXIES` | Where the header is accepted from: the ingress controller's pods. In any source mode, also the proxies whose `X-Forwarded-For` hops are followed for the client's address in the audit trail; narrow it to the controller's pod network when clients have private addresses too |
 | `x509.proxySecret.existingSecret` / `.existingSecretKey` / `.value` | `""` / `proxy-secret` / `""` | `ENS_X509_PROXY_SECRET_FILE` | The secret the proxy sends in `X-ENS-Proxy-Secret`, 32+ characters. Required in header mode |
 | `x509.trustedCa.existingSecret` / `.existingSecretKey` / `.value` | `""` / `ca.pem` / `""` | `ENS_X509_TRUSTED_CA_FILE` | PEM CAs a forwarded certificate must chain to. Required in header mode |
 | `x509.revocation` | `""` (`ocsp-then-crl`) | `ENS_X509_REVOCATION` | `off`, `ocsp`, `crl`, `ocsp-then-crl`: checked live at sign-in. Empty: `ocsp-then-crl`, soft-fail |

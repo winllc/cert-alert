@@ -95,7 +95,9 @@ start it on any address but `127.0.0.1` unless `.env` says `CERT_ALERT_ALLOW_PLA
 - **Put a reverse proxy on this host in front** (nginx, Apache) that terminates TLS and
   forwards to `http://127.0.0.1:8080`. Restrict cert-alert to this host with
   `CERT_ALERT_BIND_ADDRESS=127.0.0.1`, and set `SERVER_FORWARD_HEADERS_STRATEGY=framework`
-  and `ENS_COOKIE_SECURE=true`.
+  and `ENS_COOKIE_SECURE=true`. The proxy reaches the container from the Docker network's
+  gateway: set `ENS_X509_TRUSTED_PROXIES` to that network (e.g. `172.16.0.0/12`) as well, or
+  the audit trail records the proxy's address instead of the client's.
 - **Run the proxy as a container on the compose network** (`cert-alert_default`), forwarding
   to `http://cert-alert:8080`, and publish nothing on the host:
   `cp docker-compose.no-ports.yml docker-compose.override.yml`, then `./install.sh`. Both
