@@ -925,7 +925,9 @@ session that has not pressed **I agree** is sent to `/consent` — before any si
 runs, so no sign-in of any kind succeeds first: not the form, not a client certificate. An
 API call (`/api/**`) gets a 401 instead. The agreement is kept in the session, so signing out
 shows the banner again before the next sign-in. It is audited as `auth.consent-acknowledged`
-(category `authentication`, success, with the client's address).
+(category `authentication`, success, with the client's address) - once per session, and at
+most 10 times a minute from one client address; beyond that the agreement is refused (429),
+so the open form cannot be used to fill the audit trail.
 
 Exempt, because they are not browser sessions or are what the banner is made of: `/consent`
 itself, `/css/**`, `/js/**`, `/img/**`, `/webjars/**`, `/favicon.ico`, `/error`, the health

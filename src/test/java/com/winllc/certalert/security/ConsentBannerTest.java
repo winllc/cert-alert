@@ -152,6 +152,41 @@ class ConsentBannerTest {
                 .andExpect(authenticated().withUsername("carol@example.gov"));
     }
 
+    /**
+     * The form is open to anybody, so it is no way to fill the audit trail: a session that has
+     * agreed is not recorded again, and one address is held to a few agreements a minute.
+     */
+    @Test
+    void agreeingAgainOrOverAndOverIsNotRecordedEveryTime() throws Exception {
+        long head = auditStore.headSeq();
+        MockHttpSession session = new MockHttpSession();
+        for (int i = 0; i < 5; i++) {
+            mockMvc.perform(post("/consent").session(session).with(csrf()).with(from("10.9.8.6")))
+                    .andExpect(redirectedUrl("/"));
+        }
+        assertThat(acknowledgments(head)).hasSize(1);
+
+        for (int i = 1; i < com.winllc.certalert.web.ConsentController.PER_ADDRESS; i++) {
+            mockMvc.perform(post("/consent").with(csrf()).with(from("10.9.8.5"))).andExpect(redirectedUrl("/"));
+        }
+        mockMvc.perform(post("/consent").with(csrf()).with(from("10.9.8.5"))).andExpect(redirectedUrl("/"));
+        mockMvc.perform(post("/consent").with(csrf()).with(from("10.9.8.5"))).andExpect(status().isTooManyRequests());
+        assertThat(acknowledgments(head)).hasSize(1 + com.winllc.certalert.web.ConsentController.PER_ADDRESS);
+    }
+
+    private List<StoredEvent> acknowledgments(long head) {
+        return auditStore.after(head, 1000).stream()
+                .filter(event -> "auth.consent-acknowledged".equals(event.action()))
+                .toList();
+    }
+
+    private static org.springframework.test.web.servlet.request.RequestPostProcessor from(String address) {
+        return request -> {
+            request.setRemoteAddr(address);
+            return request;
+        };
+    }
+
     @Test
     void agreeingNeedsTheFormsToken() throws Exception {
         mockMvc.perform(post("/consent")).andExpect(status().isForbidden());
