@@ -12,6 +12,7 @@ import java.time.Instant;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
+import javax.security.auth.x500.X500Principal;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -168,15 +169,27 @@ public class RevocationChecker {
         if (serial == null) {
             return Outcome.unknown("The cached serial number could not be read");
         }
-        Optional<CrlStore.Fetched> fetched =
-                crls.fetch(urls, issuers.issuerOf(certificate).orElse(null));
+        X509Certificate issuer = issuers.issuerOf(certificate).orElse(null);
+        Optional<CrlStore.Fetched> fetched = crls.fetch(urls, issuer);
         if (fetched.isEmpty()) {
             return Outcome.unknown("No distribution point answered: " + String.join(", ", urls));
         }
         CrlStore.Fetched crl = fetched.get();
-        if (!crl.verified() && !properties.isAllowUnverifiedCrl()) {
-            return Outcome.unknown(
-                    "The CRL from " + crl.url() + " could not be verified against a known issuer");
+        if (!crl.verified()) {
+            if (issuer != null) {
+                // The issuer's certificate is known and its key did not sign this: some other
+                // list, whatever the setting for deployments with no issuer certificates says.
+                return Outcome.unknown("The CRL from " + crl.url() + " is not signed by the certificate's issuer");
+            }
+            if (!properties.isAllowUnverifiedCrl()) {
+                return Outcome.unknown(
+                        "The CRL from " + crl.url() + " could not be verified against a known issuer");
+            }
+            if (!issuedBy(crl.crl(), certificate)) {
+                // Without a signature to go on, at least the list has to be its issuer's by name.
+                return Outcome.unknown("The CRL from " + crl.url() + " is issued by "
+                        + crl.crl().getIssuerX500Principal().getName() + ", not by the certificate's issuer");
+            }
         }
         String where = "CRL from " + crl.url()
                 + (certificate.getCrlUrls().isEmpty() ? " (configured default)" : "")
@@ -184,6 +197,12 @@ public class RevocationChecker {
 
         X509CRLEntry entry = crl.crl().getRevokedCertificate(serial);
         if (entry == null) {
+            // Not listed by a list that has been superseded is not an answer: the revocation
+            // it was replaced to announce may be this one.
+            if (crl.crl().getNextUpdate() != null && now.isAfter(crl.crl().getNextUpdate().toInstant())) {
+                return Outcome.unknown(where + " is out of date: its next update was due "
+                        + crl.crl().getNextUpdate().toInstant());
+            }
             return Outcome.good(RevocationMethod.CRL, where);
         }
         return Outcome.revoked(
@@ -191,6 +210,18 @@ public class RevocationChecker {
                 entry.getRevocationDate() == null ? null : entry.getRevocationDate().toInstant(),
                 entry.getRevocationReason() == null ? null : entry.getRevocationReason().name(),
                 where);
+    }
+
+    /** Compared as names, not as strings: spacing, case and attribute spelling do not matter. */
+    private static boolean issuedBy(X509CRL crl, CachedCertificate certificate) {
+        if (certificate.getIssuerDn() == null) {
+            return false;
+        }
+        try {
+            return crl.getIssuerX500Principal().equals(new X500Principal(certificate.getIssuerDn()));
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
     }
 
     /** Stored as hexadecimal, which is how a serial is read out and quoted. */
@@ -250,7 +281,8 @@ public class RevocationChecker {
      * bargain as the default responder, and the cheaper one to take: a list is one download
      * that answers for every certificate the authority issued, where a responder is one
      * request each. A list that turns out to be some other authority's fails its signature
-     * check and counts as no answer, so a wrong guess here cannot read as a good one.
+     * check - or, with no issuer certificate to check it against, names some other issuer -
+     * and counts as no answer, so a wrong guess here cannot read as a good one.
      */
     static List<String> distributionPointsFor(CachedCertificate certificate, String configuredDefault) {
         List<String> named = certificate.getCrlUrls();

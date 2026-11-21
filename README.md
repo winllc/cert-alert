@@ -1992,7 +1992,10 @@ CRL is signed by its issuer, so telling the authority's own list from whatever a
 URL needs the issuer's certificate; and OCSP names a certificate by hashes of its issuer's
 name and key, which only the issuer's certificate carries. With none configured, CRLs are
 still used and every result says `(signature not verified)` — set `allow-unverified-crl:
-false` to have those count as *Unknown* instead.
+false` to have those count as *Unknown* instead. Such a list must at least name the
+certificate's issuer as its own; one that names another authority is *Unknown*. Where the issuer
+certificate is configured and the list's signature does not verify against it, the result is
+*Unknown* whatever `allow-unverified-crl` says.
 
 A certificate that turns out to be revoked is recorded against its entry in the audit trail
 and its contacts are told, once — not nightly for as long as it stays revoked. Where to ask
@@ -2030,7 +2033,7 @@ distribution point too, and of the two fallbacks the list is much the cheaper: o
 answering for every certificate the authority issued, against one request per certificate
 plus a directory read per entry. It is also the one that cannot be got dangerously wrong — a
 list signed by some other authority fails its signature check against the issuer
-certificates and counts as *Unknown*.
+certificates (or, with none configured, names a different issuer) and counts as *Unknown*.
 
 Where a certificate names neither and neither is configured, the result says so. Where one
 *is* configured and the check still could not run — no issuer certificate to name the
