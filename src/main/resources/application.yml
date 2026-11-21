@@ -216,7 +216,9 @@ cert-alert:
     paged: true
     # Entries written per transaction.
     batch-size: 200
-    # Zero means no client-side cap; the directory's own limits still apply per page.
+    # Zero means no client-side cap. A directory size limit that cuts a search short then
+    # fails the sweep (some servers count it across all pages, not per page); above zero,
+    # stopping at the limit is expected and not an error.
     count-limit: 0
     search-timeout: 10m
 

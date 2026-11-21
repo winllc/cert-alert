@@ -3294,7 +3294,7 @@ DirectoryPersistenceService one transaction per batch of entries
 
 | Concern | How it is handled |
 |---------|-------------------|
-| Directory size limits | Paged searches (`page-size`, default 500). An unpaged search silently stops at the server's limit, which here would mean quietly forgetting certificates. |
+| Directory size limits | Paged searches (`page-size`, default 500). An unpaged search silently stops at the server's limit, which here would mean quietly forgetting certificates; a search the server still cuts short (some count the limit across all pages) fails the sweep rather than ending early. |
 | Memory | Entries are streamed to a consumer a page at a time and never collected. Materialising a six-figure result set, each entry carrying certificates, would cost hundreds of megabytes before a row reached the database. |
 | Round trips | Entries are written in batches (`batch-size`, default 200): one query to load what is already held, one flush. Per entry it would be two round trips each. |
 | Insert batching | Ids come from sequences, not identity columns — Hibernate cannot batch inserts behind an identity column, since it has to round trip for each generated key. |
@@ -3437,7 +3437,7 @@ Scraping, under `cert-alert.ldap`:
 | `page-size`          | `500`   | Entries per LDAP page                           |
 | `paged`              | `true`  | Turn off only for servers without the control   |
 | `batch-size`         | `200`   | Entries written per transaction                 |
-| `count-limit`        | `0`     | Client-side cap on entries; 0 means none        |
+| `count-limit`        | `0`     | Client-side cap on entries; 0 means none. With 0, a search the directory cuts short at its size limit fails the sweep instead of ending early |
 | `search-timeout`     | `10m`   | Per-search time limit                           |
 | `binary-certificate-option` | `true` | Ask for `userCertificate;binary`. Off for a directory with no such attribute to return |
 | `server.require-email-poc` | `true` | A `serverPOC` value must be an email address; off for a directory holding names. Comma-separated values are split either way |

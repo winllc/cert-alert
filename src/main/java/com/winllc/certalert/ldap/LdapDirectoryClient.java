@@ -3,6 +3,7 @@ package com.winllc.certalert.ldap;
 import java.util.List;
 import java.util.function.Consumer;
 import javax.naming.NamingException;
+import javax.naming.directory.DirContext;
 import javax.naming.directory.SearchControls;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,6 +26,12 @@ import org.springframework.stereotype.Component;
  * <p>Searches are paged for the same reason they are streamed: every directory enforces an
  * administrative size limit, and an unpaged search silently stops there, which here would
  * mean quietly forgetting certificates.
+ *
+ * <p>A search the directory cuts short at its size limit fails, rather than ending as if it
+ * had read everything: some servers count that limit across all the pages of a search, not
+ * per page, and a sweep that believed a truncated result would stop alerting on everybody
+ * past the limit. Only where {@code count-limit} asks for fewer entries on purpose is the
+ * limit an expected end.
  */
 @Component
 public class LdapDirectoryClient {
@@ -94,7 +101,7 @@ public class LdapDirectoryClient {
 
         int count = properties.isPaged()
                 ? searchPaged(base, filter, controls, contextMapper)
-                : new LdapTemplate(contextSource).search(base, filter, controls, contextMapper).size();
+                : template(contextSource).search(base, filter, controls, contextMapper).size();
         log.debug("Directory search base='{}' filter='{}' returned {} entries", base, filter, count);
         return count;
     }
@@ -105,7 +112,12 @@ public class LdapDirectoryClient {
      * which is what {@code SingleContextSource} guarantees.
      */
     private int searchPaged(String base, String filter, SearchControls controls, ContextMapper<Void> mapper) {
-        return SingleContextSource.doWithSingleContext(contextSource, operations -> {
+        // What SingleContextSource.doWithSingleContext does, but on a template that reports a
+        // size limit rather than ignoring it.
+        DirContext context = contextSource.getReadWriteContext();
+        SingleContextSource single = new SingleContextSource(context);
+        try {
+            LdapTemplate operations = template(single);
             PagedResultsDirContextProcessor processor = new PagedResultsDirContextProcessor(properties.getPageSize());
             int total = 0;
             int page = 0;
@@ -118,7 +130,19 @@ public class LdapDirectoryClient {
                 }
             } while (processor.hasMore());
             return total;
-        });
+        } finally {
+            single.destroy();
+        }
+    }
+
+    /**
+     * A template that throws {@code SizeLimitExceededException} where the directory stopped
+     * early - unless {@code count-limit} set that limit, when stopping there is the point.
+     */
+    private LdapTemplate template(ContextSource source) {
+        LdapTemplate template = new LdapTemplate(source);
+        template.setIgnoreSizeLimitExceededException(properties.getCountLimit() > 0);
+        return template;
     }
 
     /** Maps one entry, allowed to fail the way JNDI does. */
