@@ -26,6 +26,11 @@ import org.springframework.stereotype.Component;
  * expiry is a few minutes beyond its idle limit (see {@link SessionPolicy}), so one that
  * comes back is refused and recorded on that request instead; these are the ones that never
  * came back. A session that a sign-out or the policy ended is not recorded again.
+ *
+ * <p>A session nobody signed in to - one a visit to the sign-in page made for its CSRF token,
+ * or a saved request - has nothing to record, and those are cleared in bulk, a few thousand
+ * rows to a statement. The signed-in ones are read a batch at a time. Either way a pass keeps
+ * going while there is more, for up to {@link #BUDGET}, so arrivals cannot outpace it.
  */
 @Component
 @EnableScheduling
@@ -34,8 +39,14 @@ public class SessionSweeper implements BeanClassLoaderAware {
 
     private static final Logger log = LoggerFactory.getLogger(SessionSweeper.class);
 
-    /** Sessions looked at per pass; the next pass takes the rest. */
+    /** Signed-in sessions looked at per batch. */
     private static final int BATCH = 500;
+
+    /** Sessions nobody signed in to, deleted per statement. */
+    private static final int BULK = 5_000;
+
+    /** How long one pass may keep going while there is more to clear; the next takes the rest. */
+    static final java.time.Duration BUDGET = java.time.Duration.ofSeconds(30);
 
     private final JdbcTemplate jdbc;
     private final JobLocks locks;
@@ -69,8 +80,29 @@ public class SessionSweeper implements BeanClassLoaderAware {
     /** @return how many expired sessions were cleared */
     public int sweepOnce() {
         long now = clock.millis();
-        List<Map<String, Object>> expired = jdbc.queryForList(
-                "SELECT PRIMARY_ID, SESSION_ID FROM SPRING_SESSION WHERE EXPIRY_TIME < ? ORDER BY EXPIRY_TIME", now);
+        long deadline = System.nanoTime() + BUDGET.toNanos();
+        int cleared = 0;
+        int deleted;
+        do {
+            deleted = jdbc.update(
+                    "DELETE FROM SPRING_SESSION WHERE PRIMARY_ID IN (SELECT s.PRIMARY_ID FROM SPRING_SESSION s "
+                            + "WHERE s.EXPIRY_TIME < ? AND NOT EXISTS (SELECT 1 FROM SPRING_SESSION_ATTRIBUTES a "
+                            + "WHERE a.SESSION_PRIMARY_ID = s.PRIMARY_ID AND a.ATTRIBUTE_NAME = ?) LIMIT " + BULK + ")",
+                    now, SessionPolicy.SIGNED_IN_AT);
+            cleared += deleted;
+        } while (deleted == BULK && System.nanoTime() < deadline);
+        int looked;
+        do {
+            List<Map<String, Object>> expired = jdbc.queryForList(
+                    "SELECT PRIMARY_ID, SESSION_ID FROM SPRING_SESSION WHERE EXPIRY_TIME < ? ORDER BY EXPIRY_TIME", now);
+            looked = expired.size();
+            cleared += clear(expired, now);
+        } while (looked == BATCH && System.nanoTime() < deadline);
+        return cleared;
+    }
+
+    /** Clears these expired sessions one by one, recording the signed-in ones. */
+    private int clear(List<Map<String, Object>> expired, long now) {
         int cleared = 0;
         for (Map<String, Object> row : expired) {
             String primaryId = String.valueOf(row.get("PRIMARY_ID")).trim();

@@ -215,6 +215,32 @@ class StoredSessionsTest {
     }
 
     /**
+     * Sessions nobody signed in to - a visit to the sign-in page makes one - are cleared in
+     * bulk, and a pass keeps going while there are more: more than one batch's worth of them
+     * goes in one sweep, so a steady stream of them cannot outpace it.
+     */
+    @Test
+    void manySessionsNobodySignedInToAreClearedInOneSweep() throws Exception {
+        Browser browser = signIn(replica());
+        long head = auditStore.headSeq();
+        long expired = Instant.now().minus(Duration.ofMinutes(1)).toEpochMilli();
+        jdbc.update("UPDATE SPRING_SESSION SET EXPIRY_TIME = ? WHERE SESSION_ID = ?", expired, browser.sessionId());
+        List<Object[]> rows = new java.util.ArrayList<>();
+        for (int i = 0; i < 1_200; i++) {
+            String id = java.util.UUID.randomUUID().toString();
+            rows.add(new Object[] {id, java.util.UUID.randomUUID().toString(), expired, expired, 900, expired});
+        }
+        jdbc.batchUpdate("INSERT INTO SPRING_SESSION (PRIMARY_ID, SESSION_ID, CREATION_TIME, LAST_ACCESS_TIME, "
+                + "MAX_INACTIVE_INTERVAL, EXPIRY_TIME) VALUES (?, ?, ?, ?, ?, ?)", rows);
+
+        assertThat(sweeper.sweepOnce()).isEqualTo(1_201);
+
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM SPRING_SESSION", Integer.class)).isZero();
+        assertThat(expiries(head)).singleElement().satisfies(line -> assertThat(line)
+                .contains("\"reason\":\"idle\""));
+    }
+
+    /**
      * An API token is shown once, in the response that created it, and kept nowhere else:
      * not in the stored session (every attribute read back through the JDBC repository and
      * its allow-list, and serialised again), not in a cookie. A request with the token gets
