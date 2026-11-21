@@ -28,8 +28,9 @@ import org.springframework.security.authentication.event.AuthenticationSuccessEv
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * The public API's bearer tokens: {@code cat_} and 32 random bytes, base64url.
@@ -46,7 +47,14 @@ import org.springframework.transaction.annotation.Transactional;
  * whose entry is gone, disabled or locked, or a directory that cannot be read, refuses the
  * token; otherwise it does no more than the roles the directory gives the creator today, and
  * no more than they held when they made it. Their next sign-in narrows it further, never
- * widens it. A token lives at most {@code cert-alert.api.max-lifetime} (365 days by default).
+ * widens it - to what the live directory gives them then, not to the sign-in's roles, which
+ * a directory that could not be read for groups at that moment would have left short. A token
+ * lives at most {@code cert-alert.api.max-lifetime} (365 days by default).
+ *
+ * <p><b>No database connection held on the directory.</b> A token is looked up, and its use
+ * recorded, in short transactions of their own; the creator's entry is read between them, in
+ * none, after the token's rate limit - so a directory that is slow or down holds up only the
+ * requests that need it, not the connection pool everybody else needs.
  *
  * <p><b>Audited.</b> Creating and revoking one, a refusal of a real token (revoked, expired,
  * its creator's role gone), each request that changes something, and its reads summarised to
@@ -71,6 +79,8 @@ public class ApiTokens {
     private final AuditLog audit;
     private final DirectoryStanding standing;
     private final ApiProperties properties;
+    private final ApiRateLimiter limiter;
+    private final TransactionTemplate transactions;
     private final Clock clock;
 
     private final Map<Long, Instant> usesAudited = new ConcurrentHashMap<>();
@@ -83,11 +93,15 @@ public class ApiTokens {
             AuditLog audit,
             DirectoryStanding standing,
             ApiProperties properties,
+            ApiRateLimiter limiter,
+            PlatformTransactionManager transactionManager,
             Clock clock) {
         this.tokens = tokens;
         this.audit = audit;
         this.standing = standing;
         this.properties = properties;
+        this.limiter = limiter;
+        this.transactions = new TransactionTemplate(transactionManager);
         this.clock = clock;
     }
 
@@ -96,14 +110,20 @@ public class ApiTokens {
 
     /** Why a token was refused, for the response and the audit trail. */
     public enum Refusal {
-        UNKNOWN, REVOKED, EXPIRED, CREATOR_ROLE_GONE, CREATOR_GONE, CREATOR_DISABLED, DIRECTORY_UNAVAILABLE, DISABLED
+        UNKNOWN, REVOKED, EXPIRED, CREATOR_ROLE_GONE, CREATOR_GONE, CREATOR_DISABLED, DIRECTORY_UNAVAILABLE, DISABLED,
+        /** Over its rate: {@link Outcome#retryAfter()} says for how many seconds. */
+        RATE_LIMITED
     }
 
-    /** What a bearer value turned out to be. */
-    public record Outcome(ApiTokenAuthentication authentication, Refusal refusal) {
+    /**
+     * What a bearer value turned out to be.
+     *
+     * @param retryAfter seconds until a token over its rate may be used again; 0 otherwise
+     */
+    public record Outcome(ApiTokenAuthentication authentication, Refusal refusal, long retryAfter) {
 
         static Outcome refused(Refusal refusal) {
-            return new Outcome(null, refusal);
+            return new Outcome(null, refusal, 0);
         }
 
         public boolean accepted() {
@@ -212,11 +232,10 @@ public class ApiTokens {
 
     /**
      * What this bearer value is: a live token, with the scopes its creator's roles still
-     * allow, or the reason it is not one.
+     * allow, or the reason it is not one. Not in a transaction: see the class comment.
      *
      * @param from the client's address, recorded as where the token was last used from
      */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Outcome authenticate(String bearer, String from) {
         if (!properties.isTokensEnabled()) {
             return Outcome.refused(Refusal.DISABLED);
@@ -236,6 +255,11 @@ public class ApiTokens {
         Duration max = maxLifetime();
         if (token.isExpired(now) || (max != null && !now.isBefore(token.getCreatedAt().plus(max)))) {
             return refuse(token, Refusal.EXPIRED, now, null);
+        }
+        // Before the directory is asked anything: a client over its rate costs it nothing.
+        long wait = limiter.acquire(token.getId());
+        if (wait > 0) {
+            return new Outcome(null, Refusal.RATE_LIMITED, wait);
         }
         // Where the creator stands now, in the live directory: gone, disabled or locked, or
         // unreadable, and the token does nothing.
@@ -266,9 +290,10 @@ public class ApiTokens {
             return refuse(token, Refusal.CREATOR_ROLE_GONE, now, "the creator no longer holds a role its scopes need");
         }
         if (token.getLastUsedAt() == null || token.getLastUsedAt().plus(LAST_USED_RESOLUTION).isBefore(now)) {
-            token.used(now, from == null || from.length() > 64 ? null : from);
+            tokens.markUsed(token.getId(), now, from == null || from.length() > 64 ? null : from);
         }
-        return new Outcome(new ApiTokenAuthentication(token.getId(), token.getName(), token.getCreatedBy(), effective), null);
+        return new Outcome(
+                new ApiTokenAuthentication(token.getId(), token.getName(), token.getCreatedBy(), effective), null, 0);
     }
 
     /**
@@ -291,11 +316,13 @@ public class ApiTokens {
                 .detail("scopes", ApiScope.format(token.scopes())));
     }
 
-    /** A request that changes something, recorded as it happens. */
+    /** A request that changes something, recorded as it happens; a 401 or 403 as denied. */
     public void recordWrite(ApiTokenAuthentication token, String method, String path, int status) {
         audit.recordQuietly(AuditRecord.of(AuditRecord.Category.DATA, "api.request")
                 .actor(AuditContext.actorOf(token))
-                .outcome(status < 400 ? AuditRecord.Outcome.SUCCESS : AuditRecord.Outcome.FAILURE)
+                .outcome(status < 400
+                        ? AuditRecord.Outcome.SUCCESS
+                        : status == 401 || status == 403 ? AuditRecord.Outcome.DENIED : AuditRecord.Outcome.FAILURE)
                 .target("api-token", String.valueOf(token.tokenId()), token.tokenName())
                 .detail("method", method)
                 .detail("path", path)
@@ -303,11 +330,12 @@ public class ApiTokens {
     }
 
     /**
-     * Narrows the ceiling of every live token this person created to the roles they hold
-     * now. Never widens one: a token keeps no more than its creator had when it was made.
+     * Narrows the ceiling of every live token this person created to the roles the live
+     * directory gives its creator now. Never widens one: a token keeps no more than its
+     * creator had when it was made. Where the directory cannot say - an outage, an entry gone
+     * or disabled (which refuses the token on use anyway) - nothing is narrowed.
      */
     @EventListener
-    @Transactional
     public void creatorSignedIn(AuthenticationSuccessEvent event) {
         Authentication authentication = event.getAuthentication();
         if (authentication == null || authentication instanceof ApiTokenAuthentication) {
@@ -325,8 +353,8 @@ public class ApiTokens {
         Set<ApiScope.Role> roles = rolesOf(authentication);
         String who = AuditContext.actorOf(authentication).id();
         String dn = authentication.getPrincipal() instanceof DirectoryPrincipal principal ? principal.getDirectoryDn() : null;
-        // A certificate signs somebody in on every request; the same answer twice in five
-        // minutes is not worth reading the table again for.
+        // A certificate signs somebody in on every request; the same sign-in twice in five
+        // minutes is not worth reading the table, and the directory, again for.
         String key = (dn == null ? "" : dn.toLowerCase(Locale.ROOT)) + "|" + who + "|" + ApiScope.Role.format(roles);
         Instant now = Instant.now(clock);
         Instant seen = signInsSeen.get(key);
@@ -343,14 +371,38 @@ public class ApiTokens {
                     .filter(token -> theirs.stream().noneMatch(t -> t.getId().equals(token.getId())))
                     .forEach(theirs::add);
         }
-        for (ApiToken token : theirs) {
-            Set<ApiScope.Role> before = token.getCreatorRoles();
-            token.narrowCreatorRoles(roles);
-            if (!before.equals(token.getCreatorRoles())) {
-                log.info("API token {} now allows no more than its creator's roles: {}",
-                        token.getId(), ApiScope.Role.format(token.getCreatorRoles()));
-            }
+        if (theirs.isEmpty()) {
+            return;
         }
+        // Each token by its own creator's entry, read live and outside any transaction; only
+        // an entry the directory answers for as active narrows anything.
+        Map<String, Set<ApiScope.Role>> rolesByDn = new java.util.HashMap<>();
+        for (ApiToken token : theirs) {
+            String creatorDn = token.getCreatorDn();
+            if (creatorDn == null || rolesByDn.containsKey(creatorDn.toLowerCase(Locale.ROOT))) {
+                continue;
+            }
+            DirectoryStanding.Standing creator = standing.of(creatorDn, properties.getCreatorRolesCacheFor());
+            rolesByDn.put(creatorDn.toLowerCase(Locale.ROOT), creator.active() ? rolesFrom(creator.roles()) : null);
+        }
+        transactions.executeWithoutResult(status -> {
+            for (ApiToken listed : theirs) {
+                Set<ApiScope.Role> directoryRoles = listed.getCreatorDn() == null
+                        ? null
+                        : rolesByDn.get(listed.getCreatorDn().toLowerCase(Locale.ROOT));
+                if (directoryRoles == null) {
+                    continue;
+                }
+                tokens.findById(listed.getId()).ifPresent(token -> {
+                    Set<ApiScope.Role> before = token.getCreatorRoles();
+                    token.narrowCreatorRoles(directoryRoles);
+                    if (!before.equals(token.getCreatorRoles())) {
+                        log.info("API token {} now allows no more than its creator's roles: {}",
+                                token.getId(), ApiScope.Role.format(token.getCreatorRoles()));
+                    }
+                });
+            }
+        });
     }
 
     /** The maximum lifetime, where one applies: zero or negative means none. */

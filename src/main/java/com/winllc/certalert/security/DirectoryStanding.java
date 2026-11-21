@@ -33,8 +33,10 @@ import org.springframework.stereotype.Component;
  * can never outlive its creator's removal from a provider group.
  *
  * <p>Only an {@link State#ACTIVE} answer is remembered, and only for {@code cacheFor}; a
- * refusal, and a directory that cannot be read, are read again every time - and a directory
- * that cannot be read refuses.
+ * refusal is read again every time. A directory that cannot be read refuses, and that answer
+ * is remembered for a few seconds ({@link #UNREACHABLE_REMEMBERED}), so an outage does not
+ * make every request wait on the directory's timeouts. Only one read of an entry is under way
+ * at a time; anybody else asking meanwhile gets its answer.
  *
  * <p>Disabled or locked. A lock fails closed: it is taken as lapsed only where a known,
  * non-zero lockout length shows that it has, and anything that cannot be read or parsed
@@ -68,6 +70,9 @@ public class DirectoryStanding {
     private static final Logger log = LoggerFactory.getLogger(DirectoryStanding.class);
 
     private static final int MAX_REMEMBERED = 10_000;
+
+    /** How long a directory that could not be read is taken to be still unreadable. */
+    static final Duration UNREACHABLE_REMEMBERED = Duration.ofSeconds(10);
 
     /** Active Directory's ACCOUNTDISABLE bit in userAccountControl. */
     private static final int ACCOUNTDISABLE = 0x2;
@@ -141,6 +146,7 @@ public class DirectoryStanding {
     private final com.winllc.certalert.ldap.LdapProperties ldap;
     private final Clock clock;
     private final Map<String, Remembered> remembered = new ConcurrentHashMap<>();
+    private final Map<String, java.util.concurrent.CompletableFuture<Standing>> reading = new ConcurrentHashMap<>();
 
     public DirectoryStanding(
             BaseLdapPathContextSource contextSource,
@@ -169,14 +175,34 @@ public class DirectoryStanding {
             return held.standing();
         }
         remembered.remove(key);
-        Standing standing = read(dn);
-        if (standing.active() && cacheFor != null && !cacheFor.isZero() && !cacheFor.isNegative()) {
-            if (remembered.size() > MAX_REMEMBERED) {
-                remembered.clear();
-            }
-            remembered.put(key, new Remembered(standing, now.plus(cacheFor)));
+        java.util.concurrent.CompletableFuture<Standing> mine = new java.util.concurrent.CompletableFuture<>();
+        java.util.concurrent.CompletableFuture<Standing> theirs = reading.putIfAbsent(key, mine);
+        if (theirs != null) {
+            // Somebody is reading this entry already: their answer is as fresh as a new one.
+            return theirs.join();
         }
-        return standing;
+        try {
+            Standing standing = read(dn);
+            Instant until = null;
+            if (standing.active() && cacheFor != null && !cacheFor.isZero() && !cacheFor.isNegative()) {
+                until = now.plus(cacheFor);
+            } else if (standing.state() == State.UNREACHABLE) {
+                until = Instant.now(clock).plus(UNREACHABLE_REMEMBERED);
+            }
+            if (until != null) {
+                if (remembered.size() > MAX_REMEMBERED) {
+                    remembered.clear();
+                }
+                remembered.put(key, new Remembered(standing, until));
+            }
+            mine.complete(standing);
+            return standing;
+        } catch (RuntimeException | Error e) {
+            mine.completeExceptionally(e);
+            throw e;
+        } finally {
+            reading.remove(key, mine);
+        }
     }
 
     /** Forgets every remembered answer. */

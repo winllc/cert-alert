@@ -848,6 +848,13 @@ The ENS platform baseline, the same in every ENS product:
   `Secure` cookie follow the browser's request, and the audit trail records the client's
   address rather than the proxy's. Only with a proxy in front that sets those headers itself.
   The Helm chart sets it whenever its ingress or an edge or reencrypt Route terminates TLS.
+  The client's address is the rightmost `X-Forwarded-For` hop that is not a trusted proxy:
+  starting from the connection's own address, the header is followed leftwards only while
+  the address in hand is in `ENS_X509_TRUSTED_PROXIES` (the same list header-mode
+  certificates use; `127.0.0.1/32,::1/128` by default, private ranges in the Helm chart). A
+  connection from anywhere else is the client, whatever it says. Behind the release bundle,
+  where a proxy on the host reaches the container from the Docker network's gateway, set
+  `ENS_X509_TRUSTED_PROXIES` to that network (e.g. `172.16.0.0/12`).
 - **The release bundle** publishes on every interface (`0.0.0.0`) by default
   (`CERT_ALERT_BIND_ADDRESS`, `CERT_ALERT_PORT`). With TLS off on any address but
   `127.0.0.1`, `install.sh` refuses to start it unless `.env` sets
@@ -918,7 +925,9 @@ session that has not pressed **I agree** is sent to `/consent` — before any si
 runs, so no sign-in of any kind succeeds first: not the form, not a client certificate. An
 API call (`/api/**`) gets a 401 instead. The agreement is kept in the session, so signing out
 shows the banner again before the next sign-in. It is audited as `auth.consent-acknowledged`
-(category `authentication`, success, with the client's address).
+(category `authentication`, success, with the client's address) - once per session, and at
+most 10 times a minute from one client address; beyond that the agreement is refused (429),
+so the open form cannot be used to fill the audit trail.
 
 Exempt, because they are not browser sessions or are what the banner is made of: `/consent`
 itself, `/css/**`, `/js/**`, `/img/**`, `/webjars/**`, `/favicon.ico`, `/error`, the health
@@ -1029,7 +1038,7 @@ TLS, verifies the client certificate, and forwards it:
 |---|---|---|
 | `ENS_X509_SOURCE` | `servlet` | `servlet` or `header` |
 | `ENS_X509_HEADER` | `X-SSL-Client-Cert` | The header, URL-encoded PEM as nginx's `$ssl_client_escaped_cert` sends it (ingress-nginx: `ssl-client-cert`) |
-| `ENS_X509_TRUSTED_PROXIES` | `127.0.0.1/32,::1/128` | Addresses (CIDRs) the header is accepted from: the proxy's |
+| `ENS_X509_TRUSTED_PROXIES` | `127.0.0.1/32,::1/128` | Addresses (CIDRs) the header is accepted from: the proxy's. Also the proxies whose `X-Forwarded-For` hops are followed to find the client's address |
 | `ENS_X509_PROXY_SECRET_FILE` / `ENS_X509_PROXY_SECRET` | — | At least 32 characters, which the proxy sends in `X-ENS-Proxy-Secret`; compared in constant time. The file wins |
 | `ENS_X509_TRUSTED_CA_FILE` | — | PEM certificates of the CAs a forwarded certificate must chain to |
 
@@ -1102,10 +1111,10 @@ absolute URI) and the assertion consumer are built from it, never from the reque
 `Forwarded` or `X-Forwarded-Host` header a client sets cannot change what address a response
 must be addressed to, and the application refuses to start with a missing or templated one.
 With `SERVER_FORWARD_HEADERS_STRATEGY=framework` (which the chart sets behind an ingress) the
-application believes only `X-Forwarded-Proto`, `-Port` and `-For`; `Forwarded`,
-`X-Forwarded-Host` and `X-Forwarded-Prefix` are ignored. Have the proxy overwrite
-`X-Forwarded-For` and `X-Forwarded-Proto` with its own values rather than append to a
-client's.
+application believes only `X-Forwarded-Proto` and `-Port`, and `X-Forwarded-For` hop by
+hop from trusted proxies (see "Behind a proxy that terminates TLS"); `Forwarded`, `X-Forwarded-Host` and
+`X-Forwarded-Prefix` are ignored. Have the proxy overwrite `X-Forwarded-Proto` with its own
+value rather than pass on a client's.
 
 **What is checked.**
 
@@ -1201,6 +1210,7 @@ cert-alert:
       enabled: true
       display-name: Sign in with ADFS
       metadata-location: https://adfs.example.gov/FederationMetadata/2007-06/FederationMetadata.xml
+      metadata-refresh: 1h             # read again this often; 0: once, until restart
       entity-id: ""                    # empty: <public-url>/saml2/service-provider-metadata/saml
       signing-key-location: file:/etc/cert-alert/saml/signing.key          # optional
       signing-certificate-location: file:/etc/cert-alert/saml/signing.crt
@@ -1259,7 +1269,10 @@ Every setting has an environment variable (`CERT_ALERT_SSO_OIDC_ISSUER_URI`, ...
    `groups-attribute`, and list the ones that grant a role in `cert-alert.sso.saml.admin-groups`
    / `auditor-groups`.
 3. ADFS signs the assertion with its token-signing certificate, which is in its metadata
-   (`https://<adfs>/FederationMetadata/2007-06/FederationMetadata.xml`). Where ADFS requires
+   (`https://<adfs>/FederationMetadata/2007-06/FederationMetadata.xml`). The metadata is
+   read again every `metadata-refresh` (an hour), and at once - at most every five minutes -
+   when a response's signature does not verify, so a rolled certificate is picked up without
+   a restart; a read that fails keeps the copy that last worked. Where ADFS requires
    signed requests, give `signing-key-location` (PEM, PKCS#8) and `signing-certificate-location`.
 4. For an ADFS this application cannot reach, save the metadata and use
    `metadata-location: file:/path/to/metadata.xml` (Helm: `sso.saml.metadataConfigMap`).
@@ -1363,6 +1376,9 @@ environment, list them with indexed variables, e.g. `CERT_ALERT_SECURITY_GROUPS_
 OpenLDAP's `memberOf` overlay and 389 Directory Server's MemberOf plugin both maintain the
 attribute; a directory without it grants nothing by group unless a provider says so. A group
 change counts at the person's next sign-in, or within `cache-for` for a client certificate.
+Where `memberOf` cannot be read, that sign-in gets no role from a group; the failure is kept
+for 10 seconds, not `cache-for`, so a certificate holder has their roles back on a request
+soon after the directory does.
 
 `/actuator/health` stays open so the thing can be monitored. Everything else requires
 authentication; an unauthenticated API call gets a 401 rather than a login page, because a
@@ -1591,7 +1607,10 @@ DataTables columns rather than dropped, so the global search still reaches them.
 DataTables owns paging, ordering, the global search box and the per-column search inputs in
 the table footer; all of it posts as the request body and the library turns it into a JPA
 query. The filters this application adds ride along as query parameters and become an
-additional `Specification`, so the two never have to know about each other.
+additional `Specification`, so the two never have to know about each other. A page asks for
+at least one row and gets at most `cert-alert.api.max-page-size` (500); "all rows" (`-1`) is
+refused with a 400. A query the library cannot run is a plain 500, logged, rather than a 200
+carrying the exception's text.
 
 Both tables open **soonest to expire first**, which is the order the work is in. An entry
 publishing no certificate has no expiry to sort on, and where a NULL sorts is left
@@ -2848,14 +2867,18 @@ curl -H "Authorization: Bearer cat_…" \
     default; set it to the real lockout length, never shorter). A value that does not parse is
     locked, and a directory that refuses or fails a read of the policy is unreachable: refused.
   A good answer is reused for at most `cert-alert.api.creator-roles-cache-for` (a minute); a
-  refusal never is. The creator's next sign-in narrows their tokens too, never widens them.
+  refusal never is, and a directory that cannot be read is asked again after 10 seconds (one
+  read per entry at a time, with no database connection held while it waits). The creator's
+  next sign-in narrows their tokens too - to the roles the live directory gives them then,
+  never to a sign-in that could not read their groups - and never widens them.
 - **A year at most.** `cert-alert.api.max-lifetime` (default `365d`) is the expiry of a token
   created without one, the most that may be asked for, and the age at which any token stops
   working; `0` removes it.
 - **Refused** (401, `error="invalid_token"`) when unknown, revoked, past its expiry, out-ranked,
   or off (`cert-alert.api.tokens-enabled: false`).
 - **Rate-limited** per token, per replica: `cert-alert.api.requests-per-minute` (300); beyond
-  it, 429 with `Retry-After`.
+  it, 429 with `Retry-After`. The limit applies before the creator's entry is read, so a client
+  over it costs the directory nothing.
 - **No session, no CSRF.** A request with `Authorization: Bearer` on `/api/v1/**` goes through
   a filter chain of its own that keeps no session and reads none (a token with a session
   cookie is still only the token), and has no CSRF check - nothing a browser sends on its own
@@ -3356,7 +3379,8 @@ the documentation site: [audit-logging.md](https://github.com/winllc/ens-apps-do
 Secrets are never recorded: passwords, tokens, keys, license text, session ids and codes are
 written as `"[redacted]"`. `session` is the first 16 hex characters of the SHA-256 of the
 session id. `source.ip` is the request's remote address; this application does not trust
-`X-Forwarded-For` unless `server.forward-headers-strategy` is set.
+`X-Forwarded-For` unless `server.forward-headers-strategy` is set, and then only the hops
+that trusted proxies (`ENS_X509_TRUSTED_PROXIES`) added.
 
 ### Where it is kept
 
@@ -3817,8 +3841,12 @@ Certificate and password sign-in work as before. Turning single sign-on on needs
 
 With `SERVER_FORWARD_HEADERS_STRATEGY=framework` (the chart's setting behind an ingress or
 an edge route), `Forwarded`, `X-Forwarded-Host` and `X-Forwarded-Prefix` are no longer
-believed; `X-Forwarded-Proto`, `-Port` and `-For` still are. A proxy that publishes CertAlert
+believed; `X-Forwarded-Proto` and `-Port` still are. A proxy that publishes CertAlert
 under a path prefix through `X-Forwarded-Prefix` must rewrite paths itself instead.
+`X-Forwarded-For` is followed from the right only through addresses in
+`ENS_X509_TRUSTED_PROXIES`: where the proxy in front is not in that list (by default only
+loopback), the audit trail and a token's last-used address now record the proxy's address
+until it is added.
 
 ### Administrators are matched by uid or DN only
 

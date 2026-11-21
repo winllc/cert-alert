@@ -140,6 +140,17 @@ public class SessionPolicy implements HttpSessionListener, HttpSessionIdListener
             signedIn(request, authentication);
             return null;
         }
+        if (session.getAttribute(SIGNED_IN_AS) instanceof Authentication previous
+                && !keyOf(previous).equals(keyOf(authentication))) {
+            // Somebody else has signed in on this session - a password typed in over it, or
+            // another certificate with its cookie. It is theirs now: their idle limit, their
+            // count of sessions, their name on its expiry.
+            log.info("A session held by {} was signed in to by {}; it is now theirs",
+                    LogSafe.oneLine(previous.getName()), LogSafe.oneLine(authentication.getName()));
+            handOver(session);
+            signedIn(request, authentication);
+            return null;
+        }
         if (pushedOut.contains(session.getId()) || "concurrent".equals(session.getAttribute(ENDED))) {
             return "concurrent";
         }
@@ -183,6 +194,16 @@ public class SessionPolicy implements HttpSessionListener, HttpSessionIdListener
             session.invalidate();
         } catch (IllegalStateException alreadyGone) {
             // invalidated by somebody else in the meantime
+        }
+    }
+
+    /** Forgets who held this session before, so it can be signed in to afresh. */
+    private void handOver(HttpSession session) {
+        pushedOut.remove(session.getId());
+        forget(session.getId());
+        for (String attribute : List.of(ENDED, LAST_SEEN, IDLE_LIMIT,
+                FindByIndexNameSessionRepository.PRINCIPAL_NAME_INDEX_NAME)) {
+            session.removeAttribute(attribute);
         }
     }
 

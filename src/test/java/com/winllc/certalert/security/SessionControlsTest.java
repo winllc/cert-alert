@@ -161,6 +161,31 @@ class SessionControlsTest {
         assertThat(session.getMaxInactiveInterval()).isEqualTo(10 * 60);
     }
 
+    /**
+     * Another person signing in on a session already signed in to - here a different
+     * certificate with the same cookie - takes it over: their idle limit, and one sign-in
+     * recorded for them rather than one on every request.
+     */
+    @Test
+    void somebodyElseSigningInOnASessionMakesItTheirs() throws Exception {
+        MockHttpSession session = new MockHttpSession();
+        mockMvc.perform(get("/users").session(session).with(x509(daveCertificate))).andExpect(status().isOk());
+        assertThat(session.getMaxInactiveInterval()).isEqualTo(20 * 60);
+        long head = auditStore.headSeq();
+
+        for (int i = 0; i < 3; i++) {
+            mockMvc.perform(get("/users").session(session).with(x509(erinCertificate))).andExpect(status().isOk())
+                    .andExpect(authenticated().withUsername("erin@example.gov"));
+        }
+
+        assertThat(session.getMaxInactiveInterval()).isEqualTo(10 * 60);
+        assertThat(((Authentication) session.getAttribute(SessionPolicy.SIGNED_IN_AS)).getName())
+                .isEqualTo("erin@example.gov");
+        assertThat(auditStore.after(head, 1000).stream().filter(event -> "auth.login".equals(event.action())))
+                .singleElement()
+                .satisfies(event -> assertThat(event.line()).contains("erin@example.gov"));
+    }
+
     @Test
     void aSessionEndsAtItsAbsoluteTimeoutHoweverBusy() throws Exception {
         MockHttpSession session = new MockHttpSession();

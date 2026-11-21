@@ -1,5 +1,6 @@
 package com.winllc.certalert.web;
 
+import com.winllc.certalert.api.ApiProperties;
 import com.winllc.certalert.domain.CertificateRisk;
 import com.winllc.certalert.domain.CertificateStatus;
 import com.winllc.certalert.domain.DirectoryEntry;
@@ -51,6 +52,7 @@ public class DirectoryDataTablesController {
     private final DirectoryServerRepository serverRepository;
     private final ServerContactRepository contactRepository;
     private final Licensing licensing;
+    private final ApiProperties apiProperties;
     private final Clock clock;
 
     public DirectoryDataTablesController(
@@ -58,11 +60,13 @@ public class DirectoryDataTablesController {
             DirectoryServerRepository serverRepository,
             ServerContactRepository contactRepository,
             Licensing licensing,
+            ApiProperties apiProperties,
             Clock clock) {
         this.userRepository = userRepository;
         this.serverRepository = serverRepository;
         this.contactRepository = contactRepository;
         this.licensing = licensing;
+        this.apiProperties = apiProperties;
         this.clock = clock;
     }
 
@@ -80,6 +84,7 @@ public class DirectoryDataTablesController {
             @RequestParam(required = false) String risk,
             @RequestParam(required = false) Long projectId) {
 
+        DataTablesRequests.bounded(input, apiProperties.getMaxPageSize());
         Specification<DirectoryUser> filter =
                 certificateFilter(certificateStatus, expired, hideExpired, expiringWithinDays, hasCertificates);
         filter = filter.and(latestExpiryFilter(latestExpiryFrom, latestExpiryTo));
@@ -88,7 +93,7 @@ public class DirectoryDataTablesController {
         filter = filter.and(DirectorySpecifications.namedAsPointOfContactBy(poc));
         filter = filter.and(riskFilter(risk));
         filter = filter.and(DirectorySpecifications.inProject(projectFilter(projectId), "members"));
-        return userRepository.findAll(input, filter, null, DirectoryUserRow::from);
+        return DataTablesRequests.checked(userRepository.findAll(input, filter, null, DirectoryUserRow::from));
     }
 
     @PostMapping("/servers")
@@ -107,6 +112,7 @@ public class DirectoryDataTablesController {
             @RequestParam(required = false) String risk,
             @RequestParam(required = false) Long projectId) {
 
+        DataTablesRequests.bounded(input, apiProperties.getMaxPageSize());
         Specification<DirectoryServer> filter =
                 certificateFilter(certificateStatus, expired, hideExpired, expiringWithinDays, hasCertificates);
         filter = filter.and(latestExpiryFilter(latestExpiryFrom, latestExpiryTo));
@@ -114,7 +120,8 @@ public class DirectoryDataTablesController {
         filter = filter.and(riskFilter(risk));
         filter = filter.and(DirectorySpecifications.inProject(projectFilter(projectId), "servers"));
 
-        return withContactCounts(serverRepository.findAll(input, filter, null, DirectoryServerRow::from));
+        return withContactCounts(
+                DataTablesRequests.checked(serverRepository.findAll(input, filter, null, DirectoryServerRow::from)));
     }
 
     /**

@@ -16,6 +16,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.DefaultResourceLoader;
 import org.springframework.security.authentication.AuthenticationEventPublisher;
+import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.ProviderManager;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.converter.RsaKeyConverters;
@@ -66,6 +67,7 @@ import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.security.saml2.provider.service.authentication.Saml2AuthenticatedPrincipal;
 import org.springframework.security.saml2.provider.service.authentication.Saml2Authentication;
 import org.springframework.security.saml2.provider.service.authentication.Saml2AuthenticationException;
+import org.springframework.security.saml2.provider.service.authentication.Saml2AuthenticationToken;
 import org.springframework.security.saml2.provider.service.registration.RelyingPartyRegistration;
 import org.springframework.security.saml2.provider.service.registration.RelyingPartyRegistrationRepository;
 import org.springframework.security.saml2.provider.service.registration.RelyingPartyRegistrations;
@@ -510,7 +512,8 @@ public class SsoSignIn {
             throws Exception {
         SsoProperties.Saml saml = properties.getSaml();
         require(saml.getMetadataLocation(), "cert-alert.sso.saml.metadata-location");
-        RelyingPartyRegistrationRepository registrations = lazyRelyingParty(saml);
+        RefreshingRegistration registration = relyingParty(saml);
+        RelyingPartyRegistrationRepository registrations = repositoryOf(registration, saml);
 
         OpenSaml5AuthenticationProvider provider = new OpenSaml5AuthenticationProvider();
         provider.setAssertionValidator(
@@ -526,8 +529,35 @@ public class SsoSignIn {
         provider.setResponseAuthenticationConverter(token -> toPerson(standard.convert(token), saml));
 
         // Its own manager, holding nothing else: a refusal here is final, not a cue to try
-        // another way of signing the same response in.
-        ProviderManager manager = new ProviderManager(provider);
+        // another way of signing the same response in. The one exception is a signature that
+        // does not verify, which a provider that has just rolled its key produces: the
+        // metadata is read again, and the same response checked once more against it.
+        ProviderManager manager = new ProviderManager(new AuthenticationProvider() {
+            @Override
+            public Authentication authenticate(Authentication authentication) {
+                try {
+                    return provider.authenticate(authentication);
+                } catch (Saml2AuthenticationException e) {
+                    if (!Saml2ErrorCodes.INVALID_SIGNATURE.equals(e.getSaml2Error().getErrorCode())
+                            || !(authentication instanceof Saml2AuthenticationToken token)) {
+                        throw e;
+                    }
+                    RelyingPartyRegistration fresh = registration.readAgainAfterSignatureFailure();
+                    if (fresh == null) {
+                        throw e;
+                    }
+                    log.info("A SAML response's signature did not verify; read the identity provider's metadata"
+                            + " again and checking the response once more");
+                    return provider.authenticate(new Saml2AuthenticationToken(
+                            fresh, token.getSaml2Response(), token.getAuthenticationRequest()));
+                }
+            }
+
+            @Override
+            public boolean supports(Class<?> authentication) {
+                return provider.supports(authentication);
+            }
+        });
         manager.setAuthenticationEventPublisher(events);
 
         http.saml2Login(login -> login
@@ -632,11 +662,14 @@ public class SsoSignIn {
         return new Saml2Authentication(principal, standard.getSaml2Response(), principal.getAuthorities());
     }
 
-    /** The relying party, from the identity provider's metadata, read the first time it is wanted. */
-    private RelyingPartyRegistrationRepository lazyRelyingParty(SsoProperties.Saml saml) {
+    /**
+     * The relying party, from the identity provider's metadata: read the first time it is
+     * wanted, and again every {@code metadata-refresh} (see {@link RefreshingRegistration}).
+     */
+    private RefreshingRegistration relyingParty(SsoProperties.Saml saml) {
         String publicUrl = properties.requirePublicUrl();
         String entityId = entityIdOf(saml, publicUrl);
-        Supplier<RelyingPartyRegistration> registration = SingletonSupplier.of(() -> {
+        Supplier<RelyingPartyRegistration> read = () -> {
             RelyingPartyRegistration.Builder builder = RelyingPartyRegistrations
                     .fromMetadataLocation(saml.getMetadataLocation())
                     .registrationId(SsoProperties.Saml.REGISTRATION_ID)
@@ -661,7 +694,12 @@ public class SsoSignIn {
                         + "SingleLogoutService: signing out ends the session here only", saml.getMetadataLocation());
             }
             return built;
-        });
+        };
+        return new RefreshingRegistration(read, saml.getMetadataRefresh(), saml.getMetadataLocation(), Clock.systemUTC());
+    }
+
+    private static RelyingPartyRegistrationRepository repositoryOf(
+            Supplier<RelyingPartyRegistration> registration, SsoProperties.Saml saml) {
         return new RelyingPartyRegistrationRepository() {
             @Override
             public RelyingPartyRegistration findByRegistrationId(String registrationId) {

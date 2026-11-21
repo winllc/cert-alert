@@ -6,7 +6,7 @@ import org.springframework.security.core.AuthenticationException;
  * A client certificate refused for a reason worth recording: its authority has revoked it,
  * nobody could say whether it had, its dates say it is not good now, its issuer is not one
  * this deployment accepts, or - forwarded by a proxy - it did not come from the proxy or does
- * not chain to a trusted CA.
+ * not chain to a trusted CA. Or more than one person publishes it, so it names nobody.
  *
  * <p>Its own type so the audit trail can say which of those it was. The message is that
  * reason, in a few words, and it is what {@code auth.login} records.
@@ -21,7 +21,8 @@ public class RefusedCertificateException extends AuthenticationException {
         NOT_YET_VALID("certificate not yet valid"),
         ISSUER_NOT_ALLOWED("issuer not allowed"),
         UNTRUSTED("certificate not trusted"),
-        UNTRUSTED_PROXY("certificate header not from a trusted proxy");
+        UNTRUSTED_PROXY("certificate header not from a trusted proxy"),
+        AMBIGUOUS("certificate published by more than one person");
 
         private final String description;
 

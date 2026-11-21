@@ -20,8 +20,10 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.SecurityFilterChain;
@@ -65,7 +67,6 @@ public class ApiSecurityConfig {
     public SecurityFilterChain apiTokenFilterChain(
             HttpSecurity http,
             ApiTokens tokens,
-            ApiRateLimiter limiter,
             AccessDenials denials,
             EnsSecurityProperties ens) throws Exception {
         SecurityHeaders.apply(http, ens.getCsp().isReportOnly());
@@ -78,7 +79,7 @@ public class ApiSecurityConfig {
                 .httpBasic(basic -> basic.disable())
                 .logout(logout -> logout.disable())
                 .anonymous(anonymous -> anonymous.disable())
-                .addFilterBefore(new TokenFilter(tokens, limiter), AuthorizationFilter.class)
+                .addFilterBefore(new TokenFilter(tokens), AuthorizationFilter.class)
                 .authorizeHttpRequests(authorize -> {
                     authorize.requestMatchers(PathPatternRequestMatcher.withDefaults()
                                     .matcher(org.springframework.http.HttpMethod.GET, OpenApiController.PATH))
@@ -115,17 +116,20 @@ public class ApiSecurityConfig {
 
     /**
      * Turns the bearer token into the request's authentication, or answers the request
-     * itself: 401 for a token that is not a live one, 429 for one over its rate. Clears the
-     * context afterwards; nothing about the token outlives the request.
+     * itself: 401 for a token that is not a live one, 429 for one over its rate.
+     *
+     * <p>It runs inside exception translation, so a scope refused by the authorisation filter
+     * passes through here as an exception before anything has set the response's status: it
+     * is recorded as the 403 it becomes, and the context is left in place for the access-denied
+     * handler to name the token. {@code SecurityContextHolderFilter} clears it once the chain is
+     * done; nothing about the token outlives the request.
      */
     static final class TokenFilter extends OncePerRequestFilter {
 
         private final ApiTokens tokens;
-        private final ApiRateLimiter limiter;
 
-        TokenFilter(ApiTokens tokens, ApiRateLimiter limiter) {
+        TokenFilter(ApiTokens tokens) {
             this.tokens = tokens;
-            this.limiter = limiter;
         }
 
         @Override
@@ -134,13 +138,8 @@ public class ApiSecurityConfig {
             String header = request.getHeader("Authorization");
             String bearer = header == null || header.length() < 7 ? "" : header.substring(7).trim();
             ApiTokens.Outcome outcome = tokens.authenticate(bearer, request.getRemoteAddr());
-            if (!outcome.accepted()) {
-                problem(response, HttpStatus.UNAUTHORIZED, "invalid_token", describe(outcome.refusal()));
-                return;
-            }
-            ApiTokenAuthentication authentication = outcome.authentication();
-            long wait = limiter.acquire(authentication.tokenId());
-            if (wait > 0) {
+            if (outcome.refusal() == ApiTokens.Refusal.RATE_LIMITED) {
+                long wait = outcome.retryAfter();
                 response.setHeader("Retry-After", String.valueOf(wait));
                 response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
                 response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
@@ -148,19 +147,32 @@ public class ApiSecurityConfig {
                         + "\"detail\":\"This token has used its allowance; try again in " + wait + " s\"}");
                 return;
             }
+            if (!outcome.accepted()) {
+                problem(response, HttpStatus.UNAUTHORIZED, "invalid_token", describe(outcome.refusal()));
+                return;
+            }
+            ApiTokenAuthentication authentication = outcome.authentication();
             SecurityContext context = SecurityContextHolder.createEmptyContext();
             context.setAuthentication(authentication);
             SecurityContextHolder.setContext(context);
             String method = request.getMethod().toUpperCase(Locale.ROOT);
             String path = request.getRequestURI();
+            // What the request becomes; an exception other than these two is a 500.
+            int status = HttpStatus.INTERNAL_SERVER_ERROR.value();
             try {
                 tokens.recordUse(authentication, method, path);
                 chain.doFilter(request, response);
+                status = response.getStatus();
+            } catch (AccessDeniedException e) {
+                status = HttpStatus.FORBIDDEN.value();
+                throw e;
+            } catch (AuthenticationException e) {
+                status = HttpStatus.UNAUTHORIZED.value();
+                throw e;
             } finally {
                 if (!SAFE.contains(method)) {
-                    tokens.recordWrite(authentication, method, path, response.getStatus());
+                    tokens.recordWrite(authentication, method, path, status);
                 }
-                SecurityContextHolder.clearContext();
             }
         }
 
@@ -173,7 +185,7 @@ public class ApiSecurityConfig {
                 case CREATOR_DISABLED -> "The account of the person who created this API token is disabled or locked";
                 case DIRECTORY_UNAVAILABLE -> "The directory cannot be read to check this API token's creator; try again";
                 case DISABLED -> "API tokens are turned off on this installation";
-                case UNKNOWN -> "A valid API token is required";
+                case UNKNOWN, RATE_LIMITED -> "A valid API token is required";
             };
         }
     }

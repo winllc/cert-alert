@@ -130,7 +130,7 @@ public class X509DirectoryUserDetailsService
      * the certificate is still good.
      *
      * @throws RefusedCertificateException when a person publishes it, but it has been revoked
-     *     or its dates say it is not good now
+     *     or its dates say it is not good now, or when more than one person publishes it
      */
     private Optional<DirectoryUser> byPublishedCertificate(X509Certificate certificate, String subject) {
         String fingerprint = CertificateFingerprints.sha256(certificate);
@@ -153,6 +153,14 @@ public class X509DirectoryUserDetailsService
                             ? ""
                             : " (" + revoked.get().getRevocationReason() + ")");
             throw new RefusedCertificateException(RefusedCertificateException.Reason.REVOKED, fingerprint);
+        }
+        // Two entries publishing one certificate (a regular and a privileged account carrying
+        // the same card, a shared mailbox) leave nothing to say which of them is holding it.
+        long people = owned.stream().map(match -> match.getUser().getId()).distinct().count();
+        if (people > 1) {
+            log.warn("Refusing client certificate '{}': {} different directory entries publish it, "
+                    + "so it cannot say which of them is signing in", subject, people);
+            throw new RefusedCertificateException(RefusedCertificateException.Reason.AMBIGUOUS, fingerprint);
         }
         CachedCertificate cached = owned.getFirst();
         Instant now = Instant.now(clock);

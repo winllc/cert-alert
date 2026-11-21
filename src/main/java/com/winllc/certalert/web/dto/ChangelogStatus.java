@@ -38,6 +38,12 @@ public record ChangelogStatus(
                 enabled, false, null, null, null, null, null, null, null, null, null, null, null, null);
     }
 
+    /** The same, without the last error's text. */
+    public ChangelogStatus withoutError() {
+        return new ChangelogStatus(enabled, running, lastChangeNumber, firstAvailableNumber, lastAvailableNumber, lag,
+                changesApplied, changesIgnored, gapsDetected, errors, startedAt, lastPolledAt, lastChangeAt, null);
+    }
+
     public static ChangelogStatus from(ChangelogCursor cursor, boolean running) {
         return new ChangelogStatus(
                 true,
