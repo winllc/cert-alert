@@ -283,6 +283,46 @@ class NotificationEmailTest {
         }
     }
 
+    /**
+     * Two entries publishing one address - somebody's admin persona beside their own - are two
+     * rounds but one mailbox: one message about both, rather than the second replacing the
+     * first unsent.
+     */
+    @Test
+    void twoEntriesWithOneAddressGetOneMessageAboutBoth() {
+        Instant now = Instant.now();
+        DirectoryUser admin = new DirectoryUser("uid=alice-admin,ou=people");
+        admin.setUid("alice-admin");
+        admin.setDisplayName("Alice Archer (admin)");
+        admin.refreshIdentifiers("Alice@Example.gov");
+        admin.addCertificate(certificate(
+                "CN=alice-admin", now.plus(Duration.ofDays(12)), CertificateStatus.EXPIRING_SOON, now));
+        admin.markSynced(now);
+        admin.refreshCertificateSummary();
+        users.save(admin);
+
+        NotificationService.DigestResult result = notificationService.digest();
+
+        List<MimeMessage> own = mailSender.sent.stream()
+                .filter(message -> recipients(message).stream().anyMatch("alice@example.gov"::equalsIgnoreCase))
+                .filter(message -> subject(message).contains("your credential"))
+                .toList();
+        assertThat(own).hasSize(1);
+        assertThat(subject(own.getFirst())).isEqualTo("[cert-alert] 2 of your credential(s) expiring soon");
+        assertThat(html(own.getFirst())).contains("CN=alice@example.gov").contains("CN=alice-admin");
+        assertThat(result.failures()).isEmpty();
+        // Both people still have their own round-up on the page.
+        assertThat(notifications.count()).isEqualTo(3);
+    }
+
+    private List<String> recipients(MimeMessage message) {
+        try {
+            return List.of(message.getAllRecipients()).stream().map(Object::toString).toList();
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     private List<MimeMessage> to(String address) {
         return mailSender.sent.stream()
                 .filter(message -> {

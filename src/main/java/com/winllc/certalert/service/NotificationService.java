@@ -25,6 +25,7 @@ import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -428,29 +429,38 @@ public class NotificationService {
         Set<Long> standing = new HashSet<>();
         NotificationMailer.Run run = mailer.beginRun(dryRun);
         boolean rehearsing = run.isDryRun();
-        List<Mail> mail = new ArrayList<>(rounds.size());
+        // One message of each kind per address. Two entries publishing the same address -
+        // somebody's two personas, a person and a role contact - are two rounds, and their
+        // messages share an outbox supersede key: queued separately, the second would
+        // replace the first unsent.
+        Map<String, Mail> byAddress = new LinkedHashMap<>();
         for (Round round : rounds.values()) {
             told++;
-            if (round.recipient.address() == null || round.recipient.address().isBlank()) {
+            boolean addressed = round.recipient.address() != null && !round.recipient.address().isBlank();
+            if (!addressed) {
                 unaddressed++;
             }
-            if (rehearsing) {
-                // Nothing saved and nothing marked: a rehearsal that left notifications
-                // behind would be answering the question by doing the thing.
-                mail.add(new Mail(round, null));
-                continue;
+            Long notificationId = null;
+            if (!rehearsing) {
+                // The notification first, so the message knows which one it delivers: it is
+                // marked emailed when the message actually goes, not when it is queued. A
+                // rehearsal saves and marks nothing: one that left notifications behind
+                // would be answering the question by doing the thing.
+                Notification notification = roundUpFor(round, now);
+                standing.add(notification.getId());
+                notificationId = notification.getId();
             }
-            // The notification first, so the message knows which one it delivers: it is
-            // marked emailed when the message actually goes, not when it is queued.
-            Notification notification = roundUpFor(round, now);
-            standing.add(notification.getId());
-            mail.add(new Mail(round, notification.getId()));
+            if (addressed) {
+                byAddress.merge(round.recipient.address().toLowerCase(Locale.ROOT),
+                        new Mail(round.recipient, round.entries, notificationId), Mail::with);
+            }
         }
         // Most urgent first, so that where max-per-run binds it is the long-lapsed that wait
         // rather than everybody with something about to expire.
-        mail.sort(Comparator.comparing(item -> item.round().urgency()));
+        List<Mail> mail = new ArrayList<>(byAddress.values());
+        mail.sort(Comparator.comparing(Mail::urgency));
         for (Mail item : mail) {
-            mailer.send(run, item.round().recipient, item.round().entries, item.notificationId());
+            mailer.send(run, item.recipient(), item.entries(), item.notificationId());
         }
         if (!rehearsing) {
             clearRoundUpsExcept(standing, complete);
@@ -806,8 +816,51 @@ public class NotificationService {
         }
     }
 
-    /** One round-up's message to send, and the notification it delivers (none on a rehearsal). */
-    private record Mail(Round round, Long notificationId) {}
+    /**
+     * What to email one address, and the round-up it delivers (none on a rehearsal). Where
+     * several round-ups share the address, the first is the one marked emailed.
+     */
+    private record Mail(NotificationRecipients.Recipient recipient, List<ExpiryDigest.Entry> entries, Long notificationId) {
+
+        /** Another round-up for the same address, folded in: each credential once. */
+        Mail with(Mail other) {
+            Map<String, ExpiryDigest.Entry> merged = new LinkedHashMap<>();
+            for (ExpiryDigest.Entry entry : entries) {
+                merged.putIfAbsent(keyOf(entry), entry);
+            }
+            for (ExpiryDigest.Entry entry : other.entries) {
+                merged.putIfAbsent(keyOf(entry), entry);
+            }
+            // Greeted by name only where both are the same person by name.
+            String name = Objects.equals(recipient.name(), other.recipient.name()) ? recipient.name() : null;
+            return new Mail(
+                    new NotificationRecipients.Recipient(recipient.userId(), recipient.address(), name),
+                    List.copyOf(merged.values()),
+                    notificationId);
+        }
+
+        /**
+         * How soon this wants sending, lowest first: whatever is next to expire, by days to
+         * go, and only then what has lapsed, most recently first.
+         */
+        long urgency() {
+            long soonest = Long.MAX_VALUE;
+            long latestLapsed = Long.MAX_VALUE;
+            for (ExpiryDigest.Entry entry : entries) {
+                if (entry.isExpired()) {
+                    latestLapsed = Math.min(latestLapsed, Math.abs(entry.getDays()));
+                } else {
+                    soonest = Math.min(soonest, entry.getDays());
+                }
+            }
+            return soonest != Long.MAX_VALUE ? soonest : Integer.MAX_VALUE + Math.min(latestLapsed, Integer.MAX_VALUE);
+        }
+
+        private static String keyOf(ExpiryDigest.Entry entry) {
+            return entry.getOwnerType() + ":" + entry.getOwnerId() + ":" + entry.getSerialNumbers() + ":"
+                    + entry.getNotAfter();
+        }
+    }
 
     private List<NotificationRecipients.Recipient> resolve(OwnerType type, Long ownerId) {
         if (ownerId == null) {
@@ -884,23 +937,6 @@ public class NotificationService {
 
         private Round(NotificationRecipients.Recipient recipient) {
             this.recipient = recipient;
-        }
-
-        /**
-         * How soon this round-up wants sending, lowest first: whatever is next to expire, by
-         * days to go, and only then what has lapsed, most recently first.
-         */
-        private long urgency() {
-            long soonest = Long.MAX_VALUE;
-            long latestLapsed = Long.MAX_VALUE;
-            for (ExpiryDigest.Entry entry : entries) {
-                if (entry.isExpired()) {
-                    latestLapsed = Math.min(latestLapsed, Math.abs(entry.getDays()));
-                } else {
-                    soonest = Math.min(soonest, entry.getDays());
-                }
-            }
-            return soonest != Long.MAX_VALUE ? soonest : Integer.MAX_VALUE + Math.min(latestLapsed, Integer.MAX_VALUE);
         }
 
         private void add(
