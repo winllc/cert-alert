@@ -3392,6 +3392,12 @@ fifteen minutes records `audit.delivery-failed`, and `audit.delivery-recovered` 
 back. Stdout and the file are written just after each commit. Startup logs one line per
 output saying whether it is on; the token is never logged. TLS trusts the JVM's trust store.
 
+Syslog over `tcp` and `tls` has no delivery acknowledgement, so it is best effort. Before each
+batch the forwarder checks that the collector has not closed the connection, and it opens a new
+one after 30 seconds unused; when a connection turns out broken, the batch last written on it is
+sent again (a collector restart can repeat up to one batch). A batch the collector does not take
+within 30 seconds fails and is retried. Where no event may be missing, use HEC or the pull API.
+
 The release bundle passes every `ENS_AUDIT_*` variable through (see `env.template`) and mounts
 the `ens-audit` volume at `/var/log/ens`, which the image creates writable by its user and by
 group 0 for OpenShift.
