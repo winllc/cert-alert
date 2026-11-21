@@ -7,6 +7,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.FileTime;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.security.cert.CertPathBuilder;
@@ -20,11 +22,16 @@ import java.security.cert.PKIXCertPathBuilderResult;
 import java.security.cert.TrustAnchor;
 import java.security.cert.X509CertSelector;
 import java.security.cert.X509Certificate;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import jakarta.servlet.ServletRequest;
@@ -53,6 +60,10 @@ import org.springframework.stereotype.Component;
  *
  * <p>The header is URL-encoded PEM, as nginx's {@code $ssl_client_escaped_cert} sends it;
  * plain PEM, and PEM with its line breaks turned to spaces, are read as well.
+ *
+ * <p>The header comes with every request, so a chain that validated is remembered for a
+ * minute (never past the expiry of any certificate in it, nor past a change to the CA file),
+ * and the secret file is read again only when it changes.
  */
 @Component
 public class ForwardedCertificates {
@@ -71,8 +82,19 @@ public class ForwardedCertificates {
     private static final Pattern PEM = Pattern.compile(
             "-----BEGIN[ +]CERTIFICATE-----(.*?)-----END[ +]CERTIFICATE-----", Pattern.DOTALL);
 
+    /** How long a validated chain is reused for the same header. */
+    static final Duration VALIDATED_FOR = Duration.ofMinutes(1);
+
     private final EnsX509Properties settings;
     private final TrustedCas trustedCas;
+    private final Map<String, Validated> validated = new ConcurrentHashMap<>();
+    private volatile SecretFile secretFile;
+
+    /** A chain that validated, against which CA file contents, and until when. */
+    private record Validated(List<X509Certificate> chain, List<X509Certificate> cas, Instant until) {}
+
+    /** The secret file's content, as of the file's last change. */
+    private record SecretFile(String path, FileTime modified, long size, String secret) {}
 
     public ForwardedCertificates(EnsX509Properties settings, TrustedCas trustedCas) {
         this.settings = settings;
@@ -120,6 +142,14 @@ public class ForwardedCertificates {
             throw new Refused(RefusedCertificateException.Reason.UNTRUSTED_PROXY,
                     settings.getHeader() + " from " + peer + " without the right " + PROXY_SECRET_HEADER, null);
         }
+        // Checked as of the CA file now: a chain remembered against what it held before does not count.
+        String key = HexFormat.of().formatHex(sha256(header));
+        List<X509Certificate> cas = currentCas();
+        Instant now = Instant.now();
+        Validated known = validated.get(key);
+        if (known != null && cas != null && known.cas() == cas && now.isBefore(known.until())) {
+            return known.chain();
+        }
         List<X509Certificate> presented;
         try {
             presented = parse(header);
@@ -127,7 +157,31 @@ public class ForwardedCertificates {
             throw new Refused(RefusedCertificateException.Reason.UNTRUSTED,
                     settings.getHeader() + " does not hold a certificate: " + e.getMessage(), null);
         }
-        return validate(presented);
+        List<X509Certificate> chain = validate(presented);
+        Instant until = now.plus(VALIDATED_FOR);
+        for (X509Certificate certificate : chain) {
+            Instant notAfter = certificate.getNotAfter().toInstant();
+            if (notAfter.isBefore(until)) {
+                until = notAfter;
+            }
+        }
+        if (validated.size() > 10_000) {
+            validated.clear();
+        }
+        if (cas != null) {
+            // Tagged with what the file held before validating: a change since only forgets it.
+            validated.put(key, new Validated(chain, cas, until));
+        }
+        return chain;
+    }
+
+    /** What the CA file holds now, or null where it cannot be read - which validating reports. */
+    private List<X509Certificate> currentCas() {
+        try {
+            return trustedCas.certificates();
+        } catch (IllegalStateException e) {
+            return null;
+        }
     }
 
     /**
@@ -177,12 +231,25 @@ public class ForwardedCertificates {
         return MessageDigest.isEqual(sha256(expected), sha256(presented));
     }
 
-    /** The configured secret: the file's content where one is named, else the value. */
+    /**
+     * The configured secret: the file's content where one is named, else the value. The file
+     * is read again when its time or size changes, which a rotated secret does.
+     */
     public String proxySecret() {
         if (settings.getProxySecretFile() != null) {
+            String file = settings.getProxySecretFile();
             try {
-                String secret = Files.readString(Path.of(settings.getProxySecretFile()), StandardCharsets.UTF_8).strip();
-                return secret.isEmpty() ? null : secret;
+                Path path = Path.of(file);
+                BasicFileAttributes attributes = Files.readAttributes(path, BasicFileAttributes.class);
+                SecretFile held = secretFile;
+                if (held != null && held.path().equals(file) && held.modified().equals(attributes.lastModifiedTime())
+                        && held.size() == attributes.size()) {
+                    return held.secret();
+                }
+                String secret = Files.readString(path, StandardCharsets.UTF_8).strip();
+                secret = secret.isEmpty() ? null : secret;
+                secretFile = new SecretFile(file, attributes.lastModifiedTime(), attributes.size(), secret);
+                return secret;
             } catch (IOException e) {
                 throw new IllegalStateException(
                         "ENS_X509_PROXY_SECRET_FILE " + settings.getProxySecretFile() + " could not be read: "

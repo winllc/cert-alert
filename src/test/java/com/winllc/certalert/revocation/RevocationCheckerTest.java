@@ -122,6 +122,67 @@ class RevocationCheckerTest {
         assertThat(outcome.detail()).contains(CRL_PATH);
     }
 
+    /**
+     * A list past its next update has been superseded, perhaps to announce this very
+     * revocation, so not being on it says nothing. Being on it still does.
+     */
+    @Test
+    void aListPastItsNextUpdateDoesNotSayGood() {
+        TestCa.Issued listed = ca.issue("listed", NOW.minus(Duration.ofDays(30)), NOW.plus(Duration.ofDays(300)),
+                publisher.url(CRL_PATH), null);
+        TestCa.Issued unlisted = ca.issue("unlisted", NOW.minus(Duration.ofDays(30)), NOW.plus(Duration.ofDays(300)),
+                publisher.url(CRL_PATH), null);
+        TestCa.Issued another = ca.issue("another", NOW.minus(Duration.ofDays(30)), NOW.plus(Duration.ofDays(300)),
+                publisher.url(CRL_PATH), null);
+        publisher.put(CRL_PATH, ca.crl(NOW.minus(Duration.ofDays(8)), NOW.minus(Duration.ofDays(1)),
+                Map.of(listed.serial(), NOW.minus(Duration.ofDays(9)))));
+        RevocationChecker checker = checker(null);
+
+        RevocationChecker.Outcome notListed = checker.check(parse(unlisted.der()), NOW);
+        assertThat(notListed.status()).isEqualTo(RevocationStatus.UNKNOWN);
+        assertThat(notListed.detail()).contains("out of date");
+        assertThat(checker.check(parse(listed.der()), NOW).status()).isEqualTo(RevocationStatus.REVOKED);
+        // And every other certificate of that authority gets the same answer, from the one download.
+        assertThat(checker.check(parse(another.der()), NOW).detail()).contains("out of date");
+        assertThat(publisher.requestCount()).isEqualTo(1);
+    }
+
+    /**
+     * With no issuer certificate to check a signature against, the list at least has to name
+     * the certificate's issuer: the configured default can be some other authority's list.
+     */
+    @Test
+    void anUnverifiedListFromAnotherAuthorityAnswersNothing() {
+        TestCa other = new TestCa("Some Other CA");
+        TestCa.Issued issued = ca.issue("no-crldp", NOW.minus(Duration.ofDays(1)), NOW.plus(Duration.ofDays(30)), null, null);
+        publisher.put(CRL_PATH, other.emptyCrl());
+        properties.setDefaultCrlUrl(publisher.url(CRL_PATH));
+
+        RevocationChecker.Outcome outcome = checker(null).check(parse(issued.der()), NOW);
+
+        assertThat(outcome.status()).isEqualTo(RevocationStatus.UNKNOWN);
+        assertThat(outcome.detail()).contains("not by the certificate's issuer");
+    }
+
+    /**
+     * Where the issuer's certificate is known and the list fails its signature check, it is
+     * not the issuer's list - whatever {@code allow-unverified-crl} says, which is for
+     * deployments with no issuer certificates at all.
+     */
+    @Test
+    void aListThatFailsItsSignatureCheckAnswersNothingEvenWhereUnverifiedListsAreAllowed() throws IOException {
+        TestCa impostor = new TestCa("Example Verification CA");
+        TestCa.Issued issued = ca.issue("forged", NOW.minus(Duration.ofDays(1)), NOW.plus(Duration.ofDays(30)),
+                publisher.url(CRL_PATH), null);
+        publisher.put(CRL_PATH, impostor.emptyCrl());
+
+        RevocationChecker.Outcome outcome = checker(issuerDirectory()).check(parse(issued.der()), NOW);
+
+        assertThat(properties.isAllowUnverifiedCrl()).isTrue();
+        assertThat(outcome.status()).isEqualTo(RevocationStatus.UNKNOWN);
+        assertThat(outcome.detail()).contains("not signed by the certificate's issuer");
+    }
+
     // --- the configured responder ----------------------------------------------------------
 
     /**
@@ -284,7 +345,7 @@ class RevocationCheckerTest {
         // The publisher is on loopback, which is only fetched from when named.
         FetchPolicy policy = FetchPolicy.of(java.util.List.of("localhost", "127.0.0.1"));
         return new RevocationChecker(
-                new CrlStore(properties, policy), new IssuerCertificates(properties), properties);
+                new CrlStore(properties, policy, java.time.Clock.systemUTC()), new IssuerCertificates(properties), properties);
     }
 
     private Path issuerDirectory() throws IOException {

@@ -18,7 +18,8 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.web.authentication.preauth.PreAuthenticatedAuthenticationToken;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Resolves a client certificate to the person who holds it.
@@ -64,6 +65,7 @@ public class X509DirectoryUserDetailsService
     private final ClientCertificateChecks checks;
     private final CertificateMapping mapping;
     private final Clock clock;
+    private final TransactionTemplate readOnly;
 
     public X509DirectoryUserDetailsService(
             CachedCertificateRepository certificateRepository,
@@ -71,22 +73,30 @@ public class X509DirectoryUserDetailsService
             SecurityProperties properties,
             ClientCertificateChecks checks,
             CertificateMapping mapping,
-            Clock clock) {
+            Clock clock,
+            PlatformTransactionManager transactions) {
         this.certificateRepository = certificateRepository;
         this.resolver = resolver;
         this.properties = properties;
         this.checks = checks;
         this.mapping = mapping;
         this.clock = clock;
+        this.readOnly = new TransactionTemplate(transactions);
+        this.readOnly.setReadOnly(true);
     }
 
     @Override
-    @Transactional(readOnly = true)
     public UserDetails loadUserDetails(PreAuthenticatedAuthenticationToken token) {
         X509Certificate certificate = certificateOf(token);
+        // Before the transaction, not in it: a revocation check can wait on the network, and
+        // nothing it does needs a database connection held for it.
+        checks.check(certificate, chainOf(token, certificate));
+        return readOnly.execute(status -> matchedPerson(certificate));
+    }
+
+    private UserDetails matchedPerson(X509Certificate certificate) {
         // For the log only, on one line: whoever made the certificate chose its subject.
         String subject = LogSafe.oneLine(certificate.getSubjectX500Principal().getName());
-        checks.check(certificate, chainOf(token, certificate));
 
         Optional<DirectoryUser> byFingerprint = byPublishedCertificate(certificate, subject);
         if (byFingerprint.isPresent()) {

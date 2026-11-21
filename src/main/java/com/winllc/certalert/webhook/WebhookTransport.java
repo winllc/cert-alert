@@ -7,6 +7,7 @@ import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -200,7 +201,11 @@ public class WebhookTransport {
             out.write(request.toString().getBytes(StandardCharsets.US_ASCII));
             out.write(body);
             out.flush();
-            return read(tls.getInputStream(), deadline);
+            Response response = read(tls.getInputStream(), deadline);
+            // Answered. Closing must not then wait out the read timeout for the close of a
+            // receiver that keeps the connection open.
+            tls.setSoTimeout(1);
+            return response;
         }
     }
 
@@ -299,12 +304,33 @@ public class WebhookTransport {
         throw new ProxyRefusedException("The proxy's answer to CONNECT ended or ran on without a blank line");
     }
 
+    /**
+     * The status, from the head of the answer. Reading stops once the header block is in: the
+     * status is all that is needed, and a receiver that keeps the connection open despite
+     * {@code Connection: close} must not turn an accepted delivery into an unanswered one.
+     * Whatever of the body came with the head is kept.
+     */
     private static Response read(InputStream in, long deadline) throws IOException {
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         byte[] chunk = new byte[2048];
-        int n;
-        while (buffer.size() < MAX_RESPONSE && (n = in.read(chunk)) != -1) {
+        while (buffer.size() < MAX_RESPONSE) {
+            int n;
+            try {
+                n = in.read(chunk);
+            } catch (SocketTimeoutException e) {
+                if (!buffer.toString(StandardCharsets.ISO_8859_1).startsWith("HTTP/")) {
+                    throw e;
+                }
+                // A status line arrived and then the receiver went quiet: answer with it.
+                break;
+            }
+            if (n == -1) {
+                break;
+            }
             buffer.write(chunk, 0, Math.min(n, MAX_RESPONSE - buffer.size()));
+            if (buffer.toString(StandardCharsets.ISO_8859_1).contains("\r\n\r\n")) {
+                break;
+            }
             if (System.nanoTime() > deadline) {
                 break;
             }

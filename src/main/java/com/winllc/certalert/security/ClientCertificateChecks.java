@@ -77,7 +77,8 @@ public class ClientCertificateChecks {
         if (!revocation.isEnabled()) {
             return;
         }
-        SignInRevocation.Answer answer = revocation.check(certificate, issuerOf(certificate, chain));
+        // The issuer is looked for only when there is no answer to reuse: it costs a signature check.
+        SignInRevocation.Answer answer = revocation.checkFindingIssuer(certificate, () -> issuerOf(certificate, chain));
         if (answer.status() == RevocationStatus.REVOKED) {
             log.warn("Refusing client certificate '{}': revoked ({})", subject, answer.detail());
             throw new RefusedCertificateException(
@@ -85,9 +86,12 @@ public class ClientCertificateChecks {
         }
         if (answer.status() == RevocationStatus.UNKNOWN) {
             if (settings.isFailOpen()) {
-                log.warn("Allowing client certificate '{}' although no OCSP responder or CRL answered for it "
-                        + "(soft-fail; ENS_X509_REVOCATION_FAIL=closed refuses it instead): {}",
-                        subject, answer.detail());
+                // Said once per answer, not on every request the answer is reused for.
+                if (answer.fresh()) {
+                    log.warn("Allowing client certificate '{}' although no OCSP responder or CRL answered for it "
+                            + "(soft-fail; ENS_X509_REVOCATION_FAIL=closed refuses it instead): {}",
+                            subject, answer.detail());
+                }
                 return;
             }
             log.warn("Refusing client certificate '{}': its revocation status is unknown: {}", subject, answer.detail());

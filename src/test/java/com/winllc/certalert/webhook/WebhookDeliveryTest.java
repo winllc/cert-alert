@@ -100,6 +100,9 @@ class WebhookDeliveryTest {
     private JdbcTemplate jdbc;
 
     @Autowired
+    private Webhooks webhooks;
+
+    @Autowired
     private ApplicationEventPublisher events;
 
     private final List<Long> created = new ArrayList<>();
@@ -505,6 +508,43 @@ class WebhookDeliveryTest {
             outbox.deliverDue();
             assertThat(deadTries).hasValue(1);
         }
+    }
+
+    /**
+     * Disabling is a save of the same URL, which is not resolved again: a receiver whose name
+     * has since gone (as this one has, to the real resolver) can still be disabled or renamed.
+     */
+    @Test
+    void aWebhookWhoseHostNoLongerResolvesCanStillBeDisabled() {
+        Endpoint target = endpoint(WebhookEndpoint.Format.JSON, WebhookEvent.JOB_FAILED);
+
+        WebhookEndpoint changed = webhooks.update(target.endpoint().getId(), "renamed", webhooks.url(target.endpoint()),
+                WebhookEndpoint.Format.JSON, List.of(WebhookEvent.JOB_FAILED), false);
+
+        assertThat(changed.isEnabled()).isFalse();
+        assertThat(changed.getName()).isEqualTo("renamed");
+    }
+
+    /** What was queued before a webhook was disabled is not sent after; a test still is. */
+    @Test
+    void queuedDeliveriesStopWhenTheWebhookIsDisabled() {
+        Endpoint target = endpoint(WebhookEndpoint.Format.JSON, WebhookEvent.JOB_FAILED);
+        publisher.publish(WebhookEvent.JOB_FAILED, Map.of("job", "revocation"), "failed");
+        WebhookEndpoint disabled = webhooks.update(target.endpoint().getId(), "test receiver",
+                webhooks.url(target.endpoint()), WebhookEndpoint.Format.JSON, List.of(WebhookEvent.JOB_FAILED), false);
+        publisher.test(disabled, "root");
+
+        outbox(resolvingTo("127.0.0.1"), new WebhookTransport(properties, clientTls.getSocketFactory())).deliverDue();
+
+        assertThat(received).singleElement()
+                .satisfies(post -> assertThat(post.headers().get("X-certalert-event")).containsExactly("webhook.test"));
+        assertThat(log(target.endpoint()))
+                .filteredOn(delivery -> delivery.getEventType().equals("job.failed"))
+                .singleElement()
+                .satisfies(delivery -> {
+                    assertThat(delivery.getState()).isEqualTo(WebhookDelivery.State.FAILED);
+                    assertThat(delivery.getLastError()).contains("disabled");
+                });
     }
 
     @Test

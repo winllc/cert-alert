@@ -994,7 +994,7 @@ certificates.
 | `ENS_X509_OCSP_RESPONDER_URL` | — | Ask this responder instead of the one the certificate names — a local OCSP relay on an air-gapped network |
 | `ENS_X509_CRL_DIR` | — | A directory of CRL files (DER or PEM), re-read when they change. With it set, no distribution point is fetched over the network: the air-gapped option |
 | `ENS_X509_REVOCATION_FAIL` | `open` while `ENS_X509_REVOCATION` is unset, otherwise `closed` | `closed`: when the status cannot be found, refuse. `open`: allow, and log a warning |
-| `ENS_X509_REVOCATION_CACHE` | `10m` | How long a good or revoked answer is reused, per issuer and serial number. No answer is reused for 30 seconds |
+| `ENS_X509_REVOCATION_CACHE` | `10m` | How long a good or revoked answer is reused, per issuer and serial number. No answer is reused for 30 seconds, doubling while it stays unanswered up to 2 minutes; requests for one certificate that arrive while it is being checked wait for that check |
 | `ENS_X509_ALLOWED_ISSUERS` | — | Issuer DNs, separated by `;`. When set, a certificate from any other issuer is refused even if the trust store accepts it. Compared as names (RFC 4514), so spacing and case do not matter |
 | `ENS_X509_USER_FILTER` | — | An LDAP filter that finds the holder of a certificate the directory does not publish, with `{upn}`, `{edipi}`, `{email}` and `{uuid}` filled in — e.g. `(uid={edipi})`. Used instead of the uid/address matching above, and only with `require-known-certificate: false` |
 
@@ -1004,7 +1004,11 @@ certificates.
   by the platform's path validator; a CRL counts only if it is signed by the issuer and not
   past its next update. Fetches have 5 s to connect and 10 s to answer, follow redirects to
   http and https only, and never go to link-local or metadata addresses
-  (`cert-alert.revocation.allowed-hosts` applies here too). A refusal is a failed
+  (`cert-alert.revocation.allowed-hosts` applies here too). A list the nightly check is
+  downloading at the same moment is waited on no longer than a fetch of its own would take,
+  and the check runs before the database transaction that matches the certificate to a
+  person, so a slow responder does not hold a database connection. Under soft-fail the
+  warning is logged once per answer, not on every request. A refusal is a failed
   `auth.login` with reason `certificate revoked` or `revocation unknown`.
 - **The default is a live check that soft-fails.** With neither setting given, every
   certificate is checked over OCSP and then its CRL. One found revoked is refused. One that
@@ -1039,13 +1043,15 @@ TLS, verifies the client certificate, and forwards it:
 | `ENS_X509_SOURCE` | `servlet` | `servlet` or `header` |
 | `ENS_X509_HEADER` | `X-SSL-Client-Cert` | The header, URL-encoded PEM as nginx's `$ssl_client_escaped_cert` sends it (ingress-nginx: `ssl-client-cert`) |
 | `ENS_X509_TRUSTED_PROXIES` | `127.0.0.1/32,::1/128` | Addresses (CIDRs) the header is accepted from: the proxy's. Also the proxies whose `X-Forwarded-For` hops are followed to find the client's address |
-| `ENS_X509_PROXY_SECRET_FILE` / `ENS_X509_PROXY_SECRET` | — | At least 32 characters, which the proxy sends in `X-ENS-Proxy-Secret`; compared in constant time. The file wins |
+| `ENS_X509_PROXY_SECRET_FILE` / `ENS_X509_PROXY_SECRET` | — | At least 32 characters, which the proxy sends in `X-ENS-Proxy-Secret`; compared in constant time. The file wins, and is read again when its time or size changes |
 | `ENS_X509_TRUSTED_CA_FILE` | — | PEM certificates of the CAs a forwarded certificate must chain to |
 
 The header is believed only when the connection itself comes from a trusted proxy address
 (never an address a forwarded-for header claims) **and** carries the secret, and the
 certificate then chains to a CA in the file, is in date and is not restricted to some use
-other than client authentication. Anything else is refused and recorded as a failed
+other than client authentication. A chain that validated is reused for the same header for a
+minute, never past the expiry of a certificate in it or a change to the CA file. Anything else
+is refused and recorded as a failed
 `auth.login` (`certificate header not from a trusted proxy`, `certificate not trusted`). In
 header mode a certificate from the application's own TLS handshake is ignored. **The
 application refuses to start** in header mode without a secret of 32 characters or more,
@@ -1964,7 +1970,10 @@ two mechanisms scale. A CRL is one download that answers for every certificate a
 ever issued, and a directory of a hundred thousand entries is issued by a handful of
 authorities — so it is a handful of
 downloads, held for as long as each list says it is good for (`nextUpdate`, capped by
-`crl-cache-ttl`). OCSP is one request per certificate; it gives a fresher answer about one
+`crl-cache-ttl`) and fetched again after that. A distribution point that does not answer, or
+serves a list already past its `nextUpdate`, is left alone for two minutes rather than asked
+again for every certificate that names it; a certificate not on such an out-of-date list is
+*Unknown*, while one that is on it is still *Revoked*. OCSP is one request per certificate; it gives a fresher answer about one
 certificate, which is the right trade when the question is about one certificate and the
 wrong one when it is about two hundred thousand. Distribution points are tried in the order
 the certificate lists them, and `ldap://` ones work — which is how a PKI with no route to
@@ -2006,7 +2015,10 @@ CRL is signed by its issuer, so telling the authority's own list from whatever a
 URL needs the issuer's certificate; and OCSP names a certificate by hashes of its issuer's
 name and key, which only the issuer's certificate carries. With none configured, CRLs are
 still used and every result says `(signature not verified)` — set `allow-unverified-crl:
-false` to have those count as *Unknown* instead.
+false` to have those count as *Unknown* instead. Such a list must at least name the
+certificate's issuer as its own; one that names another authority is *Unknown*. Where the issuer
+certificate is configured and the list's signature does not verify against it, the result is
+*Unknown* whatever `allow-unverified-crl` says.
 
 A certificate that turns out to be revoked is recorded against its entry in the audit trail
 and its contacts are told, once — not nightly for as long as it stays revoked. Where to ask
@@ -2044,7 +2056,7 @@ distribution point too, and of the two fallbacks the list is much the cheaper: o
 answering for every certificate the authority issued, against one request per certificate
 plus a directory read per entry. It is also the one that cannot be got dangerously wrong — a
 list signed by some other authority fails its signature check against the issuer
-certificates and counts as *Unknown*.
+certificates (or, with none configured, names a different issuer) and counts as *Unknown*.
 
 Where a certificate names neither and neither is configured, the result says so. Where one
 *is* configured and the check still could not run — no issuer certificate to name the
@@ -2913,9 +2925,13 @@ Adaptive Card message for a Teams workflow's "When a webhook request is received
 
 **Delivery.** An event is written to `webhook_delivery` in the same transaction as whatever
 raised it and posted after the commit, by one replica (claimed in the database, under a
-lock), with a 5-second connect and 10-second read timeout. A 2xx is delivered; anything else -
+lock), with a 5-second connect and 10-second read timeout. A 2xx is delivered (read from the answer's status line and headers, so a receiver that keeps
+the connection open after answering is not taken for one that did not answer); anything else -
 a timeout, a 5xx, a redirect (never followed) - is retried after `retry-initial` (1 minute),
-doubling to `retry-max` (1 hour), until it is `give-up-after` (a day) old. The Integrations
+doubling to `retry-max` (1 hour), until it is `give-up-after` (a day) old. Disabling an
+endpoint gives up on what is still queued for it (a test is still sent), and saving it with the
+same URL - disabling, renaming - does not resolve the host again, so an endpoint whose name has
+gone can still be disabled; a changed URL is checked as a new one. The Integrations
 page shows each endpoint's delivery log; delivered and failed rows are kept for `keep` (14
 days).
 
@@ -3328,7 +3344,7 @@ DirectoryPersistenceService one transaction per batch of entries
 
 | Concern | How it is handled |
 |---------|-------------------|
-| Directory size limits | Paged searches (`page-size`, default 500). An unpaged search silently stops at the server's limit, which here would mean quietly forgetting certificates. |
+| Directory size limits | Paged searches (`page-size`, default 500). An unpaged search silently stops at the server's limit, which here would mean quietly forgetting certificates; a search the server still cuts short (some count the limit across all pages) fails the sweep rather than ending early. |
 | Memory | Entries are streamed to a consumer a page at a time and never collected. Materialising a six-figure result set, each entry carrying certificates, would cost hundreds of megabytes before a row reached the database. |
 | Round trips | Entries are written in batches (`batch-size`, default 200): one query to load what is already held, one flush. Per entry it would be two round trips each. |
 | Insert batching | Ids come from sequences, not identity columns — Hibernate cannot batch inserts behind an identity column, since it has to round trip for each generated key. |
@@ -3472,7 +3488,7 @@ Scraping, under `cert-alert.ldap`:
 | `page-size`          | `500`   | Entries per LDAP page                           |
 | `paged`              | `true`  | Turn off only for servers without the control   |
 | `batch-size`         | `200`   | Entries written per transaction                 |
-| `count-limit`        | `0`     | Client-side cap on entries; 0 means none        |
+| `count-limit`        | `0`     | Client-side cap on entries; 0 means none. With 0, a search the directory cuts short at its size limit fails the sweep instead of ending early |
 | `search-timeout`     | `10m`   | Per-search time limit                           |
 | `binary-certificate-option` | `true` | Ask for `userCertificate;binary`. Off for a directory with no such attribute to return |
 | `server.require-email-poc` | `true` | A `serverPOC` value must be an email address; off for a directory holding names. Comma-separated values are split either way |

@@ -199,10 +199,78 @@ class SignInRevocationTest {
         assertThat(publisher.requestCount()).as("nothing fetched over the network").isZero();
     }
 
+    /** Finding the issuer costs a signature check; an answer that is reused does not need one. */
+    @Test
+    void theIssuerIsLookedForOnlyWhenThereIsNoAnswerToReuse() {
+        settings.setRevocation("ocsp");
+        TestCa.Issued issued = issue(null, responder.url());
+        SignInRevocation checker = checker();
+        java.util.concurrent.atomic.AtomicInteger lookups = new java.util.concurrent.atomic.AtomicInteger();
+
+        SignInRevocation.Answer first = checker.checkFindingIssuer(issued.certificate(), () -> {
+            lookups.incrementAndGet();
+            return ca.certificate();
+        });
+        SignInRevocation.Answer second = checker.checkFindingIssuer(issued.certificate(), () -> {
+            lookups.incrementAndGet();
+            return ca.certificate();
+        });
+
+        assertThat(lookups).hasValue(1);
+        assertThat(first.status()).isEqualTo(RevocationStatus.GOOD);
+        // What is said about an answer is said once: the reused one says it is reused.
+        assertThat(first.fresh()).isTrue();
+        assertThat(second.fresh()).isFalse();
+    }
+
+    /** A page's parallel requests for one certificate ask the responder once between them. */
+    @Test
+    void requestsForTheSameCertificateAtOnceAskOnce() throws Exception {
+        settings.setRevocation("ocsp");
+        responder.takesThisLong(500);
+        TestCa.Issued issued = issue(null, responder.url());
+        SignInRevocation checker = checker();
+
+        java.util.concurrent.ExecutorService requests = java.util.concurrent.Executors.newFixedThreadPool(6);
+        try {
+            List<java.util.concurrent.Future<SignInRevocation.Answer>> answers = new java.util.ArrayList<>();
+            for (int i = 0; i < 6; i++) {
+                answers.add(requests.submit(() -> checker.check(issued.certificate(), ca.certificate())));
+            }
+            for (java.util.concurrent.Future<SignInRevocation.Answer> answer : answers) {
+                assertThat(answer.get(30, java.util.concurrent.TimeUnit.SECONDS).status()).isEqualTo(RevocationStatus.GOOD);
+            }
+        } finally {
+            requests.shutdownNow();
+        }
+        assertThat(responder.requestCount()).isEqualTo(1);
+    }
+
+    /** No answer is reused for longer each time it is still no answer, up to a ceiling. */
+    @Test
+    void noAnswerIsReusedForLongerWhileNobodyAnswers() {
+        assertThat(SignInRevocation.unknownHold(1)).isEqualTo(Duration.ofSeconds(30));
+        assertThat(SignInRevocation.unknownHold(2)).isEqualTo(Duration.ofSeconds(60));
+        assertThat(SignInRevocation.unknownHold(3)).isEqualTo(Duration.ofMinutes(2));
+        assertThat(SignInRevocation.unknownHold(50)).isEqualTo(Duration.ofMinutes(2));
+
+        settings.setRevocation("ocsp");
+        TestCa.Issued unreachable = issue(null, "http://localhost:1/ocsp");
+        SignInRevocation checker = checker();
+
+        assertThat(checker.check(unreachable.certificate(), ca.certificate()).fresh()).isTrue();
+        clock.advance(Duration.ofSeconds(31));
+        assertThat(checker.check(unreachable.certificate(), ca.certificate()).fresh()).as("asked again").isTrue();
+        clock.advance(Duration.ofSeconds(31));
+        assertThat(checker.check(unreachable.certificate(), ca.certificate()).fresh()).as("now held a minute").isFalse();
+        clock.advance(Duration.ofSeconds(30));
+        assertThat(checker.check(unreachable.certificate(), ca.certificate()).fresh()).isTrue();
+    }
+
     private SignInRevocation checker() {
         RevocationProperties revocation = new RevocationProperties();
         FetchPolicy policy = FetchPolicy.of(List.of("localhost", "127.0.0.1"));
-        return new SignInRevocation(settings, new CrlStore(revocation, policy), policy, revocation, clock);
+        return new SignInRevocation(settings, new CrlStore(revocation, policy, clock), policy, revocation, clock);
     }
 
     private TestCa.Issued issue(String crlUrl, String ocspUrl) {
