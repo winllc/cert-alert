@@ -3326,7 +3326,7 @@ the documentation site: [audit-logging.md](https://github.com/winllc/ens-apps-do
 | Category | Actions |
 |---|---|
 | authentication | `auth.login` (success and failure; `details.method` `x509` or `ldap`, the attempted name as an `anonymous` actor on failure, `alert` severity after repeated failures for one name; a published client certificate refused as revoked, expired or not yet valid carries that as its reason and `details.fingerprint`, and a revoked one is `alert`), `auth.logout` |
-| authorization | `access.denied` for every 403: a role refused, `license_required`, `license_read_only`, `feature_not_licensed`, a CSRF failure — with method, path and reason code; identical refusals within 60 s are one event with `details.count` |
+| authorization | `access.denied` for every 403: a role refused, `license_required`, `license_read_only`, `feature_not_licensed`, a CSRF failure — with method, path and reason code; the first is recorded at once, and identical refusals within the next 60 s are one more event with `details.count` |
 | account | `project.admin-added`, `project.admin-removed` (the one role this application grants) |
 | configuration | `settings.changed` (the round-up's lead days, `<field>.old`/`.new`), `server-attribute.defined`, `.changed`, `.retired` |
 | license | `license.installed`, `license.rejected` (with the reason), `license.mode-changed` (FULL / READ_ONLY / UNLICENSED, checked at startup, on every request and every minute), `license.limit-exceeded` (at most hourly, with the count refused) |
