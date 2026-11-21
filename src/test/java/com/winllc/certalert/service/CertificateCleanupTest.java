@@ -157,6 +157,21 @@ class CertificateCleanupTest {
     }
 
     @Test
+    void aRevokedCertificateCheckedAgainEveryNightStillGoesOnceTheWindowHasPassed() {
+        byte[] revoked = TestCertificates.der("revoked", NOW.minus(Duration.ofDays(10)), NOW.plus(Duration.ofDays(355)));
+        byte[] fine = TestCertificates.der("fine", NOW.minus(Duration.ofDays(10)), NOW.plus(Duration.ofDays(355)));
+        String dn = add("compromised", revoked, fine);
+        syncService.syncUsers();
+        // Found revoked a month ago, and still current, so the nightly check asked again last
+        // night: the window runs from when it was found, not from the last time it was asked.
+        markRevoked(TestCertificates.sha256(revoked), NOW.minus(Duration.ofDays(30)));
+        markRevoked(TestCertificates.sha256(revoked), NOW.minus(Duration.ofHours(2)));
+
+        assertThat(cleanupService.run().removed()).isEqualTo(1);
+        assertThat(published(dn)).containsExactly(TestCertificates.sha256(fine));
+    }
+
+    @Test
     void bothKindsGoInOneModifyWhenOneEntryHasBoth() {
         byte[] ancient = TestCertificates.der("a", NOW.minus(Duration.ofDays(800)), NOW.minus(Duration.ofDays(300)));
         byte[] revoked = TestCertificates.der("b", NOW.minus(Duration.ofDays(10)), NOW.plus(Duration.ofDays(355)));

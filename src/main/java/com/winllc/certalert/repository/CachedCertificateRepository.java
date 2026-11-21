@@ -211,8 +211,8 @@ public interface CachedCertificateRepository
     /** Certificates an authority has revoked, found out about before this. */
     @Query("select c.id as id, c.user.id as userId, c.server.id as serverId from CachedCertificate c "
             + "where c.revocationStatus = :status "
-            + "and c.revocationCheckedAt is not null and c.revocationCheckedAt < :before "
-            + "order by c.revocationCheckedAt, c.id")
+            + "and c.revocationFoundAt is not null and c.revocationFoundAt < :before "
+            + "order by c.revocationFoundAt, c.id")
     List<CleanupCandidate> findRevokedBefore(
             @Param("status") RevocationStatus status, @Param("before") Instant before, Pageable pageable);
 
@@ -229,6 +229,6 @@ public interface CachedCertificateRepository
     long countExpiredBefore(@Param("before") Instant before);
 
     @Query("select count(c) from CachedCertificate c where c.revocationStatus = :status "
-            + "and c.revocationCheckedAt is not null and c.revocationCheckedAt < :before")
+            + "and c.revocationFoundAt is not null and c.revocationFoundAt < :before")
     long countRevokedBefore(@Param("status") RevocationStatus status, @Param("before") Instant before);
 }

@@ -162,6 +162,14 @@ public class CachedCertificate {
     @Column(name = "revoked_at")
     private Instant revokedAt;
 
+    /**
+     * When this first found it revoked: set on the change into REVOKED and cleared on the way
+     * out. What the certificate cleanup's {@code revoked-after} is measured from, because
+     * {@code revocation_checked_at} moves on with every nightly check.
+     */
+    @Column(name = "revocation_found_at")
+    private Instant revocationFoundAt;
+
     @Column(name = "revocation_reason", length = 64)
     private String revocationReason;
 
@@ -376,7 +384,13 @@ public class CachedCertificate {
         return authorityKeyId;
     }
 
-    /** What an authority said about this certificate, and when it was asked. */
+    /**
+     * What an authority said about this certificate, and when it was asked.
+     *
+     * <p>A check that got no answer (UNKNOWN) does not undo a revocation already found: the
+     * certificate stays REVOKED, with its date and reason, and only the detail says the last
+     * check went unanswered.
+     */
     public void recordRevocation(
             RevocationStatus status,
             RevocationMethod method,
@@ -385,7 +399,22 @@ public class CachedCertificate {
             String detail,
             Instant checkedAt) {
 
-        this.revocationStatus = status == null ? RevocationStatus.NOT_CHECKED : status;
+        RevocationStatus next = status == null ? RevocationStatus.NOT_CHECKED : status;
+        if (next == RevocationStatus.UNKNOWN && this.revocationStatus == RevocationStatus.REVOKED) {
+            if (detail != null && !detail.isBlank()) {
+                this.revocationDetail = truncate("Still revoked; the last check got no answer: " + detail, 500);
+            }
+            this.revocationCheckedAt = checkedAt;
+            return;
+        }
+        if (next == RevocationStatus.REVOKED) {
+            if (this.revocationStatus != RevocationStatus.REVOKED || this.revocationFoundAt == null) {
+                this.revocationFoundAt = checkedAt;
+            }
+        } else {
+            this.revocationFoundAt = null;
+        }
+        this.revocationStatus = next;
         this.revocationMethod = method;
         this.revokedAt = revokedAt;
         this.revocationReason = truncate(reason, 64);
@@ -407,6 +436,10 @@ public class CachedCertificate {
 
     public Instant getRevokedAt() {
         return revokedAt;
+    }
+
+    public Instant getRevocationFoundAt() {
+        return revocationFoundAt;
     }
 
     public String getRevocationReason() {
