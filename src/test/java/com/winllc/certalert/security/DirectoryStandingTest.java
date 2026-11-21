@@ -279,22 +279,89 @@ class DirectoryStandingTest {
         assertThat(admin.roles()).contains(DirectoryPrincipalResolver.ROLE_ADMIN);
     }
 
+    /**
+     * Refused, and taken to be still unreadable for a few seconds - not the five minutes a
+     * good answer may be kept - so an outage is not a wait on the directory's timeouts for
+     * every request.
+     */
     @Test
-    void aDirectoryThatCannotBeReadRefusesAndIsAskedAgainEveryTime() throws Exception {
+    void aDirectoryThatCannotBeReadRefusesAndIsAskedAgainAfterAFewSeconds() throws Exception {
         BaseLdapPathContextSource source = mock(BaseLdapPathContextSource.class);
         when(source.getBaseLdapName()).thenReturn(new LdapName("dc=example,dc=test"));
         when(source.getReadOnlyContext()).thenThrow(new org.springframework.ldap.CommunicationException(
                 new javax.naming.CommunicationException("connection refused")));
+        Instant[] now = {NOW};
+        Clock clock = new Clock() {
+            @Override
+            public java.time.ZoneId getZone() {
+                return java.time.ZoneOffset.UTC;
+            }
+
+            @Override
+            public Clock withZone(java.time.ZoneId zone) {
+                return this;
+            }
+
+            @Override
+            public Instant instant() {
+                return now[0];
+            }
+        };
         DirectoryStanding standing = new DirectoryStanding(
-                source, new SecurityProperties(), null, new LdapProperties(), Clock.systemUTC());
+                source, new SecurityProperties(), null, new LdapProperties(), clock);
 
         DirectoryStanding.Standing first = standing.of("uid=ada,ou=people,dc=example,dc=test", Duration.ofMinutes(5));
         DirectoryStanding.Standing second = standing.of("uid=ada,ou=people,dc=example,dc=test", Duration.ofMinutes(5));
         assertThat(first.state()).isEqualTo(DirectoryStanding.State.UNREACHABLE);
         assertThat(second.state()).isEqualTo(DirectoryStanding.State.UNREACHABLE);
+        verify(source, times(1)).getReadOnlyContext();
+
+        now[0] = NOW.plus(DirectoryStanding.UNREACHABLE_REMEMBERED).plusSeconds(1);
+        assertThat(standing.of("uid=ada,ou=people,dc=example,dc=test", Duration.ofMinutes(5)).state())
+                .isEqualTo(DirectoryStanding.State.UNREACHABLE);
         verify(source, times(2)).getReadOnlyContext();
 
         assertThat(standing.of("uid=ada,ou=people,dc=elsewhere", Duration.ZERO).state()).isEqualTo(DirectoryStanding.State.GONE);
         assertThat(standing.of(null, Duration.ZERO).state()).isEqualTo(DirectoryStanding.State.GONE);
+    }
+
+    /** Requests that arrive while an entry is being read wait for that read rather than starting their own. */
+    @Test
+    void oneReadOfAnEntryAtATime() throws Exception {
+        java.util.concurrent.CountDownLatch inside = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicInteger reads = new java.util.concurrent.atomic.AtomicInteger();
+        DirContext context = mock(DirContext.class);
+        when(context.getAttributes(any(Name.class), any(String[].class))).thenAnswer(invocation -> {
+            reads.incrementAndGet();
+            inside.countDown();
+            release.await(10, java.util.concurrent.TimeUnit.SECONDS);
+            return with("uid", "ada");
+        });
+        BaseLdapPathContextSource source = mock(BaseLdapPathContextSource.class);
+        when(source.getBaseLdapName()).thenReturn(new LdapName("dc=example,dc=test"));
+        when(source.getReadOnlyContext()).thenReturn(context);
+        SecurityProperties security = new SecurityProperties();
+        DirectoryStanding standing = new DirectoryStanding(source, security,
+                new DirectoryPrincipalResolver(null, security, null), new LdapProperties(), Clock.systemUTC());
+
+        java.util.concurrent.ExecutorService threads = java.util.concurrent.Executors.newFixedThreadPool(4);
+        try {
+            List<java.util.concurrent.Future<DirectoryStanding.Standing>> answers = new java.util.ArrayList<>();
+            answers.add(threads.submit(() -> standing.of("uid=ada,ou=people,dc=example,dc=test", Duration.ZERO)));
+            assertThat(inside.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            for (int i = 0; i < 3; i++) {
+                answers.add(threads.submit(() -> standing.of("uid=ada,ou=people,dc=example,dc=test", Duration.ZERO)));
+            }
+            Thread.sleep(200);
+            release.countDown();
+            for (java.util.concurrent.Future<DirectoryStanding.Standing> answer : answers) {
+                assertThat(answer.get(10, java.util.concurrent.TimeUnit.SECONDS).state())
+                        .isEqualTo(DirectoryStanding.State.ACTIVE);
+            }
+        } finally {
+            threads.shutdownNow();
+        }
+        assertThat(reads.get()).isEqualTo(1);
     }
 }

@@ -65,7 +65,6 @@ public class ApiSecurityConfig {
     public SecurityFilterChain apiTokenFilterChain(
             HttpSecurity http,
             ApiTokens tokens,
-            ApiRateLimiter limiter,
             AccessDenials denials,
             EnsSecurityProperties ens) throws Exception {
         SecurityHeaders.apply(http, ens.getCsp().isReportOnly());
@@ -78,7 +77,7 @@ public class ApiSecurityConfig {
                 .httpBasic(basic -> basic.disable())
                 .logout(logout -> logout.disable())
                 .anonymous(anonymous -> anonymous.disable())
-                .addFilterBefore(new TokenFilter(tokens, limiter), AuthorizationFilter.class)
+                .addFilterBefore(new TokenFilter(tokens), AuthorizationFilter.class)
                 .authorizeHttpRequests(authorize -> {
                     authorize.requestMatchers(PathPatternRequestMatcher.withDefaults()
                                     .matcher(org.springframework.http.HttpMethod.GET, OpenApiController.PATH))
@@ -121,11 +120,9 @@ public class ApiSecurityConfig {
     static final class TokenFilter extends OncePerRequestFilter {
 
         private final ApiTokens tokens;
-        private final ApiRateLimiter limiter;
 
-        TokenFilter(ApiTokens tokens, ApiRateLimiter limiter) {
+        TokenFilter(ApiTokens tokens) {
             this.tokens = tokens;
-            this.limiter = limiter;
         }
 
         @Override
@@ -134,13 +131,8 @@ public class ApiSecurityConfig {
             String header = request.getHeader("Authorization");
             String bearer = header == null || header.length() < 7 ? "" : header.substring(7).trim();
             ApiTokens.Outcome outcome = tokens.authenticate(bearer, request.getRemoteAddr());
-            if (!outcome.accepted()) {
-                problem(response, HttpStatus.UNAUTHORIZED, "invalid_token", describe(outcome.refusal()));
-                return;
-            }
-            ApiTokenAuthentication authentication = outcome.authentication();
-            long wait = limiter.acquire(authentication.tokenId());
-            if (wait > 0) {
+            if (outcome.refusal() == ApiTokens.Refusal.RATE_LIMITED) {
+                long wait = outcome.retryAfter();
                 response.setHeader("Retry-After", String.valueOf(wait));
                 response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
                 response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
@@ -148,6 +140,11 @@ public class ApiSecurityConfig {
                         + "\"detail\":\"This token has used its allowance; try again in " + wait + " s\"}");
                 return;
             }
+            if (!outcome.accepted()) {
+                problem(response, HttpStatus.UNAUTHORIZED, "invalid_token", describe(outcome.refusal()));
+                return;
+            }
+            ApiTokenAuthentication authentication = outcome.authentication();
             SecurityContext context = SecurityContextHolder.createEmptyContext();
             context.setAuthentication(authentication);
             SecurityContextHolder.setContext(context);
@@ -173,7 +170,7 @@ public class ApiSecurityConfig {
                 case CREATOR_DISABLED -> "The account of the person who created this API token is disabled or locked";
                 case DIRECTORY_UNAVAILABLE -> "The directory cannot be read to check this API token's creator; try again";
                 case DISABLED -> "API tokens are turned off on this installation";
-                case UNKNOWN -> "A valid API token is required";
+                case UNKNOWN, RATE_LIMITED -> "A valid API token is required";
             };
         }
     }

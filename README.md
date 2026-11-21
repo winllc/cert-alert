@@ -1363,6 +1363,9 @@ environment, list them with indexed variables, e.g. `CERT_ALERT_SECURITY_GROUPS_
 OpenLDAP's `memberOf` overlay and 389 Directory Server's MemberOf plugin both maintain the
 attribute; a directory without it grants nothing by group unless a provider says so. A group
 change counts at the person's next sign-in, or within `cache-for` for a client certificate.
+Where `memberOf` cannot be read, that sign-in gets no role from a group; the failure is kept
+for 10 seconds, not `cache-for`, so a certificate holder has their roles back on a request
+soon after the directory does.
 
 `/actuator/health` stays open so the thing can be monitored. Everything else requires
 authentication; an unauthenticated API call gets a 401 rather than a login page, because a
@@ -2838,14 +2841,18 @@ curl -H "Authorization: Bearer cat_…" \
     default; set it to the real lockout length, never shorter). A value that does not parse is
     locked, and a directory that refuses or fails a read of the policy is unreachable: refused.
   A good answer is reused for at most `cert-alert.api.creator-roles-cache-for` (a minute); a
-  refusal never is. The creator's next sign-in narrows their tokens too, never widens them.
+  refusal never is, and a directory that cannot be read is asked again after 10 seconds (one
+  read per entry at a time, with no database connection held while it waits). The creator's
+  next sign-in narrows their tokens too - to the roles the live directory gives them then,
+  never to a sign-in that could not read their groups - and never widens them.
 - **A year at most.** `cert-alert.api.max-lifetime` (default `365d`) is the expiry of a token
   created without one, the most that may be asked for, and the age at which any token stops
   working; `0` removes it.
 - **Refused** (401, `error="invalid_token"`) when unknown, revoked, past its expiry, out-ranked,
   or off (`cert-alert.api.tokens-enabled: false`).
 - **Rate-limited** per token, per replica: `cert-alert.api.requests-per-minute` (300); beyond
-  it, 429 with `Retry-After`.
+  it, 429 with `Retry-After`. The limit applies before the creator's entry is read, so a client
+  over it costs the directory nothing.
 - **No session, no CSRF.** A request with `Authorization: Bearer` on `/api/v1/**` goes through
   a filter chain of its own that keeps no session and reads none (a token with a session
   cookie is still only the token), and has no CSRF check - nothing a browser sends on its own
