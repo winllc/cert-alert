@@ -405,8 +405,8 @@ public class NotificationService {
         int told = 0;
         int unaddressed = 0;
         Set<Long> standing = new HashSet<>();
-        mailer.beginRun(dryRun);
-        boolean rehearsing = mailer.isDryRun();
+        NotificationMailer.Run run = mailer.beginRun(dryRun);
+        boolean rehearsing = run.isDryRun();
         for (Round round : rounds.values()) {
             told++;
             if (round.recipient.address() == null || round.recipient.address().isBlank()) {
@@ -415,14 +415,14 @@ public class NotificationService {
             if (rehearsing) {
                 // Nothing saved and nothing marked: a rehearsal that left notifications
                 // behind would be answering the question by doing the thing.
-                mailer.send(round.recipient, round.entries);
+                mailer.send(run, round.recipient, round.entries);
                 continue;
             }
             // The notification first, so the message knows which one it delivers: it is
             // marked emailed when the message actually goes, not when it is queued.
             Notification notification = roundUpFor(round, now);
             standing.add(notification.getId());
-            mailer.send(round.recipient, round.entries, notification.getId());
+            mailer.send(run, round.recipient, round.entries, notification.getId());
         }
         if (!rehearsing) {
             clearRoundUpsExcept(standing, complete);
@@ -438,10 +438,10 @@ public class NotificationService {
                 told,
                 unaddressed,
                 leadDays,
-                mailer.sent(),
-                mailer.queued(),
-                mailer.failures(),
-                rehearsing ? mailer.rendered() : List.of());
+                run.sent(),
+                run.queued(),
+                run.failures(),
+                rehearsing ? run.rendered() : List.of());
     }
 
     /**

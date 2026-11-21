@@ -56,16 +56,6 @@ public class NotificationMailer {
     private final MailOutbox outbox;
     private final Clock clock;
 
-    private boolean warned;
-    private int sentThisRun;
-    private boolean dryRunThisRun;
-    /** What a dry run built, in the order it built it. Empty on a run that really sent. */
-    private final List<Rendered> renderedThisRun = new ArrayList<>();
-    /** What could not be built, and why. */
-    private final List<Failure> failuresThisRun = new ArrayList<>();
-    /** What this run put in the outbox, for the caller to send once its transaction is done. */
-    private final List<Long> queuedThisRun = new ArrayList<>();
-
     public NotificationMailer(
             Optional<JavaMailSender> mailSender,
             TemplateEngine templates,
@@ -82,19 +72,23 @@ public class NotificationMailer {
     }
 
     /** Writes to one person about everything of theirs that is expiring. */
-    public boolean send(NotificationRecipients.Recipient recipient, List<ExpiryDigest.Entry> entries) {
-        return send(recipient, entries, null);
+    public boolean send(Run run, NotificationRecipients.Recipient recipient, List<ExpiryDigest.Entry> entries) {
+        return send(run, recipient, entries, null);
     }
 
     /**
      * Writes to one person about everything of theirs that is expiring: builds the messages
      * and queues them.
      *
+     * @param run the run this is part of, from {@link #beginRun(boolean)}
      * @param notificationId the round-up these deliver, marked emailed when they go
      * @return whether anything was queued (or, on a dry run, built)
      */
     public boolean send(
-            NotificationRecipients.Recipient recipient, List<ExpiryDigest.Entry> entries, Long notificationId) {
+            Run run,
+            NotificationRecipients.Recipient recipient,
+            List<ExpiryDigest.Entry> entries,
+            Long notificationId) {
         NotificationProperties.Email settings = properties.getEmail();
         if (entries.isEmpty()) {
             return false;
@@ -102,19 +96,19 @@ public class NotificationMailer {
         // A rehearsal runs with sending switched off, which is the case it is most wanted
         // in: the question "what would this send" is asked before email is turned on, not
         // after. What comes back says which it was, so nothing reads as having gone out.
-        if (!settings.isEnabled() && !dryRunThisRun) {
+        if (!settings.isEnabled() && !run.dryRun) {
             return false;
         }
-        if (!dryRunThisRun && !licensing.isEnabled("notifications")) {
-            warnOnce("Notification email is enabled but the license does not allow it: "
+        if (!run.dryRun && !licensing.isEnabled("notifications")) {
+            run.warnOnce("Notification email is enabled but the license does not allow it: "
                     + (licensing.isFullyLicensed() ? "email notifications are not included" : licensing.current().message()));
             return false;
         }
         // A dry run needs no transport, which is rather the point: the question it answers -
         // how many messages, and what do they say - is one to settle before there is a mail
         // server to answer it against.
-        if (mailSender.isEmpty() && !dryRunThisRun) {
-            warnOnce("Notification email is enabled but no mail sender is configured");
+        if (mailSender.isEmpty() && !run.dryRun) {
+            run.warnOnce("Notification email is enabled but no mail sender is configured");
             return false;
         }
         if (recipient.address() == null || recipient.address().isBlank()) {
@@ -124,11 +118,11 @@ public class NotificationMailer {
 
         boolean sent = false;
         for (ExpiryDigest digest : ExpiryDigest.split(greeting(recipient), entries)) {
-            if (sentThisRun >= settings.getMaxPerRun()) {
-                warnOnce("Notification email stopped at " + settings.getMaxPerRun() + " messages for this run");
+            if (run.sent >= settings.getMaxPerRun()) {
+                run.warnOnce("Notification email stopped at " + settings.getMaxPerRun() + " messages for this run");
                 break;
             }
-            sent |= send(settings, recipient.address(), digest, notificationId);
+            sent |= send(run, settings, recipient.address(), digest, notificationId);
         }
         return sent;
     }
@@ -147,63 +141,88 @@ public class NotificationMailer {
     }
 
     /** Called at the start of a run, so the per-run cap means what it says. */
-    public void beginRun() {
-        beginRun(false);
+    public Run beginRun() {
+        return beginRun(false);
     }
 
     /**
+     * Starts a run: what it counts, builds and queues belongs to it, so a rehearsal and a
+     * real round-up running at once on one replica each keep their own.
+     *
      * @param dryRun forces this run to build its messages and send none of them, on top of
      *     the configured mode - so somebody can ask what a round-up would do without
      *     putting the whole deployment into dry run to find out
      */
-    public void beginRun(boolean dryRun) {
-        sentThisRun = 0;
-        dryRunThisRun = dryRun || properties.getEmail().isDryRun();
-        renderedThisRun.clear();
-        failuresThisRun.clear();
-        queuedThisRun.clear();
+    public Run beginRun(boolean dryRun) {
+        return new Run(dryRun || properties.getEmail().isDryRun());
     }
 
-    /** What this run queued, by outbox id. */
-    public List<Long> queued() {
-        return List.copyOf(queuedThisRun);
-    }
+    /** One run's messages: what it built, queued and could not build, and how many. */
+    public static final class Run {
 
-    /**
-     * How many messages this run has queued - or built and dropped, on a dry run.
-     *
-     * <p>Not the same as the number of people written to: somebody who holds an expiring
-     * certificate and looks after an expiring server gets one message about each, and "how
-     * many emails" is a question about messages.
-     */
-    public int sent() {
-        return sentThisRun;
+        private final boolean dryRun;
+        private int sent;
+        private boolean warned;
+        /** What a dry run built, in the order it built it. Empty on a run that really sent. */
+        private final List<Rendered> rendered = new ArrayList<>();
+        /** What could not be built, and why. */
+        private final List<Failure> failures = new ArrayList<>();
+        /** What this run put in the outbox, for the caller to send once its transaction is done. */
+        private final List<Long> queued = new ArrayList<>();
+
+        private Run(boolean dryRun) {
+            this.dryRun = dryRun;
+        }
+
+        /** What this run queued, by outbox id. */
+        public List<Long> queued() {
+            return List.copyOf(queued);
+        }
+
+        /**
+         * How many messages this run has queued - or built and dropped, on a dry run.
+         *
+         * <p>Not the same as the number of people written to: somebody who holds an expiring
+         * certificate and looks after an expiring server gets one message about each, and "how
+         * many emails" is a question about messages.
+         */
+        public int sent() {
+            return sent;
+        }
+
+        /** Whether messages are being built and thrown away rather than sent. */
+        public boolean isDryRun() {
+            return dryRun;
+        }
+
+        /** What the run just built, for showing somebody what would have gone out. */
+        public List<Rendered> rendered() {
+            return List.copyOf(rendered);
+        }
+
+        /**
+         * What went wrong, for saying so where it will be read.
+         *
+         * <p>A message that cannot be built used to leave a line in the log and nothing else -
+         * so a deployment with a template of its own that does not compile saw "nothing would be
+         * sent" and no way to find out why. A rehearsal exists to surface exactly that.
+         */
+        public List<Failure> failures() {
+            return List.copyOf(failures);
+        }
+
+        /** Once per run: the same reason applies to every message in it. */
+        private void warnOnce(String message) {
+            if (!warned) {
+                log.warn(message);
+                warned = true;
+            }
+        }
     }
 
     /** Whether there is anything to send with, which {@code spring.mail.*} decides. */
     public boolean hasSender() {
         return mailSender.isPresent();
-    }
-
-    /** Whether messages are being built and thrown away rather than sent. */
-    public boolean isDryRun() {
-        return dryRunThisRun;
-    }
-
-    /** What the run just built, for showing somebody what would have gone out. */
-    public List<Rendered> rendered() {
-        return List.copyOf(renderedThisRun);
-    }
-
-    /**
-     * What went wrong, for saying so where it will be read.
-     *
-     * <p>A message that cannot be built used to leave a line in the log and nothing else -
-     * so a deployment with a template of its own that does not compile saw "nothing would be
-     * sent" and no way to find out why. A rehearsal exists to surface exactly that.
-     */
-    public List<Failure> failures() {
-        return List.copyOf(failuresThisRun);
     }
 
     /**
@@ -225,7 +244,11 @@ public class NotificationMailer {
     public record Failure(String to, String reason) {}
 
     private boolean send(
-            NotificationProperties.Email settings, String address, ExpiryDigest digest, Long notificationId) {
+            Run run,
+            NotificationProperties.Email settings,
+            String address,
+            ExpiryDigest digest,
+            Long notificationId) {
         String template = digest.getOwnerType() == OwnerType.USER ? USER_TEMPLATE : SERVER_TEMPLATE;
         try {
             Context context = new Context(Locale.ENGLISH);
@@ -235,18 +258,18 @@ public class NotificationMailer {
             String text = templates.process(template + ".txt", context);
             String html = templates.process(template, context);
 
-            if (dryRunThisRun) {
+            if (run.dryRun) {
                 // Built and dropped, which is the point: everything that could go wrong in
                 // the building has already happened by here.
-                renderedThisRun.add(new Rendered(address, subject, text, html));
-                sentThisRun++;
+                run.rendered.add(new Rendered(address, subject, text, html));
+                run.sent++;
                 return true;
             }
 
             // One round-up of each kind per address is worth sending: a newer one replaces
             // whatever is still waiting from an earlier run.
             String supersedes = "digest:" + digest.getOwnerType() + ":" + address.toLowerCase(Locale.ROOT);
-            queuedThisRun.add(outbox.queue(
+            run.queued.add(outbox.queue(
                     new OutboundEmail(
                             OutboundEmail.Kind.DIGEST,
                             settings.getFrom(),
@@ -258,11 +281,11 @@ public class NotificationMailer {
                             notificationId,
                             Instant.now(clock)),
                     false));
-            sentThisRun++;
+            run.sent++;
             return true;
         } catch (RuntimeException e) {
             log.error("Could not build the expiry round-up for {}", address, e);
-            failuresThisRun.add(new Failure(address, describe(e)));
+            run.failures.add(new Failure(address, describe(e)));
             return false;
         }
     }
@@ -281,12 +304,5 @@ public class NotificationMailer {
                 .lines()
                 .findFirst()
                 .orElse(cause.getClass().getSimpleName());
-    }
-
-    private void warnOnce(String message) {
-        if (!warned) {
-            log.warn(message);
-            warned = true;
-        }
     }
 }
