@@ -211,6 +211,32 @@ class AuditChainTest {
     }
 
     @Test
+    void anExportFollowsOnBySeqSoEventsRecordedMeanwhileShiftNothing() {
+        String run = "export-" + System.nanoTime();
+        List<AuditRecord> many = new java.util.ArrayList<>();
+        for (int i = 0; i < 1_005; i++) {
+            many.add(event("test.export").detail("run", run));
+        }
+        audit.recordAll(many);
+        long upTo = store.headSeq();
+        AuditQuery query = new AuditQuery(null, null, null, "test.export", null, null, null, null, null, run);
+
+        List<Long> seen = new java.util.ArrayList<>();
+        int handed = store.forEach(query, upTo, 2_000, e -> {
+            if (seen.isEmpty()) {
+                // appended while the export streams, as a busy portal does
+                java.util.concurrent.CompletableFuture.runAsync(() -> audit.recordAll(List.of(
+                        event("test.export").detail("run", run), event("test.export").detail("run", run),
+                        event("test.export").detail("run", run)))).join();
+            }
+            seen.add(e.getSeq());
+        });
+
+        assertThat(handed).isEqualTo(1_005);
+        assertThat(seen).doesNotHaveDuplicates().allMatch(seq -> seq <= upTo);
+    }
+
+    @Test
     void pruningNeverRemovesTheNewestEvent() {
         Instant old = Instant.now().minus(Duration.ofDays(40));
         long head = store.headSeq();

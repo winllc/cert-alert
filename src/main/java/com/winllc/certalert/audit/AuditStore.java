@@ -12,6 +12,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -84,29 +85,33 @@ public class AuditStore {
     }
 
     /**
-     * Every match, newest first, up to {@code limit}, a page at a time so an export does not
-     * hold the whole trail at once.
+     * Every match at or below {@code upToSeq}, newest first, up to {@code limit}, a batch at a
+     * time so an export does not hold the whole trail at once. Batches follow on by seq (each
+     * below the last one handed over), so events appended meanwhile shift nothing, and no batch
+     * counts the matches.
      *
      * @return how many were handed over
      */
     @Transactional(readOnly = true)
-    public int forEach(AuditQuery query, int limit, Consumer<AuditEvent> consumer) {
+    public int forEach(AuditQuery query, long upToSeq, int limit, Consumer<AuditEvent> consumer) {
         int handed = 0;
-        int page = 0;
+        long below = upToSeq + 1;
         while (handed < limit) {
-            Page<AuditEvent> batch = repository.findAll(
-                    query.toSpecification(), PageRequest.of(page++, 1000, Sort.by(Sort.Direction.DESC, "seq")));
-            for (AuditEvent event : batch.getContent()) {
-                if (handed == limit) {
-                    break;
-                }
+            long bound = below;
+            Specification<AuditEvent> page = query.toSpecification()
+                    .and((root, q, cb) -> cb.lessThan(root.get("seq"), bound));
+            int size = Math.min(1000, limit - handed);
+            List<AuditEvent> batch = repository.findBy(page,
+                    q -> q.sortBy(Sort.by(Sort.Direction.DESC, "seq")).limit(size).all());
+            for (AuditEvent event : batch) {
                 consumer.accept(event);
                 handed++;
             }
-            batch.getContent().forEach(entityManager::detach);
-            if (!batch.hasNext()) {
+            batch.forEach(entityManager::detach);
+            if (batch.size() < size) {
                 break;
             }
+            below = batch.getLast().getSeq();
         }
         return handed;
     }
