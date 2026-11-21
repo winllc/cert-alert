@@ -331,8 +331,8 @@ public class AuditDeliveryService implements SmartLifecycle {
         synchronized (signal) {
             try {
                 long left;
-                while ((left = (deadline - System.nanoTime()) / 1_000_000) > 0) {
-                    signal.wait(left);
+                while ((left = deadline - System.nanoTime()) > 0) {
+                    signal.wait((left + 999_999) / 1_000_000);
                     if (!backingOff) {
                         break;
                     }
