@@ -2413,6 +2413,8 @@ down loses nothing:
 - a message that cannot be sent stays queued and is tried again a minute later, then two,
   four and so on up to an hour apart (`cert-alert.mail.outbox.retry-initial` / `retry-max`),
   each failure logged as a warning with the mail server's reason;
+- a round-up, like a background pass, stops after three failures in a row and leaves the rest
+  queued for the next pass, rather than waiting out every message's timeout;
 - a newer round-up to the same address replaces one still waiting, so a mail server that comes
   back after a weekend delivers today's round-up rather than three;
 - after three days (`give-up-after`) a message is given up on, with an error in the log;

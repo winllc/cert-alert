@@ -173,7 +173,9 @@ public class MailOutbox {
      * Sends these messages now, on the calling thread, and says how that went. For a caller
      * that has to report what it sent - the round-up, which answers a button on the page.
      * Must be called outside a transaction: the whole point is not to hold one while the
-     * mail server thinks. Inside one, they are left to the background instead.
+     * mail server thinks. Inside one, they are left to the background instead. Like a
+     * background pass it stops after three failures in a row, and reports the rest as not
+     * sent: they stay queued for the next pass.
      */
     public Delivery deliver(Collection<Long> ids) {
         if (ids.isEmpty()) {
@@ -187,14 +189,34 @@ public class MailOutbox {
         try {
             return locks.runExclusively(LOCK, () -> {
                         int sent = 0;
+                        int failedInARow = 0;
                         List<Delivery.Failure> failures = new ArrayList<>();
+                        List<Long> untried = new ArrayList<>();
                         for (Long id : ids) {
+                            if (failedInARow >= FAILURES_PER_PASS) {
+                                // As in a background pass: a mail server that is down fails
+                                // each one after a full timeout. The rest are left queued.
+                                untried.add(id);
+                                continue;
+                            }
                             Attempt attempt = attempt(id);
                             if (attempt.sent() || attempt.alreadySent()) {
                                 sent++;
+                                failedInARow = 0;
                             } else if (attempt.message() != null) {
                                 failures.add(new Delivery.Failure(attempt.message().getRecipients(), attempt.error()));
+                                failedInARow++;
                             }
+                        }
+                        if (!untried.isEmpty()) {
+                            String reason = "not tried after " + FAILURES_PER_PASS + " failures in a row before it";
+                            for (OutboundEmail message : outbox.findAllById(untried)) {
+                                if (message.getState() == OutboundEmail.State.PENDING) {
+                                    failures.add(new Delivery.Failure(message.getRecipients(), reason));
+                                }
+                            }
+                            log.warn("Stopped sending after {} failures in a row; {} message(s) are left queued for the "
+                                    + "next pass", FAILURES_PER_PASS, untried.size());
                         }
                         return new Delivery(sent, failures, false);
                     })
