@@ -73,6 +73,7 @@ public class CertificateRefreshPageProcessor {
         List<AuditEvent> records = new ArrayList<>();
         String actor = AuditActors.current(AuditActors.REFRESH);
         int alerts = 0;
+        List<CachedCertificate> alertable = new ArrayList<>();
         for (CachedCertificate certificate : stale) {
             CertificateStatus previous = certificate.getStatus();
             CertificateStatus current = evaluator.evaluate(certificate.getNotAfter(), now);
@@ -83,7 +84,13 @@ public class CertificateRefreshPageProcessor {
             changedIds.add(certificate.getId());
             records.add(statusChange(certificate, previous, current, now, actor));
             if (current.isAlertable()) {
-                alerts += raiseAlert(certificate, current, now);
+                alertable.add(certificate);
+            }
+        }
+        // Once every status on the page has moved, so a renewal is judged as it now stands.
+        for (CachedCertificate certificate : alertable) {
+            if (!renewed(certificate)) {
+                alerts += raiseAlert(certificate, certificate.getStatus(), now);
             }
         }
         auditService.recordAll(records);
@@ -115,6 +122,21 @@ public class CertificateRefreshPageProcessor {
                         now)
                 .by(actor)
                 .forCertificate(certificate.getSha256Fingerprint());
+    }
+
+    /**
+     * Whether its entry has already published its renewal. A directory keeps the old
+     * certificate after a renewal, and it lapsing then is not news: the change is still in
+     * the history, but nobody is alerted about a certificate somebody has already replaced.
+     */
+    private static boolean renewed(CachedCertificate certificate) {
+        if (certificate.getUser() != null) {
+            return Renewals.replaced(certificate, certificate.getUser().getCertificates());
+        }
+        if (certificate.getServer() != null) {
+            return Renewals.replaced(certificate, certificate.getServer().getCertificates());
+        }
+        return false;
     }
 
     private int raiseAlert(CachedCertificate certificate, CertificateStatus status, Instant now) {

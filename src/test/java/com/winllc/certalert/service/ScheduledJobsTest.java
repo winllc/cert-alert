@@ -88,6 +88,31 @@ class ScheduledJobsTest {
         assertThat(alert.getValue().contact()).isEqualTo("lapsed@example.gov");
     }
 
+    /**
+     * The directory keeps the old certificate after a renewal. Its lapsing is recorded, but
+     * nobody is alerted about a certificate that has already been replaced.
+     */
+    @Test
+    void refreshDoesNotAlertAboutACertificateAlreadyRenewed() {
+        Instant now = Instant.now();
+        CachedCertificate old = certificate("CN=renewer", now.minus(Duration.ofHours(6)),
+                CertificateStatus.EXPIRING_SOON, now);
+        CachedCertificate renewal = new CachedCertificate("f".repeat(64), "02", "CN=renewer", "CN=Example CA",
+                now.minus(Duration.ofDays(10)), now.plus(Duration.ofDays(355)), "SHA256withRSA", "SHA-256", "RSA",
+                2048, null, now);
+        renewal.updateStatus(CertificateStatus.VALID, now);
+        userRepository.save(userWith("uid=renewer,ou=people", "Re Newer", "renewer@example.gov", old, renewal));
+
+        DirectorySyncResult result = refreshService.refresh();
+
+        assertThat(certificateRepository.findAll())
+                .filteredOn(certificate -> "01".equals(certificate.getSerialNumber()))
+                .singleElement()
+                .satisfies(certificate -> assertThat(certificate.getStatus()).isEqualTo(CertificateStatus.EXPIRED));
+        assertThat(result.alertsRaised()).isZero();
+        verify(alertDispatcher, never()).dispatch(any());
+    }
+
     @Test
     void refreshMovesACertificateIntoTheWarningWindow() {
         Instant now = Instant.now();

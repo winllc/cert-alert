@@ -417,6 +417,7 @@ public class DirectoryPersistenceService {
             }
         }
 
+        List<CachedCertificate> alertable = new ArrayList<>();
         for (Map.Entry<String, CachedCertificate> candidate : parsed.entrySet()) {
             CachedCertificate certificate = existing.get(candidate.getKey());
             boolean isNew = certificate == null;
@@ -453,19 +454,29 @@ public class DirectoryPersistenceService {
             // A newly discovered certificate is not news, it is just the first time we
             // looked. Only a transition into a bad state is worth waking someone for.
             if (!isNew && current != previous && current.isAlertable()) {
-                long daysUntilExpiry = evaluator.daysUntilExpiry(certificate.getNotAfter(), now);
-                alertDispatcher.dispatch(CertificateAlert.from(
-                        ownerType,
-                        ownerId,
-                        ownerName,
-                        entity.getDn(),
-                        contact.get(),
-                        certificate,
-                        evaluator.severityFor(current, daysUntilExpiry),
-                        daysUntilExpiry,
-                        now));
-                alertsRaised++;
+                alertable.add(certificate);
             }
+        }
+
+        // With everything the entry now publishes in place: an old certificate lapsing
+        // beside its renewal is in the history above, but nobody is woken for it.
+        for (CachedCertificate certificate : alertable) {
+            if (Renewals.replaced(certificate, entity.getCertificates())) {
+                continue;
+            }
+            CertificateStatus current = certificate.getStatus();
+            long daysUntilExpiry = evaluator.daysUntilExpiry(certificate.getNotAfter(), now);
+            alertDispatcher.dispatch(CertificateAlert.from(
+                    ownerType,
+                    ownerId,
+                    ownerName,
+                    entity.getDn(),
+                    contact.get(),
+                    certificate,
+                    evaluator.severityFor(current, daysUntilExpiry),
+                    daysUntilExpiry,
+                    now));
+            alertsRaised++;
         }
 
         return new CertificateReconciliation(cached, removed, alertsRaised);

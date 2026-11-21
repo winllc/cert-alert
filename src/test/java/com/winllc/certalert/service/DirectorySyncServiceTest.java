@@ -371,6 +371,28 @@ class DirectorySyncServiceTest {
         assertThat(alert.getValue().contact()).isEqualTo("crossing@example.gov");
     }
 
+    /** The same crossing beside its renewal is in the history, and nobody is alerted. */
+    @Test
+    void noAlertWhenACertificateAlreadyRenewedCrossesIntoExpiry() {
+        Instant now = Instant.now();
+        String dn = directory.addUser("renewing", "Renewing Holder", "renewing@example.gov",
+                TestCertificates.der("renewing", now.minus(Duration.ofDays(365)), now.plus(Duration.ofSeconds(2))),
+                TestCertificates.der("renewing", now.minus(Duration.ofDays(1)), now.plus(Duration.ofDays(364))));
+
+        syncAll();
+        await(Duration.ofSeconds(3));
+        DirectorySyncResult result = syncService.syncUsers();
+
+        DirectoryUser user = userRepository.findByDn(dn).orElseThrow();
+        List<CertificateStatus> statuses = transactionTemplate.execute(status ->
+                userRepository.findWithCertificatesById(user.getId()).orElseThrow().getCertificates().stream()
+                        .map(CachedCertificate::getStatus)
+                        .toList());
+        assertThat(statuses).contains(CertificateStatus.EXPIRED);
+        assertThat(result.alertsRaised()).isZero();
+        verify(alertDispatcher, never()).dispatch(any());
+    }
+
     /**
      * The directory owns serverPOC and a sweep replaces it wholesale. A contact added here
      * is not the directory's to replace, which is the whole reason it lives in its own
