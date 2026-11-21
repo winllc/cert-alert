@@ -724,11 +724,15 @@ public class NotificationService {
      * about a certificate somebody has already dealt with, which is how a round-up teaches
      * people to ignore it. Note that it is not "the newest one wins": an entry holding two
      * certificates for different names holds both because it needs both.
+     *
+     * <p>A person is asked the second question alone. They hold a pair, and the roll-up
+     * passing over an expired half because the other half is current does not mean anybody
+     * renewed it: half a pair lapsed and not replaced is the case most worth telling.
      */
     private Set<Long> stillDependedOn(DirectoryEntry entry) {
         List<CachedCertificate> held = entry.getCertificates();
         Set<Long> ids = new HashSet<>();
-        for (CachedCertificate certificate : entry.standingCertificates()) {
+        for (CachedCertificate certificate : entry instanceof DirectoryUser ? held : entry.standingCertificates()) {
             if (certificate.getId() == null) {
                 continue;
             }

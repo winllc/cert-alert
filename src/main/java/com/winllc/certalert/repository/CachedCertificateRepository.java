@@ -134,9 +134,11 @@ public interface CachedCertificateRepository
      * certificates are leftovers beside a current one, and reading them all only to drop
      * them after would spend the read on nothing. The rule is the first half of
      * {@link com.winllc.certalert.domain.DirectoryEntry#standingCertificates()}: a
-     * certificate marked expired is passed over when its entry holds another that is not -
-     * and, for one not yet marked, {@link #REPLACED}. The rest of that question - which of
-     * several a server stands on - is the caller's, because it compares subjects and names.
+     * server's certificate marked expired is passed over when the server holds another that
+     * is not; a person's only once it is {@link #REPLACED}, since a person holds a pair and
+     * the other half being current says nothing about this one. The rest of that question -
+     * which of several a server stands on - is the caller's, because it compares subjects
+     * and names.
      */
     @Query("""
             select c from CachedCertificate c
@@ -147,12 +149,10 @@ public interface CachedCertificateRepository
               and c.notAfter > :floor
               and (c.notAfter < :beforeNotAfter or (c.notAfter = :beforeNotAfter and c.id < :beforeId))
               and (c.status <> :expired
-                   or ((c.user is null or not exists (
+                   or c.server is null
+                   or not exists (
                             select o.id from CachedCertificate o
-                            where o.user = c.user and o.id <> c.id and o.status <> :expired))
-                       and (c.server is null or not exists (
-                            select o.id from CachedCertificate o
-                            where o.server = c.server and o.id <> c.id and o.status <> :expired))))
+                            where o.server = c.server and o.id <> c.id and o.status <> :expired))
               and not\s""" + REPLACED + """
             order by c.notAfter desc, c.id desc
             """)

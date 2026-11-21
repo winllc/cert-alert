@@ -2399,7 +2399,9 @@ one beside it. The page and the message agree, which they would not if the round
 question of its own.
 
 An entry whose certificates have *all* lapsed is the case that most needs telling, and it
-still is: with nothing standing, nothing has been replaced.
+still is: with nothing standing, nothing has been replaced. So is half of a person's pair
+that lapsed and was not renewed, though the roll-up passes over it while the other half is
+current: for a person the round-up asks only whether it was replaced.
 
 #### When the mail server is down
 
