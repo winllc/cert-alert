@@ -313,6 +313,10 @@ cert-alert:
       # Wants to be comfortably longer than the sync interval, so a run of failed sweeps
       # can never delete the directory.
       after: 30d
+      # Each kind of entry is pruned only when a sweep of it has since completed with no
+      # errors and not seen them, and only when they are no more than this share of that
+      # kind; otherwise that kind is left alone and the run says why.
+      max-share: 0.10
 
     # ---------------------------------------------------------------------------------
     # Attribute mapping, following the IC FSD schema (FSD v2021-NOV). The specification

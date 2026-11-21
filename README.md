@@ -3052,8 +3052,11 @@ the directory, and deletions there cannot be undone from this side. See
 silently. It works on how long an entry has gone unseen rather than by diffing a sweep's
 results, because a sweep that died halfway through looks exactly like a directory that lost
 half its entries; with `after` set well beyond the sync interval, several consecutive
-failed sweeps still cannot delete anything. Check `GET /api/v1/sync/prune/preview` before
-turning it on.
+failed sweeps still cannot delete anything. Nor can a month of them: each kind of entry is
+pruned only when a sweep of that kind has completed with no errors since the newest of them
+was last seen, and only when they are at most `prune.max-share` (10%) of that kind. Otherwise
+that kind is left in place, the run is recorded as completed with errors, and the log says
+why. Check `GET /api/v1/sync/prune/preview` before turning it on.
 
 Every job is guarded against overlapping itself — a sweep of a large directory can outlast
 its own interval — by a lock in the database (`shedlock`), which a run started by hand takes
@@ -3461,6 +3464,7 @@ Scraping, under `cert-alert.ldap`:
 | `prune.enabled`      | `false` | Whether stale entries are deleted at all        |
 | `prune.cron`         | `0 0 6 * * SUN` | Prune schedule                          |
 | `prune.after`        | `30d`   | How long an entry may go unseen before deletion |
+| `prune.max-share`    | `0.10`  | Most of one kind of entry one prune may delete  |
 | `changelog.enabled`  | `false` | Follow the directory's changelog continuously   |
 | `changelog.auto-start` | `true` | Whether the loop starts with the application   |
 | `changelog.base-dn`  | `cn=changelog` | The changelog suffix                     |

@@ -4,15 +4,18 @@ import com.winllc.certalert.domain.AuditAction;
 import com.winllc.certalert.domain.AuditEvent;
 import com.winllc.certalert.domain.OwnerType;
 import com.winllc.certalert.domain.SyncJob;
+import com.winllc.certalert.domain.SyncStatus;
 import com.winllc.certalert.ldap.LdapProperties;
 import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.DirectoryUserRepository;
 import com.winllc.certalert.repository.PrunableEntry;
+import com.winllc.certalert.repository.SyncRunRepository;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -26,6 +29,13 @@ import org.springframework.transaction.annotation.Transactional;
  * otherwise look exactly like a directory that lost half its entries. With the window set
  * comfortably longer than the sync interval, several consecutive failed sweeps still
  * cannot delete anything.
+ *
+ * <p>Nor can a month of them. Each kind of entry is pruned only when a sweep of that kind
+ * has completed with no errors since the newest of them was last seen - so every entry
+ * deleted was missing from a whole, clean sweep - and only when they are no more than
+ * {@code max-share} of that kind. Otherwise that kind is left alone, and the run says so.
+ * What a prune deletes takes hand-entered contacts, aliases and project memberships with
+ * it, which no later sweep can bring back.
  */
 @Service
 public class DirectoryPruneService {
@@ -37,6 +47,7 @@ public class DirectoryPruneService {
     private final LdapProperties properties;
     private final SyncRunRecorder runRecorder;
     private final AuditService auditService;
+    private final SyncRunRepository syncRuns;
     private final Clock clock;
 
     public DirectoryPruneService(
@@ -45,12 +56,14 @@ public class DirectoryPruneService {
             LdapProperties properties,
             SyncRunRecorder runRecorder,
             AuditService auditService,
+            SyncRunRepository syncRuns,
             Clock clock) {
         this.userRepository = userRepository;
         this.serverRepository = serverRepository;
         this.properties = properties;
         this.runRecorder = runRecorder;
         this.auditService = auditService;
+        this.syncRuns = syncRuns;
         this.clock = clock;
     }
 
@@ -78,16 +91,29 @@ public class DirectoryPruneService {
         Long runId = runRecorder.started(SyncJob.PRUNE, now);
 
         int pruned;
+        int refused;
         try {
             // Named before they are deleted: afterwards there is nothing left to name, and
             // the record of a deletion is the one an audit trail exists for.
             List<AuditEvent> records = new ArrayList<>();
-            records.addAll(recordsFor(userRepository.findPrunableBefore(cutoff), OwnerType.USER, cutoff, now));
-            records.addAll(recordsFor(serverRepository.findPrunableBefore(cutoff), OwnerType.SERVER, cutoff, now));
-
-            int users = userRepository.deleteByLastSyncedAtBefore(cutoff);
-            int servers = serverRepository.deleteByLastSyncedAtBefore(cutoff);
+            int users = 0;
+            int servers = 0;
+            String usersRefused = refusal(SyncJob.USERS, "user",
+                    userRepository.countByLastSyncedAtBefore(cutoff), userRepository.count(),
+                    () -> userRepository.findNewestSyncedBefore(cutoff));
+            if (usersRefused == null) {
+                records.addAll(recordsFor(userRepository.findPrunableBefore(cutoff), OwnerType.USER, cutoff, now));
+                users = userRepository.deleteByLastSyncedAtBefore(cutoff);
+            }
+            String serversRefused = refusal(SyncJob.SERVERS, "server",
+                    serverRepository.countByLastSyncedAtBefore(cutoff), serverRepository.count(),
+                    () -> serverRepository.findNewestSyncedBefore(cutoff));
+            if (serversRefused == null) {
+                records.addAll(recordsFor(serverRepository.findPrunableBefore(cutoff), OwnerType.SERVER, cutoff, now));
+                servers = serverRepository.deleteByLastSyncedAtBefore(cutoff);
+            }
             pruned = users + servers;
+            refused = (usersRefused == null ? 0 : 1) + (serversRefused == null ? 0 : 1);
             auditService.recordAll(records);
             log.info("Pruned {} user(s) and {} server(s) unseen since {}", users, servers, cutoff);
         } catch (RuntimeException e) {
@@ -96,10 +122,36 @@ public class DirectoryPruneService {
             throw e;
         }
 
+        // A kind left alone counts as an error, so the run reads COMPLETED_WITH_ERRORS.
         DirectorySyncResult result = new DirectorySyncResult(
-                SyncJob.PRUNE, 0, 0, 0, 0, 0, pruned, 0, Duration.ofNanos(System.nanoTime() - startedNanos));
+                SyncJob.PRUNE, 0, 0, 0, 0, 0, pruned, refused, Duration.ofNanos(System.nanoTime() - startedNanos));
         runRecorder.finished(runId, Instant.now(clock), result);
         return result;
+    }
+
+    /**
+     * Why entries of this kind may not be pruned now, or null where they may (or there are
+     * none to prune). Logged as a warning, since it means somebody has a sweep to look at.
+     */
+    private String refusal(
+            SyncJob sweep, String kind, long candidates, long total, Supplier<Instant> newestCandidate) {
+        if (candidates == 0) {
+            return null;
+        }
+        String reason = null;
+        Instant newest = newestCandidate.get();
+        double maxShare = properties.getPrune().getMaxShare();
+        if (newest == null || !syncRuns.existsByJobAndStatusAndStartedAtAfter(sweep, SyncStatus.COMPLETED, newest)) {
+            reason = "no %s sweep has completed without errors since they were last seen, so they may only have been missed"
+                    .formatted(kind);
+        } else if (candidates > total * maxShare) {
+            reason = "that is more than %s of every %s (cert-alert.ldap.prune.max-share)"
+                    .formatted(java.text.NumberFormat.getPercentInstance(java.util.Locale.ROOT).format(maxShare), kind);
+        }
+        if (reason != null) {
+            log.warn("Prune: left {} unseen {} entr(ies) of {} in place: {}", candidates, kind, total, reason);
+        }
+        return reason;
     }
 
     /** How many entries the next prune would remove, for checking before enabling it. */

@@ -12,9 +12,13 @@ import com.winllc.certalert.domain.CertificateStatus;
 import com.winllc.certalert.domain.DirectoryServer;
 import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.domain.Severity;
+import com.winllc.certalert.domain.SyncJob;
+import com.winllc.certalert.domain.SyncRun;
+import com.winllc.certalert.ldap.LdapProperties;
 import com.winllc.certalert.repository.CachedCertificateRepository;
 import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.DirectoryUserRepository;
+import com.winllc.certalert.repository.SyncRunRepository;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -33,7 +37,9 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
  */
 @SpringBootTest
 @ActiveProfiles("test")
-@TestPropertySource(properties = "cert-alert.ldap.prune.after=7d")
+// A handful of entries, so any one of them is a large share; the share check has a test of
+// its own below.
+@TestPropertySource(properties = {"cert-alert.ldap.prune.after=7d", "cert-alert.ldap.prune.max-share=1.0"})
 class ScheduledJobsTest {
 
     @Autowired
@@ -54,10 +60,17 @@ class ScheduledJobsTest {
     @MockitoBean
     private AlertDispatcher alertDispatcher;
 
+    @Autowired
+    private SyncRunRepository syncRuns;
+
+    @Autowired
+    private LdapProperties ldapProperties;
+
     @BeforeEach
     void reset() {
         serverRepository.deleteAll();
         userRepository.deleteAll();
+        syncRuns.deleteAll();
     }
 
     @Test
@@ -188,6 +201,8 @@ class ScheduledJobsTest {
         serverRepository.save(staleServer);
 
         assertThat(pruneService.countPrunable()).isEqualTo(2);
+        sweptCleanly(SyncJob.USERS, now.minus(Duration.ofHours(1)), 0);
+        sweptCleanly(SyncJob.SERVERS, now.minus(Duration.ofHours(1)), 0);
 
         DirectorySyncResult result = pruneService.prune();
 
@@ -205,10 +220,65 @@ class ScheduledJobsTest {
         stale.markSynced(now.minus(Duration.ofDays(30)));
         userRepository.save(stale);
         assertThat(certificateRepository.count()).isEqualTo(1);
+        sweptCleanly(SyncJob.USERS, now.minus(Duration.ofHours(1)), 0);
 
         pruneService.prune();
 
         assertThat(certificateRepository.count()).isZero();
+    }
+
+    /**
+     * Unseen for longer than the window, but no sweep has completed cleanly since: a month of
+     * failed sweeps - an expired bind password, a lapsed license - must not delete anything.
+     */
+    @Test
+    void pruneDeletesNothingWithoutACleanSweepSinceTheEntriesWereSeen() {
+        Instant now = Instant.now();
+        DirectoryUser stale = userWith("uid=missed,ou=people", "Mis Sed", "missed@example.gov");
+        stale.markSynced(now.minus(Duration.ofDays(30)));
+        userRepository.save(stale);
+        // The last clean one saw it; the ones since failed, or wrote with errors.
+        sweptCleanly(SyncJob.USERS, now.minus(Duration.ofDays(30)), 0);
+        sweptCleanly(SyncJob.USERS, now.minus(Duration.ofDays(1)), 3);
+
+        DirectorySyncResult result = pruneService.prune();
+
+        assertThat(result.entriesPruned()).isZero();
+        assertThat(result.errors()).isEqualTo(1);
+        assertThat(userRepository.findByDn("uid=missed,ou=people")).isPresent();
+    }
+
+    /** A sweep that comes back short looks like a directory that lost people. Too many is refused. */
+    @Test
+    void pruneDeletesNothingWhenItWouldTakeMoreThanTheShare() {
+        Instant now = Instant.now();
+        for (int i = 0; i < 3; i++) {
+            DirectoryUser stale = userWith("uid=short" + i + ",ou=people", "Short " + i, "short" + i + "@example.gov");
+            stale.markSynced(now.minus(Duration.ofDays(30)));
+            userRepository.save(stale);
+        }
+        DirectoryUser seen = userWith("uid=seen,ou=people", "Se En", "seen@example.gov");
+        seen.markSynced(now);
+        userRepository.save(seen);
+        sweptCleanly(SyncJob.USERS, now.minus(Duration.ofHours(1)), 0);
+        double share = ldapProperties.getPrune().getMaxShare();
+        ldapProperties.getPrune().setMaxShare(0.10);
+        try {
+            DirectorySyncResult result = pruneService.prune();
+
+            assertThat(result.entriesPruned()).isZero();
+            assertThat(userRepository.count()).isEqualTo(4);
+        } finally {
+            ldapProperties.getPrune().setMaxShare(share);
+        }
+    }
+
+    /** A sweep of this kind, finished, as the run log records one. */
+    private void sweptCleanly(SyncJob job, Instant startedAt, int errors) {
+        SyncRun run = SyncRun.started(job, startedAt);
+        run.record(10, 0, 0, 0, 0, errors);
+        run.succeeded(startedAt.plus(Duration.ofMinutes(5)));
+        syncRuns.save(run);
     }
 
     private DirectoryUser userWith(String dn, String displayName, String email, CachedCertificate... certificates) {

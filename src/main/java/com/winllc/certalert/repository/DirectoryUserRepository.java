@@ -86,6 +86,10 @@ public interface DirectoryUserRepository extends DataTablesRepository<DirectoryU
 
     long countByLastSyncedAtBefore(Instant cutoff);
 
+    /** When the most recently seen of those the prune would remove was last seen. */
+    @Query("select max(u.lastSyncedAt) from DirectoryUser u where u.lastSyncedAt < :cutoff")
+    Instant findNewestSyncedBefore(@Param("cutoff") Instant cutoff);
+
     /** Used by the prune job; the cascade takes the certificates and identifiers with it. */
     @Modifying
     @Query("delete from DirectoryUser u where u.lastSyncedAt < :cutoff")

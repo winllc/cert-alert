@@ -55,6 +55,9 @@ class AuditTrailTest {
     private DirectoryUserRepository userRepository;
 
     @Autowired
+    private org.springframework.transaction.support.TransactionTemplate transactionTemplate;
+
+    @Autowired
     private DirectoryServerRepository serverRepository;
 
     @BeforeAll
@@ -75,8 +78,8 @@ class AuditTrailTest {
         registry.add("spring.ldap.base", () -> EmbeddedDirectory.BASE_DN);
         registry.add("cert-alert.ldap.user.search-base", () -> "ou=people");
         registry.add("cert-alert.ldap.server.search-base", () -> "ou=servers");
-        // So a prune can be driven without waiting a month for the window to pass.
-        registry.add("cert-alert.ldap.prune.after", () -> "0s");
+        // One entry is a large share of the few here.
+        registry.add("cert-alert.ldap.prune.max-share", () -> "1.0");
     }
 
     @BeforeEach
@@ -203,6 +206,11 @@ class AuditTrailTest {
         String dn = directory.addUser("doomed", "Doo Med", "doomed@example.gov");
         syncService.syncUsers();
         Long userId = userIdOf(dn);
+        // Gone from the directory a month ago, and a clean sweep since has not seen it.
+        directory.delete(dn);
+        transactionTemplate.executeWithoutResult(status -> userRepository.findById(userId).orElseThrow()
+                .markSynced(java.time.Instant.now().minus(java.time.Duration.ofDays(60))));
+        syncService.syncUsers();
 
         pruneService.prune();
 
