@@ -9,6 +9,7 @@ import com.winllc.certalert.domain.CertificateStatus;
 import com.winllc.certalert.domain.DirectoryServer;
 import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.domain.OwnerType;
+import com.winllc.certalert.domain.Severity;
 import com.winllc.certalert.repository.CachedCertificateRepository;
 import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.DirectoryUserRepository;
@@ -78,6 +79,13 @@ public class CertificateRefreshPageProcessor {
             CertificateStatus previous = certificate.getStatus();
             CertificateStatus current = evaluator.evaluate(certificate.getNotAfter(), now);
             if (current == previous) {
+                // Still expiring, and now inside the critical threshold: alerted as a
+                // WARNING when it came into the window, and escalated once, here.
+                if (current == CertificateStatus.EXPIRING_SOON
+                        && certificate.getLastAlertSeverity() == Severity.WARNING
+                        && severityOf(certificate, current, now) == Severity.CRITICAL) {
+                    alertable.add(certificate);
+                }
                 continue;
             }
             certificate.updateStatus(current, now);
@@ -139,8 +147,13 @@ public class CertificateRefreshPageProcessor {
         return false;
     }
 
+    private Severity severityOf(CachedCertificate certificate, CertificateStatus status, Instant now) {
+        return evaluator.severityFor(status, evaluator.daysUntilExpiry(certificate.getNotAfter(), now));
+    }
+
     private int raiseAlert(CachedCertificate certificate, CertificateStatus status, Instant now) {
         long daysUntilExpiry = evaluator.daysUntilExpiry(certificate.getNotAfter(), now);
+        certificate.alerted(evaluator.severityFor(status, daysUntilExpiry));
         DirectoryUser user = certificate.getUser();
         if (user != null) {
             alertDispatcher.dispatch(CertificateAlert.from(

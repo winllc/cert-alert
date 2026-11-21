@@ -127,6 +127,33 @@ class ScheduledJobsTest {
         verify(alertDispatcher).dispatch(any());
     }
 
+    /**
+     * Alerted as a WARNING when it came into the window, it is escalated to CRITICAL once,
+     * when it comes inside the critical threshold - with no status change to hang it on.
+     */
+    @Test
+    void refreshEscalatesOnceInsideTheCriticalThreshold() {
+        Instant now = Instant.now();
+        CachedCertificate warned = certificate("CN=closing", now.plus(Duration.ofDays(5)),
+                CertificateStatus.EXPIRING_SOON, now);
+        warned.alerted(Severity.WARNING);
+        userRepository.save(userWith("uid=closing,ou=people", "Clo Sing", "closing@example.gov", warned));
+        // Found already this close: never alerted, so nothing to escalate.
+        userRepository.save(userWith("uid=found,ou=people", "Fo Und", "found@example.gov",
+                certificate("CN=found", now.plus(Duration.ofDays(4)), CertificateStatus.EXPIRING_SOON, now)));
+
+        DirectorySyncResult first = refreshService.refresh();
+        DirectorySyncResult second = refreshService.refresh();
+
+        ArgumentCaptor<CertificateAlert> alert = ArgumentCaptor.forClass(CertificateAlert.class);
+        verify(alertDispatcher).dispatch(alert.capture());
+        assertThat(alert.getValue().status()).isEqualTo(CertificateStatus.EXPIRING_SOON);
+        assertThat(alert.getValue().severity()).isEqualTo(Severity.CRITICAL);
+        assertThat(alert.getValue().contact()).isEqualTo("closing@example.gov");
+        assertThat(first.alertsRaised()).isEqualTo(1);
+        assertThat(second.alertsRaised()).isZero();
+    }
+
     @Test
     void refreshLeavesCertificatesThatHaveNotMoved() {
         Instant now = Instant.now();

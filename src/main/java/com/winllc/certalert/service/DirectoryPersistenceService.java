@@ -10,6 +10,7 @@ import com.winllc.certalert.domain.DirectoryEntry;
 import com.winllc.certalert.domain.DirectoryServer;
 import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.domain.OwnerType;
+import com.winllc.certalert.domain.Severity;
 import com.winllc.certalert.ldap.LdapProperties;
 import com.winllc.certalert.license.Licensing;
 import com.winllc.certalert.ldap.LdapServerEntry;
@@ -466,6 +467,8 @@ public class DirectoryPersistenceService {
             }
             CertificateStatus current = certificate.getStatus();
             long daysUntilExpiry = evaluator.daysUntilExpiry(certificate.getNotAfter(), now);
+            Severity severity = evaluator.severityFor(current, daysUntilExpiry);
+            certificate.alerted(severity);
             alertDispatcher.dispatch(CertificateAlert.from(
                     ownerType,
                     ownerId,
@@ -473,7 +476,7 @@ public class DirectoryPersistenceService {
                     entity.getDn(),
                     contact.get(),
                     certificate,
-                    evaluator.severityFor(current, daysUntilExpiry),
+                    severity,
                     daysUntilExpiry,
                     now));
             alertsRaised++;

@@ -3034,7 +3034,9 @@ continuously, so the sweeps are a backstop rather than the only way a change arr
 because time passes — nothing in the directory changes. Without it, a status would only be
 corrected when its entry happened to be re-scraped, so a nightly sweep would mean expiry
 alerts up to a day late. It walks only certificates that could plausibly have moved (not
-already expired, notAfter inside the warning window), which is a small indexed slice.
+already expired, notAfter inside the warning window), which is a small indexed slice. It also
+escalates: a certificate alerted on as a `WARNING` when it came into the window is alerted on
+once more, as `CRITICAL`, when it comes inside `critical-threshold-days`.
 
 **Why revocation is its own job.** It is the only work here that reads neither the directory
 nor the clock: it asks the certificates' own authorities, which is a different system, on a

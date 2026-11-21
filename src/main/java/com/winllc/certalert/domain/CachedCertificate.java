@@ -181,6 +181,15 @@ public class CachedCertificate {
     @Column(nullable = false, length = 32)
     private CertificateStatus status = CertificateStatus.VALID;
 
+    /**
+     * The severity of the last expiry alert raised about it, or null for none. What lets the
+     * refresh escalate one alerted as a WARNING once it comes inside the critical threshold,
+     * once, without a status change to hang it on.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "last_alert_severity", length = 16)
+    private Severity lastAlertSeverity;
+
     @Column(name = "cached_at", nullable = false)
     private Instant cachedAt;
 
@@ -229,6 +238,18 @@ public class CachedCertificate {
     public void updateStatus(CertificateStatus status, Instant evaluatedAt) {
         this.status = status;
         this.cachedAt = evaluatedAt;
+        if (!status.isAlertable()) {
+            this.lastAlertSeverity = null;
+        }
+    }
+
+    /** That an expiry alert of this severity has been raised about it. */
+    public void alerted(Severity severity) {
+        this.lastAlertSeverity = severity;
+    }
+
+    public Severity getLastAlertSeverity() {
+        return lastAlertSeverity;
     }
 
     public Long getId() {
