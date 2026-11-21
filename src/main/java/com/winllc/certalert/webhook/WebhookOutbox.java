@@ -299,6 +299,11 @@ public class WebhookOutbox {
             record(id, now, null, "The webhook was deleted", true);
             return Outcome.NOT_SENT;
         }
+        if (!endpoint.isEnabled() && !WebhookEvent.TEST.id().equals(delivery.getEventType())) {
+            // Disabled after this was queued: nothing more goes to it. A test is sent regardless.
+            record(id, now, null, "The webhook is disabled", true);
+            return Outcome.NOT_SENT;
+        }
         Integer status = null;
         String error;
         try {

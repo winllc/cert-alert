@@ -2890,7 +2890,10 @@ Adaptive Card message for a Teams workflow's "When a webhook request is received
 raised it and posted after the commit, by one replica (claimed in the database, under a
 lock), with a 5-second connect and 10-second read timeout. A 2xx is delivered; anything else -
 a timeout, a 5xx, a redirect (never followed) - is retried after `retry-initial` (1 minute),
-doubling to `retry-max` (1 hour), until it is `give-up-after` (a day) old. The Integrations
+doubling to `retry-max` (1 hour), until it is `give-up-after` (a day) old. Disabling an
+endpoint gives up on what is still queued for it (a test is still sent), and saving it with the
+same URL - disabling, renaming - does not resolve the host again, so an endpoint whose name has
+gone can still be disabled; a changed URL is checked as a new one. The Integrations
 page shows each endpoint's delivery log; delivered and failed rows are kept for `keep` (14
 days).
 
