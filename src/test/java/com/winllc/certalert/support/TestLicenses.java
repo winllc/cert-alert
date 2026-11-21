@@ -2,6 +2,7 @@ package com.winllc.certalert.support;
 
 import com.enssolutions.license.LicenseCheck;
 import com.enssolutions.license.LicenseManager;
+import com.enssolutions.license.LicenseState;
 import com.enssolutions.license.LicenseVerifier;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -61,10 +62,19 @@ public final class TestLicenses {
         return license().sign();
     }
 
-    /** Installs a license, failing the test if the installation refuses it. */
+    /**
+     * Installs a license, failing the test if the installation refuses it. One not yet valid or
+     * expired replaces the installed license here too: the library keeps a license in full effect
+     * over such an upload, so the file is removed first.
+     */
     public static LicenseCheck install(LicenseManager licenses, String license) {
         try {
-            return licenses.install(license);
+            LicenseCheck check = licenses.install(license);
+            if (check.state() == LicenseState.NOT_IN_EFFECT && licenses.licenseFile() != null) {
+                uninstall(licenses);
+                check = licenses.install(license);
+            }
+            return check;
         } catch (Exception e) {
             throw new IllegalStateException("Could not install a test license: " + e.getMessage(), e);
         }
