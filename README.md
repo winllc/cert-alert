@@ -3050,6 +3050,10 @@ does not start a second sweep. A replica that dies holding a lock releases it af
 `cert-alert.cluster.lock-at-most-for` (10 minutes; renewed while the job runs, however long).
 Every run is recorded in `sync_run`, readable at `GET /api/v1/sync/runs`.
 
+The scheduled jobs, and the mail and webhook outboxes, audit flush and session sweep, share
+`spring.task.scheduling.pool.size` threads (`CERT_ALERT_SCHEDULER_THREADS`, 8), so a long sweep
+does not hold up the rest. A run started by hand says it is still going from a thread of its own.
+
 ### Starting a job by hand
 
 `POST /api/v1/sync` and the other job endpoints (`/sync/users`, `/sync/servers`,

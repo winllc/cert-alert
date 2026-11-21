@@ -18,14 +18,14 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.scheduling.annotation.EnableScheduling;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.concurrent.DelegatingSecurityContextRunnable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -51,7 +51,6 @@ import tools.jackson.databind.ObjectMapper;
  * any run of the job is.
  */
 @Service
-@EnableScheduling
 public class JobRuns {
 
     private static final Logger log = LoggerFactory.getLogger(JobRuns.class);
@@ -61,6 +60,9 @@ public class JobRuns {
 
     /** Runs waiting for a worker, beyond which a request is refused. */
     private static final int QUEUE = 20;
+
+    /** How often this replica says its runs are still going (see {@link #housekeeping}). */
+    private static final long HOUSEKEEPING_SECONDS = 30;
 
     private final JobRunRepository runs;
     private final JobLocks locks;
@@ -84,6 +86,18 @@ public class JobRuns {
         }
     });
 
+    /**
+     * The heartbeat has a thread of its own rather than a place on the shared scheduler: a
+     * long sweep holding a scheduler thread must not stop this replica saying its runs are
+     * still going, or another replica would mark them failed while they run.
+     */
+    private final ScheduledExecutorService heartbeat = Executors.newSingleThreadScheduledExecutor(
+            runnable -> {
+                Thread thread = new Thread(runnable, "job-run-heartbeat");
+                thread.setDaemon(true);
+                return thread;
+            });
+
     public JobRuns(
             JobRunRepository runs,
             JobLocks locks,
@@ -102,6 +116,8 @@ public class JobRuns {
         this.clock = clock;
         this.independent = new TransactionTemplate(transactions);
         this.independent.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        heartbeat.scheduleWithFixedDelay(
+                this::housekeeping, HOUSEKEEPING_SECONDS, HOUSEKEEPING_SECONDS, TimeUnit.SECONDS);
     }
 
     /** A job that was already running when this run came to start it. */
@@ -220,9 +236,9 @@ public class JobRuns {
     /**
      * Says this replica's runs are still going, fails those whose replica has stopped
      * saying so, and forgets old ones. On every replica: each beats for its own runs, and
-     * failing or forgetting the same row twice is harmless.
+     * failing or forgetting the same row twice is harmless. Every 30 seconds, on the
+     * {@code job-run-heartbeat} thread.
      */
-    @Scheduled(fixedDelayString = "PT30S", initialDelayString = "PT30S")
     public void housekeeping() {
         Instant now = Instant.now(clock);
         try {
@@ -247,6 +263,7 @@ public class JobRuns {
 
     @PreDestroy
     void stop() {
+        heartbeat.shutdownNow();
         workers.shutdownNow();
     }
 
