@@ -962,7 +962,9 @@ public class NotificationService {
             long named = entries.stream().map(ExpiryDigest.Entry::getOwnerDn).distinct().count();
             String where;
             if (entries.size() == 1) {
-                where = "(" + entries.getFirst().getSummary() + ")";
+                // Dated rather than counted down: the count changes every day, and a message
+                // that changes every day is marked unread every day.
+                where = "(" + entries.getFirst().getDatedSummary() + ")";
             } else if (named == 1) {
                 where = "for " + entries.getFirst().getOwnerName();
             } else {
