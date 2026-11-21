@@ -27,7 +27,7 @@
                                   th:classappend="${badges.get(server.certificateStatus.name())}"
                                   th:text="${#strings.capitalize(#strings.replace(#strings.toLowerCase(server.certificateStatus.name()), '_', ' '))}">Valid</span>
                             <!--/* Only an http or https address is a link: the value is the directory's free text,
-                                 and a javascript: or other scheme must not become one. It is shown as text below. */-->
+                                 and any other scheme must not become one. It is shown as text below. */-->
                             <th:block th:with="openUrl=${server.serverUrl == null ? '' : #strings.trim(server.serverUrl)},
                                                lowered=${#strings.toLowerCase(openUrl)}">
                             <a class="btn" th:if="${#strings.startsWith(lowered, 'https://') or #strings.startsWith(lowered, 'http://')}"
