@@ -111,4 +111,68 @@ class WebhookTransportTest {
                 .isInstanceOf(WebhookTransport.DeliveryTimeoutException.class);
         assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(10));
     }
+
+    /**
+     * A receiver that answers and then keeps the connection open, despite
+     * {@code Connection: close}: its answer is the answer, not a timeout.
+     */
+    @Test
+    void anAnswerFromAReceiverThatKeepsTheConnectionOpenIsTheAnswer() throws Exception {
+        SSLContext[] tls = tlsContexts();
+        SSLServerSocket socket = (SSLServerSocket) tls[0].getServerSocketFactory()
+                .createServerSocket(0, 1, InetAddress.getLoopbackAddress());
+        open.add(socket);
+        Thread answering = new Thread(() -> {
+            try {
+                Socket client = socket.accept();
+                open.add(client);
+                byte[] request = new byte[8192];
+                client.getInputStream().read(request);
+                client.getOutputStream().write(
+                        "HTTP/1.1 202 Accepted\r\nContent-Length: 2\r\n\r\nok".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+                client.getOutputStream().flush();
+                // ...and neither closes nor says anything more.
+            } catch (Exception e) {
+                // closed at the end of the test
+            }
+        });
+        answering.setDaemon(true);
+        answering.start();
+        WebhookProperties properties = new WebhookProperties();
+        properties.setConnectTimeout(Duration.ofSeconds(5));
+        properties.setReadTimeout(Duration.ofSeconds(20));
+        properties.setDeliveryTimeout(Duration.ofSeconds(20));
+        WebhookTransport transport = new WebhookTransport(properties, tls[1].getSocketFactory());
+
+        long started = System.nanoTime();
+        WebhookTransport.Response response = transport.post(
+                URI.create("https://hooks.example.test:" + socket.getLocalPort() + "/x"),
+                InetAddress.getLoopbackAddress(), Map.of(), new byte[] {'{', '}'});
+
+        assertThat(response.status()).isEqualTo(202);
+        assertThat(response.successful()).isTrue();
+        assertThat(Duration.ofNanos(System.nanoTime() - started)).isLessThan(Duration.ofSeconds(10));
+    }
+
+    /** A receiver's TLS context and a sender's that trusts it. */
+    private static SSLContext[] tlsContexts() throws Exception {
+        X509Certificate certificate = TestCertificates.certificateOf(
+                TestCertificates.withNames("hooks.example.test", "hooks.example.test"));
+        char[] password = "changeit".toCharArray();
+        KeyStore keys = KeyStore.getInstance("PKCS12");
+        keys.load(null, null);
+        keys.setKeyEntry("r", TestCertificates.sharedKeyPair().getPrivate(), password, new Certificate[] {certificate});
+        KeyManagerFactory keyManagers = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+        keyManagers.init(keys, password);
+        SSLContext server = SSLContext.getInstance("TLS");
+        server.init(keyManagers.getKeyManagers(), null, null);
+        KeyStore trust = KeyStore.getInstance("PKCS12");
+        trust.load(null, null);
+        trust.setCertificateEntry("r", certificate);
+        TrustManagerFactory trustManagers = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+        trustManagers.init(trust);
+        SSLContext client = SSLContext.getInstance("TLS");
+        client.init(null, trustManagers.getTrustManagers(), null);
+        return new SSLContext[] {server, client};
+    }
 }

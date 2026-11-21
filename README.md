@@ -2888,7 +2888,8 @@ Adaptive Card message for a Teams workflow's "When a webhook request is received
 
 **Delivery.** An event is written to `webhook_delivery` in the same transaction as whatever
 raised it and posted after the commit, by one replica (claimed in the database, under a
-lock), with a 5-second connect and 10-second read timeout. A 2xx is delivered; anything else -
+lock), with a 5-second connect and 10-second read timeout. A 2xx is delivered (read from the answer's status line and headers, so a receiver that keeps
+the connection open after answering is not taken for one that did not answer); anything else -
 a timeout, a 5xx, a redirect (never followed) - is retried after `retry-initial` (1 minute),
 doubling to `retry-max` (1 hour), until it is `give-up-after` (a day) old. Disabling an
 endpoint gives up on what is still queued for it (a test is still sent), and saving it with the
