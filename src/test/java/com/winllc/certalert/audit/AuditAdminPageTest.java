@@ -41,6 +41,9 @@ class AuditAdminPageTest {
     @Autowired
     private AuditStore store;
 
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbc;
+
     private MockMvc mockMvc;
     private String run;
 
@@ -154,6 +157,7 @@ class AuditAdminPageTest {
 
     @Test
     void verifyingIsAuditedWithItsOutcome() throws Exception {
+        PrunedTrail.asIfPruned(jdbc);
         long head = store.headSeq();
         mockMvc.perform(post("/api/v1/admin/audit/verify").with(admin()).with(csrf()))
                 .andExpect(status().isOk())

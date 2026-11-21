@@ -8,11 +8,13 @@ import org.springframework.stereotype.Component;
 /**
  * Walks the retained trail in seq order and recomputes every hash.
  *
- * <p>The first retained event is the anchor. After pruning it is not seq 1, and its
- * prevHash names an event that is no longer there, so it is taken as given - and the
- * result says so. From there on each event must follow the one before it without a gap,
- * state the previous event's hash as its prevHash, and hash to what it says it hashes to.
- * Editing a stored event breaks it at that seq; deleting one breaks the chain at the next.
+ * <p>The first retained event is the anchor: seq 1, chained to 64 zeros, or, after pruning,
+ * the event right after the last one retention deleted, chained to that event's hash (both
+ * kept on the chain head; an installation that pruned before the head kept the hash has its
+ * anchor's prevHash taken as given). From there on each event must follow the one before it
+ * without a gap, state the previous event's hash as its prevHash, and hash to what it says it
+ * hashes to, and the walk must reach the chain head's seq and hash. Editing a stored event
+ * breaks it at that seq; deleting one breaks the chain at the next, or at the head.
  */
 @Component
 public class AuditVerifier {
@@ -29,8 +31,8 @@ public class AuditVerifier {
     /**
      * @param intact whether every retained event checked out
      * @param checked how many were checked
-     * @param anchorSeq the first retained seq, whose prevHash was accepted as given; null when empty
-     * @param anchorPrevHash that prevHash
+     * @param anchorSeq the first retained seq; null when empty
+     * @param anchorPrevHash its prevHash
      * @param lastSeq the last seq checked
      * @param brokenSeq the first seq that did not check out, or null
      * @param problem what was wrong with it
@@ -45,13 +47,15 @@ public class AuditVerifier {
             String problem) {
 
         public String summary() {
-            if (anchorSeq == null) {
+            if (anchorSeq == null && intact) {
                 return "The audit trail is empty.";
             }
-            String anchor = anchorSeq == 1
+            String anchor = anchorSeq == null
+                    ? "with no event retained"
+                    : anchorSeq == 1
                     ? "from seq 1"
-                    : "anchored at seq " + anchorSeq + " (earlier events were pruned; its prevHash "
-                            + anchorPrevHash.substring(0, 12) + "... is accepted as given)";
+                    : "anchored at seq " + anchorSeq + " (retention pruned the events before it; its prevHash "
+                            + anchorPrevHash.substring(0, Math.min(12, anchorPrevHash.length())) + "...)";
             if (intact) {
                 return "Intact: " + checked + " event(s) verified " + anchor + " to seq " + lastSeq + ".";
             }
@@ -60,6 +64,7 @@ public class AuditVerifier {
     }
 
     public Result verify() {
+        AuditStore.ChainState head = store.chainState();
         long checked = 0;
         Long anchor = null;
         String anchorPrev = null;
@@ -77,6 +82,20 @@ public class AuditVerifier {
                     anchor = event.seq();
                     anchorPrev = event.line() == null || event.line().length() < 75
                             ? "" : AuditFormat.prevHashOf(AuditFormat.bodyOf(event.line()));
+                    if (problem == null) {
+                        Result misplaced = anchorProblem(head, event.seq(), anchorPrev);
+                        if (misplaced != null) {
+                            // retention may have pruned meanwhile: judge by the head as it is now
+                            misplaced = anchorProblem(store.chainState(), event.seq(), anchorPrev);
+                        }
+                        if (misplaced != null) {
+                            return misplaced;
+                        }
+                    }
+                }
+                if (problem == null && event.seq() == head.lastSeq()
+                        && !AuditFormat.hashOf(event.line()).equals(head.lastHash())) {
+                    problem = "its hash is not the chain head's";
                 }
                 if (problem != null) {
                     return new Result(false, checked, anchor, anchorPrev, previousSeq == 0 ? null : previousSeq,
@@ -88,7 +107,36 @@ public class AuditVerifier {
             }
             cursor = page.getLast().seq();
         }
+        if (previousSeq < head.lastSeq()) {
+            long missing = Math.max(previousSeq, head.prunedThroughSeq()) + 1;
+            return new Result(false, checked, anchor, anchorPrev, previousSeq == 0 ? null : previousSeq, missing,
+                    "seq " + missing + " to " + head.lastSeq() + " are missing (the chain head is at seq "
+                            + head.lastSeq() + ")");
+        }
         return new Result(true, checked, anchor, anchorPrev, anchor == null ? null : previousSeq, null, null);
+    }
+
+    /** Why the oldest retained event is not where the chain starts or retention's pruning left it, or null. */
+    private static Result anchorProblem(AuditStore.ChainState head, long seq, String prevHash) {
+        if (seq == 1) {
+            return AuditFormat.GENESIS.equals(prevHash) ? null
+                    : new Result(false, 0, seq, prevHash, null, seq, "the first event's prevHash is not 64 zeros");
+        }
+        long prunedThrough = head.prunedThroughSeq();
+        if (prunedThrough >= seq) {
+            return new Result(false, 0, seq, prevHash, null, seq,
+                    "retention pruned up to seq " + prunedThrough + ", yet this event is there");
+        }
+        if (prunedThrough != seq - 1) {
+            return new Result(false, 0, seq, prevHash, null, prunedThrough + 1, "seq " + (prunedThrough + 1)
+                    + " to " + (seq - 1) + " are missing; retention " + (prunedThrough == 0 ? "has pruned nothing"
+                    : "pruned only up to seq " + prunedThrough));
+        }
+        if (head.prunedThroughHash() != null && !head.prunedThroughHash().equals(prevHash)) {
+            return new Result(false, 0, seq, prevHash, null, seq,
+                    "its prevHash is not the hash of seq " + prunedThrough + ", the last event retention pruned");
+        }
+        return null;
     }
 
     /** What is wrong with this event, or null. */

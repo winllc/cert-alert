@@ -3361,7 +3361,9 @@ read-only included, since the audit trail is not a licensed feature:
 - **Export** of the current filter (up to 100,000 events) as CSV or NDJSON, itself recorded
   as `audit.exported`;
 - **Verify integrity**, which recomputes the chain and reports intact, broken at seq N, or the
-  anchor (the first retained seq after pruning, whose `prevHash` is taken as given);
+  anchor (the first retained seq after pruning). The anchor must be the event right after the
+  last one retention deleted, chained to its hash, and the walk must end at the chain head, so
+  events deleted by other means from either end are reported;
 - **Delivery**: per output, whether it is on, the last seq delivered and when, the backlog
   and the last error;
 - **SIEM API tokens**: create (shown once, with a copy button), list, revoke;

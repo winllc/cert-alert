@@ -50,6 +50,7 @@ class AuditChainTest {
     @BeforeEach
     void startFromAnEmptyTrail() {
         repository.deleteAll();
+        PrunedTrail.asIfPruned(jdbc);
     }
 
     @AfterEach
@@ -129,6 +130,58 @@ class AuditChainTest {
         AuditVerifier.Result result = verifier.verify();
         assertThat(result.intact()).isFalse();
         assertThat(result.brokenSeq()).isEqualTo(head + 3);
+        repository.deleteAll();
+    }
+
+    @Test
+    void eventsDeletedFromTheStartWithoutRetentionAreDetected() {
+        long head = store.headSeq();
+        for (int i = 0; i < 4; i++) {
+            audit.record(event("test.delete"));
+        }
+        jdbc.update("delete from audit_event where seq <= ?", head + 2);
+
+        AuditVerifier.Result result = verifier.verify();
+        assertThat(result.intact()).as(result.summary()).isFalse();
+        assertThat(result.brokenSeq()).isEqualTo(head + 1);
+        assertThat(result.summary()).contains("are missing; retention");
+        repository.deleteAll();
+    }
+
+    @Test
+    void theNewestEventsDeletedAreDetected() {
+        long head = store.headSeq();
+        for (int i = 0; i < 4; i++) {
+            audit.record(event("test.delete"));
+        }
+        jdbc.update("delete from audit_event where seq >= ?", head + 3);
+
+        AuditVerifier.Result result = verifier.verify();
+        assertThat(result.intact()).as(result.summary()).isFalse();
+        assertThat(result.brokenSeq()).isEqualTo(head + 3);
+        assertThat(result.summary()).contains("the chain head is at seq " + (head + 4));
+        repository.deleteAll();
+    }
+
+    @Test
+    void afterPruningTheAnchorMustBeTheEventAfterTheLastPruned() {
+        Instant old = Instant.now().minus(Duration.ofDays(40));
+        long head = store.headSeq();
+        for (int i = 0; i < 3; i++) {
+            audit.record(event("test.old").time(old.plusSeconds(i)));
+        }
+        audit.record(event("test.recent"));
+        audit.record(event("test.recent"));
+        properties.setRetentionDays(30);
+        assertThat(retention.prune()).isEqualTo(3);
+        assertThat(store.chainState().prunedThroughSeq()).isEqualTo(head + 3);
+        assertThat(verifier.verify().intact()).isTrue();
+
+        jdbc.update("delete from audit_event where seq = ?", head + 4);
+        AuditVerifier.Result result = verifier.verify();
+        assertThat(result.intact()).as(result.summary()).isFalse();
+        assertThat(result.brokenSeq()).isEqualTo(head + 4);
+        assertThat(result.summary()).contains("retention pruned only up to seq " + (head + 3));
         repository.deleteAll();
     }
 

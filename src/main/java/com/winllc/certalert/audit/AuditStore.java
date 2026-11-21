@@ -35,6 +35,25 @@ public class AuditStore {
         return head == null ? 0 : head.getLastSeq();
     }
 
+    /** The chain head: its seq and hash, and the last seq retention pruned and that event's hash. */
+    public record ChainState(long lastSeq, String lastHash, long prunedThroughSeq, String prunedThroughHash) {}
+
+    /** The chain head as it is now, read afresh. */
+    @Transactional(readOnly = true)
+    public ChainState chainState() {
+        List<Object[]> rows = entityManager
+                .createQuery("select h.lastSeq, h.lastHash, h.prunedThroughSeq, h.prunedThroughHash "
+                        + "from AuditChainHead h where h.id = :id", Object[].class)
+                .setParameter("id", AuditChainHead.ID)
+                .getResultList();
+        if (rows.isEmpty()) {
+            return new ChainState(0, AuditFormat.GENESIS, 0, null);
+        }
+        Object[] row = rows.getFirst();
+        return new ChainState(((Number) row[0]).longValue(), (String) row[1], ((Number) row[2]).longValue(),
+                (String) row[3]);
+    }
+
     /** Events after this seq, ascending, at most {@code limit}. */
     @Transactional(readOnly = true)
     public List<StoredEvent> after(long seq, int limit) {

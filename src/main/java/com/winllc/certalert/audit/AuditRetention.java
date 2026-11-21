@@ -121,8 +121,18 @@ public class AuditRetention {
             if (first == null || upTo < first) {
                 return null;
             }
+            String hash = entityManager.createQuery("select e.hash from AuditEvent e where e.seq = :upTo", String.class)
+                    .setParameter("upTo", upTo)
+                    .getResultStream().findFirst().orElse(null);
             int removed = entityManager.createQuery("delete from AuditEvent e where e.seq <= :upTo")
                     .setParameter("upTo", upTo)
+                    .executeUpdate();
+            // What verification anchors on, in the same transaction as the delete.
+            entityManager.createQuery("update AuditChainHead h set h.prunedThroughSeq = :upTo, "
+                            + "h.prunedThroughHash = :hash where h.id = :id and h.prunedThroughSeq < :upTo")
+                    .setParameter("upTo", upTo)
+                    .setParameter("hash", hash)
+                    .setParameter("id", AuditChainHead.ID)
                     .executeUpdate();
             return new Range(first, upTo, removed);
         });
