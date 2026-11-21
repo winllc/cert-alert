@@ -111,6 +111,8 @@ public class DirectoryServer extends DirectoryEntry {
     @Column(name = "server_poc_display", length = 2000)
     private String serverPocDisplay;
 
+    /** Batched: the round-up reaches into this for every owner it reports on. */
+    @BatchSize(size = 200)
     @OneToMany(mappedBy = "server", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<CachedCertificate> certificates = new ArrayList<>();
 

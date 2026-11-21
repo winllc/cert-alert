@@ -16,6 +16,9 @@ import com.winllc.certalert.domain.Severity;
 import com.winllc.certalert.observability.EnsMetrics;
 import com.winllc.certalert.repository.CachedCertificateRepository;
 import com.winllc.certalert.repository.NotificationRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.FlushModeType;
+import jakarta.persistence.PersistenceContext;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -75,6 +78,9 @@ public class NotificationService {
     private final TransactionTemplate transactions;
     private final ObjectProvider<EnsMetrics> metrics;
     private final Clock clock;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     public NotificationService(
             NotificationRepository notifications,
@@ -339,6 +345,12 @@ public class NotificationService {
         int leadDays = settings.leadDays();
         Instant horizon = now.plus(Duration.ofDays(leadDays));
 
+        // Nothing is written until every round is built, so no query before then needs the
+        // automatic flush - which dirty-checks everything the transaction holds, once per
+        // query, and on a large directory that was most of the run.
+        FlushModeType flushMode = entityManager.getFlushMode();
+        entityManager.setFlushMode(FlushModeType.COMMIT);
+
         // Two reads, each to its own limit, and what is about to expire first. Read as one,
         // soonest first, the expired came first: a directory publishing more old
         // certificates than the limit filled the read with them, and what expires next week
@@ -363,6 +375,7 @@ public class NotificationService {
         expiring.addAll(upcoming.certificates());
         if (expiring.isEmpty()) {
             log.debug("Expiry digest: nothing expiring in the next {} day(s) that has not been renewed", leadDays);
+            entityManager.setFlushMode(flushMode);
             // Nothing expiring means nobody's round-up still says anything true.
             if (!dryRun && !properties.getEmail().isDryRun()) {
                 clearRoundUpsExcept(Set.of(), complete);
@@ -415,14 +428,17 @@ public class NotificationService {
         for (Map.Entry<Long, List<CachedCertificate>> owned : byEntry.entrySet()) {
             AuditEvent.SubjectRef subject = subjects.get(owned.getKey());
             OwnerType type = types.get(owned.getKey());
+            // Once per entry rather than per credential: a server's are several queries.
+            List<NotificationRecipients.Recipient> entryRecipients = resolve(type, subject.id());
             for (Credential credential : Credential.group(owned.getValue(), credentialProperties.getPairWindow())) {
                 credentials++;
-                for (NotificationRecipients.Recipient recipient : resolve(type, subject.id())) {
+                for (NotificationRecipients.Recipient recipient : entryRecipients) {
                     rounds.computeIfAbsent(keyOf(recipient), key -> new Round(recipient))
                             .add(credential, subject, type, now);
                 }
             }
         }
+        entityManager.setFlushMode(flushMode);
 
         int told = 0;
         int unaddressed = 0;

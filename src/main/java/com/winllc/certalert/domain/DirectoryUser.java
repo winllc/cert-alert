@@ -155,6 +155,8 @@ public class DirectoryUser extends DirectoryEntry {
     @Column(name = "address", length = 320, nullable = false)
     private Set<String> additionalEmails = new LinkedHashSet<>();
 
+    /** Batched: the round-up reaches into this for every owner it reports on. */
+    @BatchSize(size = 200)
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<CachedCertificate> certificates = new ArrayList<>();
 
