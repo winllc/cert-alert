@@ -101,4 +101,13 @@ class LicenseStateInDatabaseTest {
         assertThat(older.state()).isEqualTo(LicenseState.SUPERSEDED);
         assertThat(first.current().license()).hasValueSatisfying(license -> assertThat(license.revision()).isEqualTo(4));
     }
+
+    @Test
+    void theLatestTimeSeenIsRecordedOnTheInstallationRow() {
+        long before = System.currentTimeMillis();
+        replica().current();
+        Long seen = jdbc.queryForObject("SELECT latest_seen_ms FROM ens_license_installation WHERE product = ?",
+                Long.class, TestLicenses.PRODUCT);
+        assertThat(seen).isNotNull().isGreaterThanOrEqualTo(before);
+    }
 }
