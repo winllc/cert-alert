@@ -64,6 +64,9 @@ class CertificateCleanupTest {
     @Autowired
     private TransactionTemplate transactionTemplate;
 
+    @Autowired
+    private com.winllc.certalert.ldap.LdapProperties ldapProperties;
+
     @BeforeAll
     static void startDirectory() {
         directory = new EmbeddedDirectory();
@@ -224,6 +227,34 @@ class CertificateCleanupTest {
         // What becomes of an entry the directory has stopped publishing is the prune's
         // decision, not this job's: it removes certificates, not entries.
         assertThat(cached("vanished")).hasSize(1);
+    }
+
+    /**
+     * Rows it could not remove go to the back of the next run's list. Otherwise, once the cap's
+     * worth of them existed, every run would pick the same ones, remove nothing and never
+     * reach anything else.
+     */
+    @Test
+    void whatCouldNotBeRemovedDoesNotFillEveryRun() {
+        byte[] older = TestCertificates.der("missing", NOW.minus(Duration.ofDays(900)), NOW.minus(Duration.ofDays(400)));
+        add("vanished", older);
+        byte[] ancient = TestCertificates.der("old", NOW.minus(Duration.ofDays(800)), NOW.minus(Duration.ofDays(200)));
+        String dn = add("lapsed", ancient);
+        syncService.syncUsers();
+        directory.delete(dn("vanished"));
+        int cap = ldapProperties.getCertificateCleanup().getMaxPerRun();
+        ldapProperties.getCertificateCleanup().setMaxPerRun(1);
+        try {
+            // The longest expired first, and it is not there to change.
+            assertThat(cleanupService.run().missing()).isEqualTo(1);
+
+            CertificateCleanupService.Result second = cleanupService.run();
+
+            assertThat(second.removed()).isEqualTo(1);
+            assertThat(published(dn)).isEmpty();
+        } finally {
+            ldapProperties.getCertificateCleanup().setMaxPerRun(cap);
+        }
     }
 
     /**

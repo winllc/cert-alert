@@ -198,21 +198,23 @@ public interface CachedCertificateRepository
     /**
      * Certificates whose validity ran out before this. Ordered by expiry, oldest first, so
      * a capped run works through the most finished-with ones rather than an arbitrary
-     * slice of them.
+     * slice of them - after any it has not tried yet, so that rows it could not remove (the
+     * entry gone, the modify refused) wait their turn rather than filling every run.
      *
      * <p>The owner's id comes back with the row rather than being reached for afterwards:
      * the association is lazy, and the job that reads these groups them by entry outside
      * any transaction.
      */
     @Query("select c.id as id, c.user.id as userId, c.server.id as serverId from CachedCertificate c "
-            + "where c.notAfter is not null and c.notAfter < :before order by c.notAfter, c.id")
+            + "where c.notAfter is not null and c.notAfter < :before "
+            + "order by c.cleanupAttemptedAt asc nulls first, c.notAfter, c.id")
     List<CleanupCandidate> findExpiredBefore(@Param("before") Instant before, Pageable pageable);
 
-    /** Certificates an authority has revoked, found out about before this. */
+    /** Certificates an authority has revoked, found out about before this; untried ones first, as above. */
     @Query("select c.id as id, c.user.id as userId, c.server.id as serverId from CachedCertificate c "
             + "where c.revocationStatus = :status "
             + "and c.revocationFoundAt is not null and c.revocationFoundAt < :before "
-            + "order by c.revocationFoundAt, c.id")
+            + "order by c.cleanupAttemptedAt asc nulls first, c.revocationFoundAt, c.id")
     List<CleanupCandidate> findRevokedBefore(
             @Param("status") RevocationStatus status, @Param("before") Instant before, Pageable pageable);
 

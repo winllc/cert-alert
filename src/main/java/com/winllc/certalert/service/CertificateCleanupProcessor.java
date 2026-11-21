@@ -114,9 +114,11 @@ public class CertificateCleanupProcessor {
             // an entry the directory has stopped publishing is the prune's decision and
             // not this job's - it removes certificates, not entries.
             log.debug("'{}' is no longer in the directory; nothing to clean up", entry.getDn());
+            wanted.forEach(certificate -> certificate.cleanupAttempted(now));
             return new Outcome(0, 0, false, true);
         } catch (RuntimeException e) {
             log.warn("Could not read the certificates of '{}': {}", entry.getDn(), describe(e));
+            wanted.forEach(certificate -> certificate.cleanupAttempted(now));
             return new Outcome(0, 0, true, false);
         }
 
@@ -140,6 +142,8 @@ public class CertificateCleanupProcessor {
                 // this and should: it is being asked to delete published data.
                 log.warn("The directory refused to remove {} certificate(s) from '{}': {}",
                         removing.size(), entry.getDn(), describe(e));
+                // To the back of the next run's list, so this entry cannot fill every run.
+                wanted.forEach(certificate -> certificate.cleanupAttempted(now));
                 return new Outcome(0, 0, true, false);
             }
         }

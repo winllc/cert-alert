@@ -170,6 +170,14 @@ public class CachedCertificate {
     @Column(name = "revocation_found_at")
     private Instant revocationFoundAt;
 
+    /**
+     * When the certificate cleanup last tried to remove it and could not - the entry gone
+     * from the directory, or the modify refused. Such rows go to the back of the next run's
+     * list, so they cannot fill every run's cap and stop it reaching anything else.
+     */
+    @Column(name = "cleanup_attempted_at")
+    private Instant cleanupAttemptedAt;
+
     @Column(name = "revocation_reason", length = 64)
     private String revocationReason;
 
@@ -461,6 +469,15 @@ public class CachedCertificate {
 
     public Instant getRevocationFoundAt() {
         return revocationFoundAt;
+    }
+
+    /** That the cleanup tried to remove it, and the directory was missing the entry or refused. */
+    public void cleanupAttempted(Instant when) {
+        this.cleanupAttemptedAt = when;
+    }
+
+    public Instant getCleanupAttemptedAt() {
+        return cleanupAttemptedAt;
     }
 
     public String getRevocationReason() {

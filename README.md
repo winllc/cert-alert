@@ -2096,7 +2096,8 @@ the one that was deleted. So —
   otherwise rewrite tens of thousands of entries in one go, and a mistake caught after five
   hundred removals is a different kind of morning from one caught after fifty thousand.
   Revoked certificates are taken first, so a run that hits the cap spends it on the ones
-  that matter.
+  that matter. One it could not remove — the entry gone from the directory, the modify
+  refused — waits behind everything not yet tried, so such rows cannot fill every run.
 - **A preview**, which counts what would go and takes nothing:
 
 ```
