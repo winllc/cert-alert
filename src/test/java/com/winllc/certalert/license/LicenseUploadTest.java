@@ -1,7 +1,9 @@
 package com.winllc.certalert.license;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.allOf;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -85,6 +87,19 @@ class LicenseUploadTest {
 
         upload(TestLicenses.license().product("readyroom").sign())
                 .andExpect(flash().attribute("error", containsString("This is a license for readyroom, not certalert.")));
+
+        assertThat(licenses.current().license().orElseThrow().id()).isEqualTo(installed);
+        assertThat(licenses.current().state()).isEqualTo(LicenseState.VALID);
+    }
+
+    @Test
+    void anExpiredLicenseIsNotInstalledOverOneInForce() throws Exception {
+        TestLicenses.restoreFull(licenses);
+        String installed = licenses.current().license().orElseThrow().id();
+
+        upload(TestLicenses.license().expired().sign())
+                .andExpect(flash().attribute("error", allOf(startsWith("That license was not installed. This license expired on"),
+                        containsString("the license installed now is still in force."))));
 
         assertThat(licenses.current().license().orElseThrow().id()).isEqualTo(installed);
         assertThat(licenses.current().state()).isEqualTo(LicenseState.VALID);
