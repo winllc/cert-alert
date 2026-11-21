@@ -237,6 +237,15 @@ class AuditChainTest {
     }
 
     @Test
+    void theRecordedActionsForTheFilterAreReadAtMostHourly() {
+        store.actions();
+        String novel = "test.novel-" + System.nanoTime();
+        audit.record(event(novel));
+
+        assertThat(store.actions()).doesNotContain(novel);
+    }
+
+    @Test
     void pruningNeverRemovesTheNewestEvent() {
         Instant old = Instant.now().minus(Duration.ofDays(40));
         long head = store.headSeq();

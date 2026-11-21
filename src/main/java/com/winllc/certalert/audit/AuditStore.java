@@ -4,6 +4,7 @@ import com.winllc.certalert.domain.AuditEvent;
 import com.winllc.certalert.repository.AuditEventRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -24,6 +25,12 @@ public class AuditStore {
     private EntityManager entityManager;
 
     private final AuditEventRepository repository;
+
+    /** How long the recorded actions are used before they are read again. */
+    static final Duration ACTIONS_FOR = Duration.ofHours(1);
+
+    private volatile List<String> actions;
+    private volatile long actionsReadAt;
 
     public AuditStore(AuditEventRepository repository) {
         this.repository = repository;
@@ -116,13 +123,22 @@ public class AuditStore {
         return handed;
     }
 
-    /** Distinct action ids, for the audit page's filter. */
+    /**
+     * Distinct action ids, for the audit page's filter: read at most hourly, since a distinct over
+     * the whole trail reads every row.
+     */
     @Transactional(readOnly = true)
     public List<String> actions() {
-        return entityManager
-                .createQuery("select distinct e.eventAction from AuditEvent e where e.eventAction is not null "
-                        + "order by e.eventAction", String.class)
-                .getResultList();
+        List<String> cached = actions;
+        if (cached == null || System.nanoTime() - actionsReadAt > ACTIONS_FOR.toNanos()) {
+            cached = List.copyOf(entityManager
+                    .createQuery("select distinct e.eventAction from AuditEvent e where e.eventAction is not null "
+                            + "order by e.eventAction", String.class)
+                    .getResultList());
+            actions = cached;
+            actionsReadAt = System.nanoTime();
+        }
+        return cached;
     }
 
     /** Lowest retained seq, or null when the store is empty. */
