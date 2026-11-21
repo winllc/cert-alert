@@ -202,7 +202,7 @@ class SignInRevocationTest {
     private SignInRevocation checker() {
         RevocationProperties revocation = new RevocationProperties();
         FetchPolicy policy = FetchPolicy.of(List.of("localhost", "127.0.0.1"));
-        return new SignInRevocation(settings, new CrlStore(revocation, policy), policy, revocation, clock);
+        return new SignInRevocation(settings, new CrlStore(revocation, policy, clock), policy, revocation, clock);
     }
 
     private TestCa.Issued issue(String crlUrl, String ocspUrl) {

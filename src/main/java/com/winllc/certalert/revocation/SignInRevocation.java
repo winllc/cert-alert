@@ -160,7 +160,7 @@ public class SignInRevocation {
             if (urls.isEmpty()) {
                 return new Answer(RevocationStatus.UNKNOWN, "the certificate names no CRL distribution point");
             }
-            Optional<CrlStore.Fetched> fetched = crls.fetch(urls, issuer, now, fetcher);
+            Optional<CrlStore.Fetched> fetched = crls.fetch(urls, issuer, fetcher);
             if (fetched.isEmpty()) {
                 return new Answer(RevocationStatus.UNKNOWN, "no distribution point answered: " + String.join(", ", urls));
             }

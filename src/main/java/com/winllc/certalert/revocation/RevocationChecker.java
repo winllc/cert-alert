@@ -169,7 +169,7 @@ public class RevocationChecker {
             return Outcome.unknown("The cached serial number could not be read");
         }
         Optional<CrlStore.Fetched> fetched =
-                crls.fetch(urls, issuers.issuerOf(certificate).orElse(null), now);
+                crls.fetch(urls, issuers.issuerOf(certificate).orElse(null));
         if (fetched.isEmpty()) {
             return Outcome.unknown("No distribution point answered: " + String.join(", ", urls));
         }

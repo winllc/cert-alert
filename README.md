@@ -995,7 +995,9 @@ certificates.
   by the platform's path validator; a CRL counts only if it is signed by the issuer and not
   past its next update. Fetches have 5 s to connect and 10 s to answer, follow redirects to
   http and https only, and never go to link-local or metadata addresses
-  (`cert-alert.revocation.allowed-hosts` applies here too). A refusal is a failed
+  (`cert-alert.revocation.allowed-hosts` applies here too). A list the nightly check is
+  downloading at the same moment is waited on no longer than a fetch of its own would take.
+  A refusal is a failed
   `auth.login` with reason `certificate revoked` or `revocation unknown`.
 - **The default is a live check that soft-fails.** With neither setting given, every
   certificate is checked over OCSP and then its CRL. One found revoked is refused. One that
@@ -1945,7 +1947,10 @@ two mechanisms scale. A CRL is one download that answers for every certificate a
 ever issued, and a directory of a hundred thousand entries is issued by a handful of
 authorities — so it is a handful of
 downloads, held for as long as each list says it is good for (`nextUpdate`, capped by
-`crl-cache-ttl`). OCSP is one request per certificate; it gives a fresher answer about one
+`crl-cache-ttl`) and fetched again after that. A distribution point that does not answer, or
+serves a list already past its `nextUpdate`, is left alone for two minutes rather than asked
+again for every certificate that names it; a certificate not on such an out-of-date list is
+*Unknown*, while one that is on it is still *Revoked*. OCSP is one request per certificate; it gives a fresher answer about one
 certificate, which is the right trade when the question is about one certificate and the
 wrong one when it is about two hundred thousand. Distribution points are tried in the order
 the certificate lists them, and `ldap://` ones work — which is how a PKI with no route to

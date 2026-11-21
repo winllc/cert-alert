@@ -73,6 +73,11 @@ public final class RevocationFetcher {
         return policy;
     }
 
+    /** The longest one fetch, redirects included, is allowed to take. */
+    public Duration maxTime() {
+        return maxTime;
+    }
+
     /** What is published at this address, over HTTP or from a directory. */
     public byte[] get(String url, String accept) throws IOException {
         URI uri = parse(url);
