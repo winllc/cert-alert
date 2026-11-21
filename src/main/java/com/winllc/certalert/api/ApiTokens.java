@@ -316,11 +316,13 @@ public class ApiTokens {
                 .detail("scopes", ApiScope.format(token.scopes())));
     }
 
-    /** A request that changes something, recorded as it happens. */
+    /** A request that changes something, recorded as it happens; a 401 or 403 as denied. */
     public void recordWrite(ApiTokenAuthentication token, String method, String path, int status) {
         audit.recordQuietly(AuditRecord.of(AuditRecord.Category.DATA, "api.request")
                 .actor(AuditContext.actorOf(token))
-                .outcome(status < 400 ? AuditRecord.Outcome.SUCCESS : AuditRecord.Outcome.FAILURE)
+                .outcome(status < 400
+                        ? AuditRecord.Outcome.SUCCESS
+                        : status == 401 || status == 403 ? AuditRecord.Outcome.DENIED : AuditRecord.Outcome.FAILURE)
                 .target("api-token", String.valueOf(token.tokenId()), token.tokenName())
                 .detail("method", method)
                 .detail("path", path)

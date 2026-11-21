@@ -20,8 +20,10 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.SecurityFilterChain;
@@ -114,8 +116,13 @@ public class ApiSecurityConfig {
 
     /**
      * Turns the bearer token into the request's authentication, or answers the request
-     * itself: 401 for a token that is not a live one, 429 for one over its rate. Clears the
-     * context afterwards; nothing about the token outlives the request.
+     * itself: 401 for a token that is not a live one, 429 for one over its rate.
+     *
+     * <p>It runs inside exception translation, so a scope refused by the authorisation filter
+     * passes through here as an exception before anything has set the response's status: it
+     * is recorded as the 403 it becomes, and the context is left in place for the access-denied
+     * handler to name the token. {@code SecurityContextHolderFilter} clears it once the chain is
+     * done; nothing about the token outlives the request.
      */
     static final class TokenFilter extends OncePerRequestFilter {
 
@@ -150,14 +157,22 @@ public class ApiSecurityConfig {
             SecurityContextHolder.setContext(context);
             String method = request.getMethod().toUpperCase(Locale.ROOT);
             String path = request.getRequestURI();
+            // What the request becomes; an exception other than these two is a 500.
+            int status = HttpStatus.INTERNAL_SERVER_ERROR.value();
             try {
                 tokens.recordUse(authentication, method, path);
                 chain.doFilter(request, response);
+                status = response.getStatus();
+            } catch (AccessDeniedException e) {
+                status = HttpStatus.FORBIDDEN.value();
+                throw e;
+            } catch (AuthenticationException e) {
+                status = HttpStatus.UNAUTHORIZED.value();
+                throw e;
             } finally {
                 if (!SAFE.contains(method)) {
-                    tokens.recordWrite(authentication, method, path, response.getStatus());
+                    tokens.recordWrite(authentication, method, path, status);
                 }
-                SecurityContextHolder.clearContext();
             }
         }
 

@@ -110,6 +110,9 @@ class ApiTokenTest {
     @Autowired
     private ApiProperties apiProperties;
 
+    @Autowired
+    private com.winllc.certalert.audit.AccessDenials accessDenials;
+
     @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
     private com.winllc.certalert.security.DirectoryStanding standing;
 
@@ -556,6 +559,30 @@ class ApiTokenTest {
                 .singleElement()
                 .satisfies(event -> assertThat(event.line())
                         .contains("\"type\":\"service\"", "api-token:", "API token of admin", "/api/v1/revocation/check"));
+    }
+
+    /**
+     * A write the token's scopes do not cover is refused by the authorisation filter, after
+     * the token filter has run: recorded as the 403 it is, and the refusal is the token's.
+     */
+    @Test
+    void aWriteRefusedForScopeIsAuditedAsDeniedAndAsTheToken() throws Exception {
+        String reader = create("certificates:read");
+        accessDenials.flush();
+        long head = audit.headSeq();
+        mockMvc.perform(post("/api/v1/revocation/check").header("Authorization", bearer(reader)))
+                .andExpect(status().isForbidden());
+        accessDenials.flush();
+        List<StoredEvent> recorded = audit.after(head, 1000);
+        assertThat(recorded).filteredOn(event -> event.action().equals("api.request"))
+                .singleElement()
+                .satisfies(event -> assertThat(event.line())
+                        .contains("\"outcome\":\"denied\"", "\"status\":403", "api-token:" + idOf(reader)));
+        assertThat(recorded).filteredOn(event -> event.action().equals("access.denied"))
+                .singleElement()
+                .satisfies(event -> assertThat(event.line())
+                        .contains("api-token:" + idOf(reader))
+                        .doesNotContain("\"type\":\"system\""));
     }
 
     private Long idOf(String secret) {
