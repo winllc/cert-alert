@@ -985,7 +985,7 @@ certificates.
 | `ENS_X509_OCSP_RESPONDER_URL` | — | Ask this responder instead of the one the certificate names — a local OCSP relay on an air-gapped network |
 | `ENS_X509_CRL_DIR` | — | A directory of CRL files (DER or PEM), re-read when they change. With it set, no distribution point is fetched over the network: the air-gapped option |
 | `ENS_X509_REVOCATION_FAIL` | `open` while `ENS_X509_REVOCATION` is unset, otherwise `closed` | `closed`: when the status cannot be found, refuse. `open`: allow, and log a warning |
-| `ENS_X509_REVOCATION_CACHE` | `10m` | How long a good or revoked answer is reused, per issuer and serial number. No answer is reused for 30 seconds |
+| `ENS_X509_REVOCATION_CACHE` | `10m` | How long a good or revoked answer is reused, per issuer and serial number. No answer is reused for 30 seconds, doubling while it stays unanswered up to 2 minutes; requests for one certificate that arrive while it is being checked wait for that check |
 | `ENS_X509_ALLOWED_ISSUERS` | — | Issuer DNs, separated by `;`. When set, a certificate from any other issuer is refused even if the trust store accepts it. Compared as names (RFC 4514), so spacing and case do not matter |
 | `ENS_X509_USER_FILTER` | — | An LDAP filter that finds the holder of a certificate the directory does not publish, with `{upn}`, `{edipi}`, `{email}` and `{uuid}` filled in — e.g. `(uid={edipi})`. Used instead of the uid/address matching above, and only with `require-known-certificate: false` |
 
@@ -996,8 +996,10 @@ certificates.
   past its next update. Fetches have 5 s to connect and 10 s to answer, follow redirects to
   http and https only, and never go to link-local or metadata addresses
   (`cert-alert.revocation.allowed-hosts` applies here too). A list the nightly check is
-  downloading at the same moment is waited on no longer than a fetch of its own would take.
-  A refusal is a failed
+  downloading at the same moment is waited on no longer than a fetch of its own would take,
+  and the check runs before the database transaction that matches the certificate to a
+  person, so a slow responder does not hold a database connection. Under soft-fail the
+  warning is logged once per answer, not on every request. A refusal is a failed
   `auth.login` with reason `certificate revoked` or `revocation unknown`.
 - **The default is a live check that soft-fails.** With neither setting given, every
   certificate is checked over OCSP and then its CRL. One found revoked is refused. One that
@@ -1032,13 +1034,15 @@ TLS, verifies the client certificate, and forwards it:
 | `ENS_X509_SOURCE` | `servlet` | `servlet` or `header` |
 | `ENS_X509_HEADER` | `X-SSL-Client-Cert` | The header, URL-encoded PEM as nginx's `$ssl_client_escaped_cert` sends it (ingress-nginx: `ssl-client-cert`) |
 | `ENS_X509_TRUSTED_PROXIES` | `127.0.0.1/32,::1/128` | Addresses (CIDRs) the header is accepted from: the proxy's |
-| `ENS_X509_PROXY_SECRET_FILE` / `ENS_X509_PROXY_SECRET` | — | At least 32 characters, which the proxy sends in `X-ENS-Proxy-Secret`; compared in constant time. The file wins |
+| `ENS_X509_PROXY_SECRET_FILE` / `ENS_X509_PROXY_SECRET` | — | At least 32 characters, which the proxy sends in `X-ENS-Proxy-Secret`; compared in constant time. The file wins, and is read again when its time or size changes |
 | `ENS_X509_TRUSTED_CA_FILE` | — | PEM certificates of the CAs a forwarded certificate must chain to |
 
 The header is believed only when the connection itself comes from a trusted proxy address
 (never an address a forwarded-for header claims) **and** carries the secret, and the
 certificate then chains to a CA in the file, is in date and is not restricted to some use
-other than client authentication. Anything else is refused and recorded as a failed
+other than client authentication. A chain that validated is reused for the same header for a
+minute, never past the expiry of a certificate in it or a change to the CA file. Anything else
+is refused and recorded as a failed
 `auth.login` (`certificate header not from a trusted proxy`, `certificate not trusted`). In
 header mode a certificate from the application's own TLS handshake is ignored. **The
 application refuses to start** in header mode without a secret of 32 characters or more,
