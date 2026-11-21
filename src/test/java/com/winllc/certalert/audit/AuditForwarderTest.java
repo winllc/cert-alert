@@ -190,6 +190,28 @@ class AuditForwarderTest {
     }
 
     @Test
+    void aBackoffIsWaitedOutInFullWhileEventsKeepArriving() throws Exception {
+        Thread waiter = new Thread(() -> delivery.pause(Duration.ofMillis(1500), true));
+        long start = System.nanoTime();
+        waiter.start();
+        while (waiter.isAlive() && System.nanoTime() - start < Duration.ofSeconds(1).toNanos()) {
+            delivery.wake(); // every recorded event does this
+            Thread.sleep(10);
+        }
+        waiter.join(5000);
+        assertThat(Duration.ofNanos(System.nanoTime() - start)).isGreaterThanOrEqualTo(Duration.ofMillis(1500));
+
+        Thread polling = new Thread(() -> delivery.pause(Duration.ofSeconds(30), false));
+        start = System.nanoTime();
+        polling.start();
+        while (polling.isAlive() && System.nanoTime() - start < Duration.ofSeconds(10).toNanos()) {
+            delivery.wake();
+            Thread.sleep(10);
+        }
+        assertThat(polling.isAlive()).as("a poll interval ends when an event arrives").isFalse();
+    }
+
+    @Test
     void syslogDefaultsAndSeverities() {
         EnsAuditProperties.Syslog settings = new EnsAuditProperties.Syslog();
         assertThat(settings.effectivePort()).isEqualTo(514);

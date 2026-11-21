@@ -3385,7 +3385,7 @@ the documentation site: [audit-logging.md](https://github.com/winllc/ens-apps-do
 | Category | Actions |
 |---|---|
 | authentication | `auth.login` (success and failure; `details.method` `x509` or `ldap`, the attempted name as an `anonymous` actor on failure, `alert` severity after repeated failures for one name; a published client certificate refused as revoked, expired or not yet valid carries that as its reason and `details.fingerprint`, and a revoked one is `alert`), `auth.logout` |
-| authorization | `access.denied` for every 403: a role refused, `license_required`, `license_read_only`, `feature_not_licensed`, a CSRF failure — with method, path and reason code; identical refusals within 60 s are one event with `details.count` |
+| authorization | `access.denied` for every 403: a role refused, `license_required`, `license_read_only`, `feature_not_licensed`, a CSRF failure — with method, path and reason code; the first is recorded at once, and identical refusals within the next 60 s are one more event with `details.count` |
 | account | `project.admin-added`, `project.admin-removed` (the one role this application grants) |
 | configuration | `settings.changed` (the round-up's lead days, `<field>.old`/`.new`), `server-attribute.defined`, `.changed`, `.retired` |
 | license | `license.installed`, `license.rejected` (with the reason), `license.mode-changed` (FULL / READ_ONLY / UNLICENSED, checked at startup, on every request and every minute), `license.limit-exceeded` (at most hourly, with the count refused) |
@@ -3421,7 +3421,9 @@ read-only included, since the audit trail is not a licensed feature:
 - **Export** of the current filter (up to 100,000 events) as CSV or NDJSON, itself recorded
   as `audit.exported`;
 - **Verify integrity**, which recomputes the chain and reports intact, broken at seq N, or the
-  anchor (the first retained seq after pruning, whose `prevHash` is taken as given);
+  anchor (the first retained seq after pruning). The anchor must be the event right after the
+  last one retention deleted, chained to its hash, and the walk must end at the chain head, so
+  events deleted by other means from either end are reported;
 - **Delivery**: per output, whether it is on, the last seq delivered and when, the backlog
   and the last error;
 - **SIEM API tokens**: create (shown once, with a copy button), list, revoke;
@@ -3451,6 +3453,12 @@ retried with backoff up to five minutes, and never slowing a request. An output 
 fifteen minutes records `audit.delivery-failed`, and `audit.delivery-recovered` when it comes
 back. Stdout and the file are written just after each commit. Startup logs one line per
 output saying whether it is on; the token is never logged. TLS trusts the JVM's trust store.
+
+Syslog over `tcp` and `tls` has no delivery acknowledgement, so it is best effort. Before each
+batch the forwarder checks that the collector has not closed the connection, and it opens a new
+one after 30 seconds unused; when a connection turns out broken, the batch last written on it is
+sent again (a collector restart can repeat up to one batch). A batch the collector does not take
+within 30 seconds fails and is retried. Where no event may be missing, use HEC or the pull API.
 
 The release bundle passes every `ENS_AUDIT_*` variable through (see `env.template`) and mounts
 the `ens-audit` volume at `/var/log/ens`, which the image creates writable by its user and by

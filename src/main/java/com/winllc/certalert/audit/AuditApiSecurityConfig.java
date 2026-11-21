@@ -26,7 +26,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * authenticated by {@code Authorization: Bearer ensat_...} alone - no session, no CSRF, no
  * sign-in page - and answers 401 to anything else. The same in a demo as anywhere, and the
  * license interceptor lets it through whatever the license says: the audit trail has to stay
- * readable.
+ * readable. A wrong or revoked token is recorded as a failed {@code auth.login}, collapsed per
+ * source address ({@link AccessDenials#tokenRefused}).
  */
 @Configuration(proxyBeanMethods = false)
 public class AuditApiSecurityConfig {
@@ -36,7 +37,7 @@ public class AuditApiSecurityConfig {
     @Bean
     @Order(Ordered.HIGHEST_PRECEDENCE)
     public SecurityFilterChain auditApiFilterChain(
-            HttpSecurity http, AuditTokens tokens, EnsSecurityProperties ens) throws Exception {
+            HttpSecurity http, AuditTokens tokens, EnsSecurityProperties ens, AccessDenials denials) throws Exception {
         SecurityHeaders.apply(http, ens.getCsp().isReportOnly());
         http.securityMatcher(PATH)
                 .csrf(csrf -> csrf.disable())
@@ -47,7 +48,7 @@ public class AuditApiSecurityConfig {
                 .httpBasic(basic -> basic.disable())
                 .logout(logout -> logout.disable())
                 .anonymous(anonymous -> anonymous.disable())
-                .addFilterBefore(new BearerTokenFilter(tokens), AuthorizationFilter.class)
+                .addFilterBefore(new BearerTokenFilter(tokens, denials), AuthorizationFilter.class)
                 .authorizeHttpRequests(authorize -> authorize.anyRequest().hasAuthority(AuditTokenAuthentication.AUTHORITY))
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED))
@@ -60,9 +61,11 @@ public class AuditApiSecurityConfig {
     static final class BearerTokenFilter extends OncePerRequestFilter {
 
         private final AuditTokens tokens;
+        private final AccessDenials denials;
 
-        BearerTokenFilter(AuditTokens tokens) {
+        BearerTokenFilter(AuditTokens tokens, AccessDenials denials) {
             this.tokens = tokens;
+            this.denials = denials;
         }
 
         @Override
@@ -70,11 +73,14 @@ public class AuditApiSecurityConfig {
                 throws ServletException, IOException {
             String header = request.getHeader("Authorization");
             if (header != null && header.regionMatches(true, 0, "Bearer ", 0, 7)) {
-                tokens.authenticate(header.substring(7).trim()).ifPresent(token -> {
+                var token = tokens.authenticate(header.substring(7).trim());
+                if (token.isPresent()) {
                     SecurityContext context = SecurityContextHolder.createEmptyContext();
-                    context.setAuthentication(new AuditTokenAuthentication(token.getId(), token.getName()));
+                    context.setAuthentication(new AuditTokenAuthentication(token.get().getId(), token.get().getName()));
                     SecurityContextHolder.setContext(context);
-                });
+                } else if (denials != null) {
+                    denials.tokenRefused(request);
+                }
             }
             try {
                 chain.doFilter(request, response);

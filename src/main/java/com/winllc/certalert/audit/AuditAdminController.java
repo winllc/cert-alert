@@ -159,7 +159,10 @@ public class AuditAdminController {
         requireAuditReader(authentication);
         boolean csv = !"ndjson".equalsIgnoreCase(format);
         AuditQuery query = filter.toQuery();
-        long matching = repository.count(query.toSpecification());
+        // What is there now: the export's own record, and whatever is appended while it streams, is not in it.
+        long upTo = store.headSeq();
+        long matching = repository.count(query.toSpecification()
+                .and((root, q, cb) -> cb.lessThanOrEqualTo(root.get("seq"), upTo)));
         int count = (int) Math.min(matching, MAX_EXPORT);
         audit.record(AuditRecord.of(AuditRecord.Category.AUDIT, "audit.exported")
                 .detail("format", csv ? "csv" : "ndjson")
@@ -177,7 +180,7 @@ public class AuditAdminController {
             writer.write(String.join(",", CSV_COLUMNS));
             writer.write("\r\n");
         }
-        store.forEach(query, count, event -> {
+        store.forEach(query, upTo, count, event -> {
             try {
                 if (csv) {
                     writer.write(csvRow(event));

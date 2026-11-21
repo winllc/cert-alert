@@ -51,6 +51,9 @@ class AuditPullApiTest {
     @Autowired
     private LicenseManager licenses;
 
+    @Autowired
+    private AccessDenials denials;
+
     private MockMvc mockMvc;
 
     @BeforeEach
@@ -124,9 +127,16 @@ class AuditPullApiTest {
 
     @Test
     void noTokenAWrongOneOrASessionGets401() throws Exception {
+        denials.flush();
+        long cursor = store.headSeq();
         mockMvc.perform(get("/api/audit/events")).andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/audit/events").header("Authorization", "Bearer ensat_not-a-real-token"))
                 .andExpect(status().isUnauthorized());
+        // A wrong token is a failed sign-in, never with the token in it.
+        StoredEvent refused = store.after(cursor, 10).getFirst();
+        assertThat(refused.action()).isEqualTo("auth.login");
+        assertThat(refused.line()).contains("\"outcome\":\"failure\"", "\"method\":\"api-token\"",
+                "\"reason\":\"invalid or revoked token\"").doesNotContain("ensat_not-a-real-token");
         // A signed-in administrator's session is not a token either.
         mockMvc.perform(get("/api/audit/events").with(admin())).andExpect(status().isUnauthorized());
     }
@@ -137,6 +147,7 @@ class AuditPullApiTest {
         mockMvc.perform(get("/api/audit/events").header("Authorization", "Bearer " + token)).andExpect(status().isOk());
         Long id = tokens.list().stream().filter(t -> t.getPrefix().equals(token.substring(0, 12))).findFirst()
                 .orElseThrow().getId();
+        denials.flush();
         long cursor = store.headSeq();
 
         mockMvc.perform(delete("/api/v1/admin/audit/tokens/{id}", id).with(admin()).with(csrf()))
@@ -145,7 +156,8 @@ class AuditPullApiTest {
 
         mockMvc.perform(get("/api/audit/events").header("Authorization", "Bearer " + token))
                 .andExpect(status().isUnauthorized());
-        assertThat(store.after(cursor, 10)).extracting(StoredEvent::action).containsExactly("audit.token-revoked");
+        assertThat(store.after(cursor, 10)).extracting(StoredEvent::action)
+                .containsExactly("audit.token-revoked", "auth.login");
     }
 
     @Test

@@ -172,13 +172,33 @@ class AuditCoverageTest {
         mockMvc.perform(get("/admin").with(reader())).andExpect(status().isForbidden());
         mockMvc.perform(get("/admin").with(reader())).andExpect(status().isForbidden());
         mockMvc.perform(get("/admin").with(reader())).andExpect(status().isForbidden());
-        denials.flush();
-
+        // The first is recorded at once; the repeats when the window closes.
         StoredEvent denied = only("access.denied");
         assertThat(denied.line()).contains(
                 "\"category\":\"authorization\"", "\"outcome\":\"denied\"", "\"severity\":\"warning\"",
                 "\"actor\":{\"type\":\"user\",\"id\":\"reader\"", "\"method\":\"GET\"", "\"path\":\"/admin\"",
-                "\"reasonCode\":\"role_required\"", "\"count\":3");
+                "\"reasonCode\":\"role_required\"", "\"count\":1");
+        denials.flush();
+        List<StoredEvent> both = written().stream().filter(e -> e.action().equals("access.denied")).toList();
+        assertThat(both).hasSize(2);
+        assertThat(both.getLast().line()).contains("\"actor\":{\"type\":\"user\",\"id\":\"reader\"",
+                "\"path\":\"/admin\"", "\"count\":2", "\"collapsed\":true");
+    }
+
+    @Test
+    void aFullMapOfDenialWindowsCollapsesPerActorWhateverThePath() throws Exception {
+        denials.maxWindows = 1;
+        try {
+            for (String path : List.of("/admin", "/admin/integrations", "/admin/audit", "/admin/license")) {
+                mockMvc.perform(get(path).with(reader())).andExpect(status().isForbidden());
+            }
+            List<StoredEvent> denied = written().stream().filter(e -> e.action().equals("access.denied")).toList();
+            assertThat(denied).hasSize(2);
+            assertThat(denied.getLast().line()).contains("\"path\":\"/admin/integrations\"", "\"anyPath\":true");
+            assertThat(denials.openWindows()).isEqualTo(2);
+        } finally {
+            denials.maxWindows = AccessDenials.MAX_WINDOWS;
+        }
     }
 
     @Test
