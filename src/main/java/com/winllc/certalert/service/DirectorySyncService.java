@@ -105,7 +105,7 @@ public class DirectorySyncService {
         }
         log.info(
                 "{} sync finished in {} ms: {} entries ({} new), {} certificate(s) cached, {} removed, "
-                        + "{} alert(s), {} failed batch(es)",
+                        + "{} alert(s), {} entr(ies) that could not be written",
                 job,
                 result.duration().toMillis(),
                 result.entriesSeen(),
@@ -118,8 +118,9 @@ public class DirectorySyncService {
     }
 
     /**
-     * Fills a batch, writes it, and forgets it. A batch that blows up is logged and
-     * skipped: on a directory this size, one malformed entry must not cost the sweep.
+     * Fills a batch, writes it, and forgets it. A batch that blows up is written again an
+     * entry at a time, so one malformed entry costs itself and not its neighbours - which,
+     * paging being stable, would otherwise be the same neighbours every night.
      */
     private final class BatchCollector<T> {
 
@@ -146,7 +147,6 @@ public class DirectorySyncService {
             }
         }
 
-        @SuppressWarnings("unchecked")
         private void flush() {
             if (batch.isEmpty()) {
                 return;
@@ -154,17 +154,41 @@ public class DirectorySyncService {
             List<T> pending = List.copyOf(batch);
             batch.clear();
             try {
-                outcome = outcome.plus(job == SyncJob.USERS
-                        ? persistenceService.upsertUsers((List<LdapUserEntry>) pending, now, actor)
-                        : persistenceService.upsertServers((List<LdapServerEntry>) pending, now, actor));
+                outcome = outcome.plus(write(pending));
             } catch (RuntimeException e) {
-                errors++;
-                log.error("Failed to write a batch of {} {} entries", pending.size(), job, e);
+                if (pending.size() == 1) {
+                    errors++;
+                    log.error("Failed to write {} entry '{}'", job, dnOf(pending.getFirst()), e);
+                } else {
+                    log.warn("Failed to write a batch of {} {} entries; writing them one at a time: {}",
+                            pending.size(), job, e.toString());
+                    for (T entry : pending) {
+                        try {
+                            outcome = outcome.plus(write(List.of(entry)));
+                        } catch (RuntimeException single) {
+                            errors++;
+                            log.error("Failed to write {} entry '{}'", job, dnOf(entry), single);
+                        }
+                    }
+                }
             }
             written += pending.size();
             if (written % 10_000 < properties.getBatchSize()) {
                 log.info("{} sync progress: {} entries written", job, written);
             }
+        }
+
+        @SuppressWarnings("unchecked")
+        private BatchOutcome write(List<T> entries) {
+            return job == SyncJob.USERS
+                    ? persistenceService.upsertUsers((List<LdapUserEntry>) entries, now, actor)
+                    : persistenceService.upsertServers((List<LdapServerEntry>) entries, now, actor);
+        }
+
+        private String dnOf(T entry) {
+            return entry instanceof LdapUserEntry user
+                    ? user.dn()
+                    : entry instanceof LdapServerEntry server ? server.dn() : String.valueOf(entry);
         }
     }
 }

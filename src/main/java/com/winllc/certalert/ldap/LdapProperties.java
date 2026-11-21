@@ -233,8 +233,23 @@ public class LdapProperties {
          */
         private Duration after = Duration.ofDays(30);
 
+        /**
+         * The most of one kind of entry a prune may remove at once, as a share of all of
+         * them. A prune that would take more is refused: a directory losing a tenth of
+         * its people in a week is far likelier to be a sweep coming back short.
+         */
+        private double maxShare = 0.10;
+
         public boolean isEnabled() {
             return enabled;
+        }
+
+        public double getMaxShare() {
+            return maxShare;
+        }
+
+        public void setMaxShare(double maxShare) {
+            this.maxShare = maxShare;
         }
 
         public void setEnabled(boolean enabled) {

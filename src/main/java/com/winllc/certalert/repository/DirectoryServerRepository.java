@@ -52,6 +52,10 @@ public interface DirectoryServerRepository extends DataTablesRepository<Director
 
     long countByLastSyncedAtBefore(Instant cutoff);
 
+    /** When the most recently seen of those the prune would remove was last seen. */
+    @Query("select max(s.lastSyncedAt) from DirectoryServer s where s.lastSyncedAt < :cutoff")
+    Instant findNewestSyncedBefore(@Param("cutoff") Instant cutoff);
+
     /** Used by the prune job; the cascade takes the certificates and contacts with it. */
     @Modifying
     @Query("delete from DirectoryServer s where s.lastSyncedAt < :cutoff")

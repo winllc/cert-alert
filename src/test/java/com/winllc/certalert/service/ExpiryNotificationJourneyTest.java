@@ -359,7 +359,7 @@ class ExpiryNotificationJourneyTest {
         assertThat(JsonPath.<String>read(page, "$.content[0].kindLabel")).isEqualTo("Expiry summary");
         assertThat(JsonPath.<String>read(page, "$.content[0].severity")).isEqualTo("CRITICAL");
         assertThat(JsonPath.<String>read(page, "$.content[0].message"))
-                .startsWith("1 credential(s) expired (web01 - CN=web01.example.gov - expired 2 day(s) ago, on ")
+                .startsWith("1 credential(s) expired (web01 - CN=web01.example.gov - expired on ")
                 .doesNotContain("Olive");
         assertThat(JsonPath.<String>read(page, "$.content[0].emailedAt")).isNotNull();
         // What it is about is the server it reports on, linked like any notification about
@@ -371,7 +371,7 @@ class ExpiryNotificationJourneyTest {
 
         String hers = notificationsOf(signIn("olive"));
         assertThat(JsonPath.<String>read(hers, "$.content[0].message"))
-                .startsWith("1 credential(s) expiring (Olive Owner - CN=olive - expires in 10 day(s), on ")
+                .startsWith("1 credential(s) expiring (Olive Owner - CN=olive - expires on ")
                 .doesNotContain("web01");
         // Her own certificate: the entry it is about is hers, and it says so.
         assertThat(JsonPath.<String>read(hers, "$.content[0].subjectName")).isEqualTo("Olive Owner");

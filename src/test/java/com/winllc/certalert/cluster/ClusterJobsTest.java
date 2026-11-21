@@ -24,6 +24,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.scheduling.TaskScheduler;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
@@ -63,6 +65,9 @@ class ClusterJobsTest {
 
     @Autowired
     private TransactionTemplate transactions;
+
+    @Autowired
+    private TaskScheduler scheduler;
 
     private MockMvc mockMvc;
 
@@ -181,6 +186,25 @@ class ClusterJobsTest {
         JobRun run = runs.findById("00000000-0000-0000-0000-000000000001").orElseThrow();
         assertThat(run.getState()).isEqualTo(JobRun.State.FAILED);
         assertThat(run.getError()).contains("stopped");
+    }
+
+    @Test
+    void scheduledJobsShareMoreThanOneThread() {
+        // One thread would let a long sweep hold up the outboxes, the audit flush and the rest.
+        assertThat(scheduler).isInstanceOf(ThreadPoolTaskScheduler.class);
+        assertThat(((ThreadPoolTaskScheduler) scheduler).getScheduledThreadPoolExecutor().getCorePoolSize())
+                .isEqualTo(8);
+    }
+
+    @Test
+    void runsAreHeartBeatenOffTheSharedScheduler() throws Exception {
+        // A sweep holding the scheduler's threads must not stop this replica saying its runs
+        // are going, or another replica fails them while they run.
+        assertThat(JobRuns.class.getMethod("housekeeping")
+                        .isAnnotationPresent(org.springframework.scheduling.annotation.Scheduled.class))
+                .isFalse();
+        assertThat(Thread.getAllStackTraces().keySet())
+                .anyMatch(thread -> thread.getName().equals("job-run-heartbeat") && thread.isAlive());
     }
 
     @Test

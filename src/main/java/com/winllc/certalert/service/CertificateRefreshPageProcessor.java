@@ -9,6 +9,7 @@ import com.winllc.certalert.domain.CertificateStatus;
 import com.winllc.certalert.domain.DirectoryServer;
 import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.domain.OwnerType;
+import com.winllc.certalert.domain.Severity;
 import com.winllc.certalert.repository.CachedCertificateRepository;
 import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.DirectoryUserRepository;
@@ -73,17 +74,31 @@ public class CertificateRefreshPageProcessor {
         List<AuditEvent> records = new ArrayList<>();
         String actor = AuditActors.current(AuditActors.REFRESH);
         int alerts = 0;
+        List<CachedCertificate> alertable = new ArrayList<>();
         for (CachedCertificate certificate : stale) {
             CertificateStatus previous = certificate.getStatus();
             CertificateStatus current = evaluator.evaluate(certificate.getNotAfter(), now);
             if (current == previous) {
+                // Still expiring, and now inside the critical threshold: alerted as a
+                // WARNING when it came into the window, and escalated once, here.
+                if (current == CertificateStatus.EXPIRING_SOON
+                        && certificate.getLastAlertSeverity() == Severity.WARNING
+                        && severityOf(certificate, current, now) == Severity.CRITICAL) {
+                    alertable.add(certificate);
+                }
                 continue;
             }
             certificate.updateStatus(current, now);
             changedIds.add(certificate.getId());
             records.add(statusChange(certificate, previous, current, now, actor));
             if (current.isAlertable()) {
-                alerts += raiseAlert(certificate, current, now);
+                alertable.add(certificate);
+            }
+        }
+        // Once every status on the page has moved, so a renewal is judged as it now stands.
+        for (CachedCertificate certificate : alertable) {
+            if (!renewed(certificate)) {
+                alerts += raiseAlert(certificate, certificate.getStatus(), now);
             }
         }
         auditService.recordAll(records);
@@ -117,8 +132,28 @@ public class CertificateRefreshPageProcessor {
                 .forCertificate(certificate.getSha256Fingerprint());
     }
 
+    /**
+     * Whether its entry has already published its renewal. A directory keeps the old
+     * certificate after a renewal, and it lapsing then is not news: the change is still in
+     * the history, but nobody is alerted about a certificate somebody has already replaced.
+     */
+    private static boolean renewed(CachedCertificate certificate) {
+        if (certificate.getUser() != null) {
+            return Renewals.replaced(certificate, certificate.getUser().getCertificates());
+        }
+        if (certificate.getServer() != null) {
+            return Renewals.replaced(certificate, certificate.getServer().getCertificates());
+        }
+        return false;
+    }
+
+    private Severity severityOf(CachedCertificate certificate, CertificateStatus status, Instant now) {
+        return evaluator.severityFor(status, evaluator.daysUntilExpiry(certificate.getNotAfter(), now));
+    }
+
     private int raiseAlert(CachedCertificate certificate, CertificateStatus status, Instant now) {
         long daysUntilExpiry = evaluator.daysUntilExpiry(certificate.getNotAfter(), now);
+        certificate.alerted(evaluator.severityFor(status, daysUntilExpiry));
         DirectoryUser user = certificate.getUser();
         if (user != null) {
             alertDispatcher.dispatch(CertificateAlert.from(

@@ -2096,7 +2096,8 @@ the one that was deleted. So —
   otherwise rewrite tens of thousands of entries in one go, and a mistake caught after five
   hundred removals is a different kind of morning from one caught after fifty thousand.
   Revoked certificates are taken first, so a run that hits the cap spends it on the ones
-  that matter.
+  that matter. One it could not remove — the entry gone from the directory, the modify
+  refused — waits behind everything not yet tried, so such rows cannot fill every run.
 - **A preview**, which counts what would go and takes nothing:
 
 ```
@@ -2399,7 +2400,9 @@ one beside it. The page and the message agree, which they would not if the round
 question of its own.
 
 An entry whose certificates have *all* lapsed is the case that most needs telling, and it
-still is: with nothing standing, nothing has been replaced.
+still is: with nothing standing, nothing has been replaced. So is half of a person's pair
+that lapsed and was not renewed, though the roll-up passes over it while the other half is
+current: for a person the round-up asks only whether it was replaced.
 
 #### When the mail server is down
 
@@ -2413,6 +2416,8 @@ down loses nothing:
 - a message that cannot be sent stays queued and is tried again a minute later, then two,
   four and so on up to an hour apart (`cert-alert.mail.outbox.retry-initial` / `retry-max`),
   each failure logged as a warning with the mail server's reason;
+- a round-up, like a background pass, stops after three failures in a row and leaves the rest
+  queued for the next pass, rather than waiting out every message's timeout;
 - a newer round-up to the same address replaces one still waiting, so a mail server that comes
   back after a weekend delivers today's round-up rather than three;
 - after three days (`give-up-after`) a message is given up on, with an error in the log;
@@ -2421,6 +2426,11 @@ down loses nothing:
 A round-up run while the mail server is down says so on the notifications page — "could not
 be sent and are queued to try again", with the reason — rather than reporting them as sent.
 An alert is recorded as `alert.sent` once it is safely queued.
+
+**The per-run cap.** A round-up sends at most `cert-alert.notifications.email.max-per-run`
+(500) messages. Where that binds, whatever is next to expire is mailed first and what has
+lapsed longest waits; everybody is still told on the page. The run says how many it held back
+(`notMailed`, and the note on the card), and logs a warning every run the cap binds.
 
 #### A dry run
 
@@ -3025,7 +3035,9 @@ continuously, so the sweeps are a backstop rather than the only way a change arr
 because time passes — nothing in the directory changes. Without it, a status would only be
 corrected when its entry happened to be re-scraped, so a nightly sweep would mean expiry
 alerts up to a day late. It walks only certificates that could plausibly have moved (not
-already expired, notAfter inside the warning window), which is a small indexed slice.
+already expired, notAfter inside the warning window), which is a small indexed slice. It also
+escalates: a certificate alerted on as a `WARNING` when it came into the window is alerted on
+once more, as `CRITICAL`, when it comes inside `critical-threshold-days`.
 
 **Why revocation is its own job.** It is the only work here that reads neither the directory
 nor the clock: it asks the certificates' own authorities, which is a different system, on a
@@ -3040,8 +3052,11 @@ the directory, and deletions there cannot be undone from this side. See
 silently. It works on how long an entry has gone unseen rather than by diffing a sweep's
 results, because a sweep that died halfway through looks exactly like a directory that lost
 half its entries; with `after` set well beyond the sync interval, several consecutive
-failed sweeps still cannot delete anything. Check `GET /api/v1/sync/prune/preview` before
-turning it on.
+failed sweeps still cannot delete anything. Nor can a month of them: each kind of entry is
+pruned only when a sweep of that kind has completed with no errors since the newest of them
+was last seen, and only when they are at most `prune.max-share` (10%) of that kind. Otherwise
+that kind is left in place, the run is recorded as completed with errors, and the log says
+why. Check `GET /api/v1/sync/prune/preview` before turning it on.
 
 Every job is guarded against overlapping itself — a sweep of a large directory can outlast
 its own interval — by a lock in the database (`shedlock`), which a run started by hand takes
@@ -3049,6 +3064,10 @@ too: pressing "Sync directory" while the nightly sweep is running, on this repli
 does not start a second sweep. A replica that dies holding a lock releases it after
 `cert-alert.cluster.lock-at-most-for` (10 minutes; renewed while the job runs, however long).
 Every run is recorded in `sync_run`, readable at `GET /api/v1/sync/runs`.
+
+The scheduled jobs, and the mail and webhook outboxes, audit flush and session sweep, share
+`spring.task.scheduling.pool.size` threads (`CERT_ALERT_SCHEDULER_THREADS`, 8), so a long sweep
+does not hold up the rest. A run started by hand says it is still going from a thread of its own.
 
 ### Starting a job by hand
 
@@ -3445,6 +3464,7 @@ Scraping, under `cert-alert.ldap`:
 | `prune.enabled`      | `false` | Whether stale entries are deleted at all        |
 | `prune.cron`         | `0 0 6 * * SUN` | Prune schedule                          |
 | `prune.after`        | `30d`   | How long an entry may go unseen before deletion |
+| `prune.max-share`    | `0.10`  | Most of one kind of entry one prune may delete  |
 | `changelog.enabled`  | `false` | Follow the directory's changelog continuously   |
 | `changelog.auto-start` | `true` | Whether the loop starts with the application   |
 | `changelog.base-dn`  | `cn=changelog` | The changelog suffix                     |
