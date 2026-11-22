@@ -377,6 +377,9 @@ true
 {{- end -}}
 {{- end -}}
 {{- if eq .Values.x509.source "header" -}}
+{{- if not .Values.x509.trustedProxies -}}
+{{- fail "x509.source=header needs x509.trustedProxies: the ingress controller's pod network (CIDRs, e.g. 10.42.0.0/16). The certificate header is accepted only from there. Before this release it defaulted to every private range." -}}
+{{- end -}}
 {{- if not (include "cert-alert.x509ProxySecretConfigured" .) -}}
 {{- fail "x509.source=header needs x509.proxySecret.existingSecret (or .value): the secret, at least 32 characters, that the proxy sends in X-ENS-Proxy-Secret. A forwarded certificate is believed only with it." -}}
 {{- end -}}

@@ -191,6 +191,24 @@ jobs:
           helm template cert-alert "$CHART" -f "$CHART/ci/ingress-values.yaml" \
             | grep -q 'ENS_LICENSE_MENU_VISIBLE: "false"'
 
+      - name: Trusted proxies are never a default, and header mode needs them
+        run: |
+          # Their X-Forwarded-For hops decide the client's address, so no range is trusted
+          # unless the values name it, and header mode does not render without one.
+          if helm template cert-alert "$CHART" -f "$CHART/ci/ingress-values.yaml" \
+              | grep -q 'ENS_X509_TRUSTED_PROXIES'; then
+            echo "::error::ENS_X509_TRUSTED_PROXIES rendered without x509.trustedProxies"
+            exit 1
+          fi
+          helm template cert-alert "$CHART" -f "$CHART/ci/header-x509-values.yaml" \
+            | grep -q 'ENS_X509_TRUSTED_PROXIES: "10.42.0.0/16"'
+          if out=$(helm template cert-alert "$CHART" -f "$CHART/ci/header-x509-values.yaml" \
+              --set x509.trustedProxies= 2>&1); then
+            echo "::error::x509.source=header rendered without x509.trustedProxies"
+            exit 1
+          fi
+          echo "$out" | grep -q 'x509.source=header needs x509.trustedProxies'
+
       - name: Render and validate
         run: |
           for values in "$CHART"/ci/*.yaml; do

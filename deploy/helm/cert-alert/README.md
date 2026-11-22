@@ -147,7 +147,7 @@ The license screen shows the installation id; after the first sign-in it is also
 | `caTruststore.password` | `""` | | Or `passwordExistingSecret` + `passwordExistingSecretKey` (`ca-truststore-password`) |
 | `x509.source` | `servlet` | `ENS_X509_SOURCE` | `servlet`: from the pod's TLS handshake. `header`: forwarded by a TLS-terminating ingress |
 | `x509.header` | `""` (`X-SSL-Client-Cert`) | `ENS_X509_HEADER` | ingress-nginx sends `ssl-client-cert` |
-| `x509.trustedProxies` | private ranges | `ENS_X509_TRUSTED_PROXIES` | Where the header is accepted from: the ingress controller's pods. In any source mode, also the proxies whose `X-Forwarded-For` hops are followed for the client's address in the audit trail; narrow it to the controller's pod network when clients have private addresses too |
+| `x509.trustedProxies` | `""` (loopback) | `ENS_X509_TRUSTED_PROXIES` | The ingress controller's (or router's) pod network, e.g. `10.42.0.0/16`: where the header is accepted from, and in any source mode the proxies whose `X-Forwarded-For` hops are followed for the client's address in the audit trail. List only the proxy. Required in header mode; empty behind an ingress records the controller's address |
 | `x509.proxySecret.existingSecret` / `.existingSecretKey` / `.value` | `""` / `proxy-secret` / `""` | `ENS_X509_PROXY_SECRET_FILE` | The secret the proxy sends in `X-ENS-Proxy-Secret`, 32+ characters. Required in header mode |
 | `x509.trustedCa.existingSecret` / `.existingSecretKey` / `.value` | `""` / `ca.pem` / `""` | `ENS_X509_TRUSTED_CA_FILE` | PEM CAs a forwarded certificate must chain to. Required in header mode |
 | `x509.revocation` | `""` (`ocsp-then-crl`) | `ENS_X509_REVOCATION` | `off`, `ocsp`, `crl`, `ocsp-then-crl`: checked live at sign-in. Empty: `ocsp-then-crl`, soft-fail |
@@ -155,7 +155,8 @@ The license screen shows the installation id; after the first sign-in it is also
 | `x509.allowedIssuers` | `""` | `ENS_X509_ALLOWED_ISSUERS` | Issuer DNs separated by `;` |
 | `x509.userFilter` | `""` | `ENS_X509_USER_FILTER` | e.g. `(uid={edipi})`, with `CERT_ALERT_SECURITY_X509_REQUIRE_KNOWN_CERTIFICATE=false` in `extraEnv` |
 
-The chart refuses to render `x509.source=header` without a proxy secret and a CA.
+The chart refuses to render `x509.source=header` without `x509.trustedProxies`, a proxy secret
+and a CA.
 
 ### Database
 
@@ -583,6 +584,13 @@ In particular:
 - Jobs started by hand answer 202 and run in the background (`/api/v1/jobs/{id}`), and
   sessions are kept in the database: everybody signs in once more after the upgrade.
 - `strategy` now defaults to `{}` (`Recreate` for one replica, as before).
+- `x509.trustedProxies` now defaults to `""` (loopback only) instead of every private range,
+  because those proxies' `X-Forwarded-For` hops now decide the client's address: with the old
+  default, a client on a private address could have a hop it wrote taken as its address. Set
+  it to the ingress controller's (or router's) pod network, e.g. `10.42.0.0/16`. Header mode
+  (`x509.source=header`) does not render without it; behind an ingress without it, the audit
+  trail records the controller's address. Setting the old value back restores the old behaviour,
+  forgery included.
 
 ### Backups and upgrades
 

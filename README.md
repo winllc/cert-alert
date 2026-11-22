@@ -852,7 +852,8 @@ The ENS platform baseline, the same in every ENS product:
   The client's address is the rightmost `X-Forwarded-For` hop that is not a trusted proxy:
   starting from the connection's own address, the header is followed leftwards only while
   the address in hand is in `ENS_X509_TRUSTED_PROXIES` (the same list header-mode
-  certificates use; `127.0.0.1/32,::1/128` by default, private ranges in the Helm chart). A
+  certificates use; `127.0.0.1/32,::1/128` by default, also in the Helm chart, whose
+  `x509.trustedProxies` should name the ingress controller's pod network and nothing wider). A
   connection from anywhere else is the client, whatever it says. Behind the release bundle,
   where a proxy on the host reaches the container from the Docker network's gateway, set
   `ENS_X509_TRUSTED_PROXIES` to that network (e.g. `172.16.0.0/12`).
@@ -3632,6 +3633,17 @@ class SlackAlertNotifier implements AlertNotifier {
 
 Read these before upgrading. They apply to the compose bundle, the Helm chart and a plain
 `java -jar` alike.
+
+### The client's address behind a proxy, and the chart's trusted proxies
+
+With `SERVER_FORWARD_HEADERS_STRATEGY=framework`, the client's address in the audit trail is
+now the rightmost `X-Forwarded-For` hop that is not in `ENS_X509_TRUSTED_PROXIES`, no longer the
+leftmost one, which a client could write. Until that list names the proxy in front, the trail
+records the proxy's address: on the release bundle, set it to the Docker network (see
+`env.template`). The Helm chart's `x509.trustedProxies` now defaults to `""` (loopback) instead
+of every private range, since with those a client on a private address could still have a hop
+it wrote taken as its address. Set it to the ingress controller's or router's pod network, e.g.
+`10.42.0.0/16`; with `x509.source=header` the chart does not render until it is set.
 
 ### The round-up's "About" column names the entry
 
