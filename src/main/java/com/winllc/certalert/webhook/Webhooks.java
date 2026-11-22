@@ -78,8 +78,11 @@ public class Webhooks {
         String label = checkName(name);
         String before = secrets.revealUrl(endpoint);
         // The same URL keeps what it was allowed when saved; a new one is held to today's rules.
+        // It is not resolved again here: a host that has since gone, or a tightened allowlist,
+        // must not stop an administrator disabling or renaming the webhook, and every send
+        // checks the address anyway.
         boolean sameUrl = url != null && url.trim().equals(before);
-        URI checked = checkUrl(url, sameUrl && endpoint.isPrivateNetworksAllowed());
+        URI checked = sameUrl ? savedUrl(before) : checkUrl(url);
         Set<WebhookEvent> subscribed = checkEvents(events);
         AuditRecord record = AuditRecord.of(AuditRecord.Category.CONFIGURATION, "webhook.changed")
                 .severity(AuditRecord.Severity.NOTICE)
@@ -143,6 +146,14 @@ public class Webhooks {
 
     private URI checkUrl(String url) {
         return checkUrl(url, false);
+    }
+
+    private static URI savedUrl(String url) {
+        try {
+            return WebhookAddressGuard.parse(url);
+        } catch (IOException e) {
+            throw new IllegalArgumentException(e.getMessage());
+        }
     }
 
     private URI checkUrl(String url, boolean grandfathered) {

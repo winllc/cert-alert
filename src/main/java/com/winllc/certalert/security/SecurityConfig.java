@@ -168,6 +168,14 @@ public class SecurityConfig {
                 // them, and auditors.
                 .requestMatchers("/api/v1/jobs", "/api/v1/jobs/**")
                 .hasAnyRole("ADMIN", "AUDITOR")
+                // The same for the sweeps' runs, which carry the directory's errors, and for
+                // what a prune or a certificate cleanup would remove.
+                .requestMatchers(
+                        HttpMethod.GET,
+                        "/api/v1/sync/runs",
+                        "/api/v1/sync/prune/preview",
+                        "/api/v1/sync/certificate-cleanup/preview")
+                .hasAnyRole("ADMIN", "AUDITOR")
                 .requestMatchers(HttpMethod.GET, "/api/v1/admin/**")
                 .hasAnyRole("ADMIN", "AUDITOR")
                 .requestMatchers(HttpMethod.POST, "/api/v1/admin/audit/verify")

@@ -126,7 +126,8 @@ installation's id** (e.g. `CA-7F3K-29QD`, with a copy button): enter it on the p
 bind a license to this installation. Upload a `.lic` file, or paste one, to install it; it
 takes effect at once. A file for another product, bound to another installation, or an
 older revision of a license already seen here is refused with the reason, and the
-installed one stays. `GET /api/v1/license` returns the same as JSON to anyone signed in —
+installed one stays; so is one not yet valid or already expired while the installed license
+is in full effect (upload next term's license on or after its start date). `GET /api/v1/license` returns the same as JSON to anyone signed in —
 the installation id and the file's path to administrators only.
 
 Where the screen is offered:
@@ -848,6 +849,14 @@ The ENS platform baseline, the same in every ENS product:
   `Secure` cookie follow the browser's request, and the audit trail records the client's
   address rather than the proxy's. Only with a proxy in front that sets those headers itself.
   The Helm chart sets it whenever its ingress or an edge or reencrypt Route terminates TLS.
+  The client's address is the rightmost `X-Forwarded-For` hop that is not a trusted proxy:
+  starting from the connection's own address, the header is followed leftwards only while
+  the address in hand is in `ENS_X509_TRUSTED_PROXIES` (the same list header-mode
+  certificates use; `127.0.0.1/32,::1/128` by default, also in the Helm chart, whose
+  `x509.trustedProxies` should name the ingress controller's pod network and nothing wider). A
+  connection from anywhere else is the client, whatever it says. Behind the release bundle,
+  where a proxy on the host reaches the container from the Docker network's gateway, set
+  `ENS_X509_TRUSTED_PROXIES` to that network's subnet only (e.g. `172.18.0.0/16`), not a whole private range.
 - **The release bundle** publishes on every interface (`0.0.0.0`) by default
   (`CERT_ALERT_BIND_ADDRESS`, `CERT_ALERT_PORT`). With TLS off on any address but
   `127.0.0.1`, `install.sh` refuses to start it unless `.env` sets
@@ -918,7 +927,9 @@ session that has not pressed **I agree** is sent to `/consent` — before any si
 runs, so no sign-in of any kind succeeds first: not the form, not a client certificate. An
 API call (`/api/**`) gets a 401 instead. The agreement is kept in the session, so signing out
 shows the banner again before the next sign-in. It is audited as `auth.consent-acknowledged`
-(category `authentication`, success, with the client's address).
+(category `authentication`, success, with the client's address) - once per session, and at
+most 10 times a minute from one client address; beyond that the agreement is refused (429),
+so the open form cannot be used to fill the audit trail.
 
 Exempt, because they are not browser sessions or are what the banner is made of: `/consent`
 itself, `/css/**`, `/js/**`, `/img/**`, `/webjars/**`, `/favicon.ico`, `/error`, the health
@@ -985,7 +996,7 @@ certificates.
 | `ENS_X509_OCSP_RESPONDER_URL` | — | Ask this responder instead of the one the certificate names — a local OCSP relay on an air-gapped network |
 | `ENS_X509_CRL_DIR` | — | A directory of CRL files (DER or PEM), re-read when they change. With it set, no distribution point is fetched over the network: the air-gapped option |
 | `ENS_X509_REVOCATION_FAIL` | `open` while `ENS_X509_REVOCATION` is unset, otherwise `closed` | `closed`: when the status cannot be found, refuse. `open`: allow, and log a warning |
-| `ENS_X509_REVOCATION_CACHE` | `10m` | How long a good or revoked answer is reused, per issuer and serial number. No answer is reused for 30 seconds |
+| `ENS_X509_REVOCATION_CACHE` | `10m` | How long a good or revoked answer is reused, per issuer and serial number. No answer is reused for 30 seconds, doubling while it stays unanswered up to 2 minutes; requests for one certificate that arrive while it is being checked wait for that check |
 | `ENS_X509_ALLOWED_ISSUERS` | — | Issuer DNs, separated by `;`. When set, a certificate from any other issuer is refused even if the trust store accepts it. Compared as names (RFC 4514), so spacing and case do not matter |
 | `ENS_X509_USER_FILTER` | — | An LDAP filter that finds the holder of a certificate the directory does not publish, with `{upn}`, `{edipi}`, `{email}` and `{uuid}` filled in — e.g. `(uid={edipi})`. Used instead of the uid/address matching above, and only with `require-known-certificate: false` |
 
@@ -995,7 +1006,11 @@ certificates.
   by the platform's path validator; a CRL counts only if it is signed by the issuer and not
   past its next update. Fetches have 5 s to connect and 10 s to answer, follow redirects to
   http and https only, and never go to link-local or metadata addresses
-  (`cert-alert.revocation.allowed-hosts` applies here too). A refusal is a failed
+  (`cert-alert.revocation.allowed-hosts` applies here too). A list the nightly check is
+  downloading at the same moment is waited on no longer than a fetch of its own would take,
+  and the check runs before the database transaction that matches the certificate to a
+  person, so a slow responder does not hold a database connection. Under soft-fail the
+  warning is logged once per answer, not on every request. A refusal is a failed
   `auth.login` with reason `certificate revoked` or `revocation unknown`.
 - **The default is a live check that soft-fails.** With neither setting given, every
   certificate is checked over OCSP and then its CRL. One found revoked is refused. One that
@@ -1029,14 +1044,16 @@ TLS, verifies the client certificate, and forwards it:
 |---|---|---|
 | `ENS_X509_SOURCE` | `servlet` | `servlet` or `header` |
 | `ENS_X509_HEADER` | `X-SSL-Client-Cert` | The header, URL-encoded PEM as nginx's `$ssl_client_escaped_cert` sends it (ingress-nginx: `ssl-client-cert`) |
-| `ENS_X509_TRUSTED_PROXIES` | `127.0.0.1/32,::1/128` | Addresses (CIDRs) the header is accepted from: the proxy's |
-| `ENS_X509_PROXY_SECRET_FILE` / `ENS_X509_PROXY_SECRET` | — | At least 32 characters, which the proxy sends in `X-ENS-Proxy-Secret`; compared in constant time. The file wins |
+| `ENS_X509_TRUSTED_PROXIES` | `127.0.0.1/32,::1/128` | Addresses (CIDRs) the header is accepted from: the proxy's. Also the proxies whose `X-Forwarded-For` hops are followed to find the client's address |
+| `ENS_X509_PROXY_SECRET_FILE` / `ENS_X509_PROXY_SECRET` | — | At least 32 characters, which the proxy sends in `X-ENS-Proxy-Secret`; compared in constant time. The file wins, and is read again when its time or size changes |
 | `ENS_X509_TRUSTED_CA_FILE` | — | PEM certificates of the CAs a forwarded certificate must chain to |
 
 The header is believed only when the connection itself comes from a trusted proxy address
 (never an address a forwarded-for header claims) **and** carries the secret, and the
 certificate then chains to a CA in the file, is in date and is not restricted to some use
-other than client authentication. Anything else is refused and recorded as a failed
+other than client authentication. A chain that validated is reused for the same header for a
+minute, never past the expiry of a certificate in it or a change to the CA file. Anything else
+is refused and recorded as a failed
 `auth.login` (`certificate header not from a trusted proxy`, `certificate not trusted`). In
 header mode a certificate from the application's own TLS handshake is ignored. **The
 application refuses to start** in header mode without a secret of 32 characters or more,
@@ -1102,10 +1119,10 @@ absolute URI) and the assertion consumer are built from it, never from the reque
 `Forwarded` or `X-Forwarded-Host` header a client sets cannot change what address a response
 must be addressed to, and the application refuses to start with a missing or templated one.
 With `SERVER_FORWARD_HEADERS_STRATEGY=framework` (which the chart sets behind an ingress) the
-application believes only `X-Forwarded-Proto`, `-Port` and `-For`; `Forwarded`,
-`X-Forwarded-Host` and `X-Forwarded-Prefix` are ignored. Have the proxy overwrite
-`X-Forwarded-For` and `X-Forwarded-Proto` with its own values rather than append to a
-client's.
+application believes only `X-Forwarded-Proto` and `-Port`, and `X-Forwarded-For` hop by
+hop from trusted proxies (see "Behind a proxy that terminates TLS"); `Forwarded`, `X-Forwarded-Host` and
+`X-Forwarded-Prefix` are ignored. Have the proxy overwrite `X-Forwarded-Proto` with its own
+value rather than pass on a client's.
 
 **What is checked.**
 
@@ -1201,6 +1218,7 @@ cert-alert:
       enabled: true
       display-name: Sign in with ADFS
       metadata-location: https://adfs.example.gov/FederationMetadata/2007-06/FederationMetadata.xml
+      metadata-refresh: 1h             # read again this often; 0: once, until restart
       entity-id: ""                    # empty: <public-url>/saml2/service-provider-metadata/saml
       signing-key-location: file:/etc/cert-alert/saml/signing.key          # optional
       signing-certificate-location: file:/etc/cert-alert/saml/signing.crt
@@ -1259,7 +1277,10 @@ Every setting has an environment variable (`CERT_ALERT_SSO_OIDC_ISSUER_URI`, ...
    `groups-attribute`, and list the ones that grant a role in `cert-alert.sso.saml.admin-groups`
    / `auditor-groups`.
 3. ADFS signs the assertion with its token-signing certificate, which is in its metadata
-   (`https://<adfs>/FederationMetadata/2007-06/FederationMetadata.xml`). Where ADFS requires
+   (`https://<adfs>/FederationMetadata/2007-06/FederationMetadata.xml`). The metadata is
+   read again every `metadata-refresh` (an hour), and at once - at most every five minutes -
+   when a response's signature does not verify, so a rolled certificate is picked up without
+   a restart; a read that fails keeps the copy that last worked. Where ADFS requires
    signed requests, give `signing-key-location` (PEM, PKCS#8) and `signing-certificate-location`.
 4. For an ADFS this application cannot reach, save the metadata and use
    `metadata-location: file:/path/to/metadata.xml` (Helm: `sso.saml.metadataConfigMap`).
@@ -1363,6 +1384,9 @@ environment, list them with indexed variables, e.g. `CERT_ALERT_SECURITY_GROUPS_
 OpenLDAP's `memberOf` overlay and 389 Directory Server's MemberOf plugin both maintain the
 attribute; a directory without it grants nothing by group unless a provider says so. A group
 change counts at the person's next sign-in, or within `cache-for` for a client certificate.
+Where `memberOf` cannot be read, that sign-in gets no role from a group; the failure is kept
+for 10 seconds, not `cache-for`, so a certificate holder has their roles back on a request
+soon after the directory does.
 
 `/actuator/health` stays open so the thing can be monitored. Everything else requires
 authentication; an unauthenticated API call gets a 401 rather than a login page, because a
@@ -1591,7 +1615,10 @@ DataTables columns rather than dropped, so the global search still reaches them.
 DataTables owns paging, ordering, the global search box and the per-column search inputs in
 the table footer; all of it posts as the request body and the library turns it into a JPA
 query. The filters this application adds ride along as query parameters and become an
-additional `Specification`, so the two never have to know about each other.
+additional `Specification`, so the two never have to know about each other. A page asks for
+at least one row and gets at most `cert-alert.api.max-page-size` (500); "all rows" (`-1`) is
+refused with a 400. A query the library cannot run is a plain 500, logged, rather than a 200
+carrying the exception's text.
 
 Both tables open **soonest to expire first**, which is the order the work is in. An entry
 publishing no certificate has no expiry to sort on, and where a NULL sorts is left
@@ -1945,7 +1972,10 @@ two mechanisms scale. A CRL is one download that answers for every certificate a
 ever issued, and a directory of a hundred thousand entries is issued by a handful of
 authorities — so it is a handful of
 downloads, held for as long as each list says it is good for (`nextUpdate`, capped by
-`crl-cache-ttl`). OCSP is one request per certificate; it gives a fresher answer about one
+`crl-cache-ttl`) and fetched again after that. A distribution point that does not answer, or
+serves a list already past its `nextUpdate`, is left alone for two minutes rather than asked
+again for every certificate that names it; a certificate not on such an out-of-date list is
+*Unknown*, while one that is on it is still *Revoked*. OCSP is one request per certificate; it gives a fresher answer about one
 certificate, which is the right trade when the question is about one certificate and the
 wrong one when it is about two hundred thousand. Distribution points are tried in the order
 the certificate lists them, and `ldap://` ones work — which is how a PKI with no route to
@@ -1987,7 +2017,10 @@ CRL is signed by its issuer, so telling the authority's own list from whatever a
 URL needs the issuer's certificate; and OCSP names a certificate by hashes of its issuer's
 name and key, which only the issuer's certificate carries. With none configured, CRLs are
 still used and every result says `(signature not verified)` — set `allow-unverified-crl:
-false` to have those count as *Unknown* instead.
+false` to have those count as *Unknown* instead. Such a list must at least name the
+certificate's issuer as its own; one that names another authority is *Unknown*. Where the issuer
+certificate is configured and the list's signature does not verify against it, the result is
+*Unknown* whatever `allow-unverified-crl` says.
 
 A certificate that turns out to be revoked is recorded against its entry in the audit trail
 and its contacts are told, once — not nightly for as long as it stays revoked. Where to ask
@@ -2025,7 +2058,7 @@ distribution point too, and of the two fallbacks the list is much the cheaper: o
 answering for every certificate the authority issued, against one request per certificate
 plus a directory read per entry. It is also the one that cannot be got dangerously wrong — a
 list signed by some other authority fails its signature check against the issuer
-certificates and counts as *Unknown*.
+certificates (or, with none configured, names a different issuer) and counts as *Unknown*.
 
 Where a certificate names neither and neither is configured, the result says so. Where one
 *is* configured and the check still could not run — no issuer certificate to name the
@@ -2096,7 +2129,8 @@ the one that was deleted. So —
   otherwise rewrite tens of thousands of entries in one go, and a mistake caught after five
   hundred removals is a different kind of morning from one caught after fifty thousand.
   Revoked certificates are taken first, so a run that hits the cap spends it on the ones
-  that matter.
+  that matter. One it could not remove — the entry gone from the directory, the modify
+  refused — waits behind everything not yet tried, so such rows cannot fill every run.
 - **A preview**, which counts what would go and takes nothing:
 
 ```
@@ -2399,7 +2433,9 @@ one beside it. The page and the message agree, which they would not if the round
 question of its own.
 
 An entry whose certificates have *all* lapsed is the case that most needs telling, and it
-still is: with nothing standing, nothing has been replaced.
+still is: with nothing standing, nothing has been replaced. So is half of a person's pair
+that lapsed and was not renewed, though the roll-up passes over it while the other half is
+current: for a person the round-up asks only whether it was replaced.
 
 #### When the mail server is down
 
@@ -2413,6 +2449,8 @@ down loses nothing:
 - a message that cannot be sent stays queued and is tried again a minute later, then two,
   four and so on up to an hour apart (`cert-alert.mail.outbox.retry-initial` / `retry-max`),
   each failure logged as a warning with the mail server's reason;
+- a round-up, like a background pass, stops after three failures in a row and leaves the rest
+  queued for the next pass, rather than waiting out every message's timeout;
 - a newer round-up to the same address replaces one still waiting, so a mail server that comes
   back after a weekend delivers today's round-up rather than three;
 - after three days (`give-up-after`) a message is given up on, with an error in the log;
@@ -2421,6 +2459,11 @@ down loses nothing:
 A round-up run while the mail server is down says so on the notifications page — "could not
 be sent and are queued to try again", with the reason — rather than reporting them as sent.
 An alert is recorded as `alert.sent` once it is safely queued.
+
+**The per-run cap.** A round-up sends at most `cert-alert.notifications.email.max-per-run`
+(500) messages. Where that binds, whatever is next to expire is mailed first and what has
+lapsed longest waits; everybody is still told on the page. The run says how many it held back
+(`notMailed`, and the note on the card), and logs a warning every run the cap binds.
 
 #### A dry run
 
@@ -2838,14 +2881,18 @@ curl -H "Authorization: Bearer cat_…" \
     default; set it to the real lockout length, never shorter). A value that does not parse is
     locked, and a directory that refuses or fails a read of the policy is unreachable: refused.
   A good answer is reused for at most `cert-alert.api.creator-roles-cache-for` (a minute); a
-  refusal never is. The creator's next sign-in narrows their tokens too, never widens them.
+  refusal never is, and a directory that cannot be read is asked again after 10 seconds (one
+  read per entry at a time, with no database connection held while it waits). The creator's
+  next sign-in narrows their tokens too - to the roles the live directory gives them then,
+  never to a sign-in that could not read their groups - and never widens them.
 - **A year at most.** `cert-alert.api.max-lifetime` (default `365d`) is the expiry of a token
   created without one, the most that may be asked for, and the age at which any token stops
   working; `0` removes it.
 - **Refused** (401, `error="invalid_token"`) when unknown, revoked, past its expiry, out-ranked,
   or off (`cert-alert.api.tokens-enabled: false`).
 - **Rate-limited** per token, per replica: `cert-alert.api.requests-per-minute` (300); beyond
-  it, 429 with `Retry-After`.
+  it, 429 with `Retry-After`. The limit applies before the creator's entry is read, so a client
+  over it costs the directory nothing.
 - **No session, no CSRF.** A request with `Authorization: Bearer` on `/api/v1/**` goes through
   a filter chain of its own that keeps no session and reads none (a token with a session
   cookie is still only the token), and has no CSRF check - nothing a browser sends on its own
@@ -2880,9 +2927,13 @@ Adaptive Card message for a Teams workflow's "When a webhook request is received
 
 **Delivery.** An event is written to `webhook_delivery` in the same transaction as whatever
 raised it and posted after the commit, by one replica (claimed in the database, under a
-lock), with a 5-second connect and 10-second read timeout. A 2xx is delivered; anything else -
+lock), with a 5-second connect and 10-second read timeout. A 2xx is delivered (read from the answer's status line and headers, so a receiver that keeps
+the connection open after answering is not taken for one that did not answer); anything else -
 a timeout, a 5xx, a redirect (never followed) - is retried after `retry-initial` (1 minute),
-doubling to `retry-max` (1 hour), until it is `give-up-after` (a day) old. The Integrations
+doubling to `retry-max` (1 hour), until it is `give-up-after` (a day) old. Disabling an
+endpoint gives up on what is still queued for it (a test is still sent), and saving it with the
+same URL - disabling, renaming - does not resolve the host again, so an endpoint whose name has
+gone can still be disabled; a changed URL is checked as a new one. The Integrations
 page shows each endpoint's delivery log; delivered and failed rows are kept for `keep` (14
 days).
 
@@ -3025,7 +3076,9 @@ continuously, so the sweeps are a backstop rather than the only way a change arr
 because time passes — nothing in the directory changes. Without it, a status would only be
 corrected when its entry happened to be re-scraped, so a nightly sweep would mean expiry
 alerts up to a day late. It walks only certificates that could plausibly have moved (not
-already expired, notAfter inside the warning window), which is a small indexed slice.
+already expired, notAfter inside the warning window), which is a small indexed slice. It also
+escalates: a certificate alerted on as a `WARNING` when it came into the window is alerted on
+once more, as `CRITICAL`, when it comes inside `critical-threshold-days`.
 
 **Why revocation is its own job.** It is the only work here that reads neither the directory
 nor the clock: it asks the certificates' own authorities, which is a different system, on a
@@ -3040,8 +3093,11 @@ the directory, and deletions there cannot be undone from this side. See
 silently. It works on how long an entry has gone unseen rather than by diffing a sweep's
 results, because a sweep that died halfway through looks exactly like a directory that lost
 half its entries; with `after` set well beyond the sync interval, several consecutive
-failed sweeps still cannot delete anything. Check `GET /api/v1/sync/prune/preview` before
-turning it on.
+failed sweeps still cannot delete anything. Nor can a month of them: each kind of entry is
+pruned only when a sweep of that kind has completed with no errors since the newest of them
+was last seen, and only when they are at most `prune.max-share` (10%) of that kind. Otherwise
+that kind is left in place, the run is recorded as completed with errors, and the log says
+why. Check `GET /api/v1/sync/prune/preview` before turning it on.
 
 Every job is guarded against overlapping itself — a sweep of a large directory can outlast
 its own interval — by a lock in the database (`shedlock`), which a run started by hand takes
@@ -3049,6 +3105,10 @@ too: pressing "Sync directory" while the nightly sweep is running, on this repli
 does not start a second sweep. A replica that dies holding a lock releases it after
 `cert-alert.cluster.lock-at-most-for` (10 minutes; renewed while the job runs, however long).
 Every run is recorded in `sync_run`, readable at `GET /api/v1/sync/runs`.
+
+The scheduled jobs, and the mail and webhook outboxes, audit flush and session sweep, share
+`spring.task.scheduling.pool.size` threads (`CERT_ALERT_SCHEDULER_THREADS`, 8), so a long sweep
+does not hold up the rest. A run started by hand says it is still going from a thread of its own.
 
 ### Starting a job by hand
 
@@ -3286,7 +3346,7 @@ DirectoryPersistenceService one transaction per batch of entries
 
 | Concern | How it is handled |
 |---------|-------------------|
-| Directory size limits | Paged searches (`page-size`, default 500). An unpaged search silently stops at the server's limit, which here would mean quietly forgetting certificates. |
+| Directory size limits | Paged searches (`page-size`, default 500). An unpaged search silently stops at the server's limit, which here would mean quietly forgetting certificates; a search the server still cuts short (some count the limit across all pages) fails the sweep rather than ending early. |
 | Memory | Entries are streamed to a consumer a page at a time and never collected. Materialising a six-figure result set, each entry carrying certificates, would cost hundreds of megabytes before a row reached the database. |
 | Round trips | Entries are written in batches (`batch-size`, default 200): one query to load what is already held, one flush. Per entry it would be two round trips each. |
 | Insert batching | Ids come from sequences, not identity columns — Hibernate cannot batch inserts behind an identity column, since it has to round trip for each generated key. |
@@ -3326,7 +3386,7 @@ the documentation site: [audit-logging.md](https://github.com/winllc/ens-apps-do
 | Category | Actions |
 |---|---|
 | authentication | `auth.login` (success and failure; `details.method` `x509` or `ldap`, the attempted name as an `anonymous` actor on failure, `alert` severity after repeated failures for one name; a published client certificate refused as revoked, expired or not yet valid carries that as its reason and `details.fingerprint`, and a revoked one is `alert`), `auth.logout` |
-| authorization | `access.denied` for every 403: a role refused, `license_required`, `license_read_only`, `feature_not_licensed`, a CSRF failure — with method, path and reason code; identical refusals within 60 s are one event with `details.count` |
+| authorization | `access.denied` for every 403: a role refused, `license_required`, `license_read_only`, `feature_not_licensed`, a CSRF failure — with method, path and reason code; the first is recorded at once, and identical refusals within the next 60 s are one more event with `details.count` |
 | account | `project.admin-added`, `project.admin-removed` (the one role this application grants) |
 | configuration | `settings.changed` (the round-up's lead days, `<field>.old`/`.new`), `server-attribute.defined`, `.changed`, `.retired` |
 | license | `license.installed`, `license.rejected` (with the reason), `license.mode-changed` (FULL / READ_ONLY / UNLICENSED, checked at startup, on every request and every minute), `license.limit-exceeded` (at most hourly, with the count refused) |
@@ -3337,7 +3397,8 @@ the documentation site: [audit-logging.md](https://github.com/winllc/ens-apps-do
 Secrets are never recorded: passwords, tokens, keys, license text, session ids and codes are
 written as `"[redacted]"`. `session` is the first 16 hex characters of the SHA-256 of the
 session id. `source.ip` is the request's remote address; this application does not trust
-`X-Forwarded-For` unless `server.forward-headers-strategy` is set.
+`X-Forwarded-For` unless `server.forward-headers-strategy` is set, and then only the hops
+that trusted proxies (`ENS_X509_TRUSTED_PROXIES`) added.
 
 ### Where it is kept
 
@@ -3361,7 +3422,9 @@ read-only included, since the audit trail is not a licensed feature:
 - **Export** of the current filter (up to 100,000 events) as CSV or NDJSON, itself recorded
   as `audit.exported`;
 - **Verify integrity**, which recomputes the chain and reports intact, broken at seq N, or the
-  anchor (the first retained seq after pruning, whose `prevHash` is taken as given);
+  anchor (the first retained seq after pruning). The anchor must be the event right after the
+  last one retention deleted, chained to its hash, and the walk must end at the chain head, so
+  events deleted by other means from either end are reported;
 - **Delivery**: per output, whether it is on, the last seq delivered and when, the backlog
   and the last error;
 - **SIEM API tokens**: create (shown once, with a copy button), list, revoke;
@@ -3391,6 +3454,12 @@ retried with backoff up to five minutes, and never slowing a request. An output 
 fifteen minutes records `audit.delivery-failed`, and `audit.delivery-recovered` when it comes
 back. Stdout and the file are written just after each commit. Startup logs one line per
 output saying whether it is on; the token is never logged. TLS trusts the JVM's trust store.
+
+Syslog over `tcp` and `tls` has no delivery acknowledgement, so it is best effort. Before each
+batch the forwarder checks that the collector has not closed the connection, and it opens a new
+one after 30 seconds unused; when a connection turns out broken, the batch last written on it is
+sent again (a collector restart can repeat up to one batch). A batch the collector does not take
+within 30 seconds fails and is retried. Where no event may be missing, use HEC or the pull API.
 
 The release bundle passes every `ENS_AUDIT_*` variable through (see `env.template`) and mounts
 the `ens-audit` volume at `/var/log/ens`, which the image creates writable by its user and by
@@ -3429,7 +3498,7 @@ Scraping, under `cert-alert.ldap`:
 | `page-size`          | `500`   | Entries per LDAP page                           |
 | `paged`              | `true`  | Turn off only for servers without the control   |
 | `batch-size`         | `200`   | Entries written per transaction                 |
-| `count-limit`        | `0`     | Client-side cap on entries; 0 means none        |
+| `count-limit`        | `0`     | Client-side cap on entries; 0 means none. With 0, a search the directory cuts short at its size limit fails the sweep instead of ending early |
 | `search-timeout`     | `10m`   | Per-search time limit                           |
 | `binary-certificate-option` | `true` | Ask for `userCertificate;binary`. Off for a directory with no such attribute to return |
 | `server.require-email-poc` | `true` | A `serverPOC` value must be an email address; off for a directory holding names. Comma-separated values are split either way |
@@ -3445,6 +3514,7 @@ Scraping, under `cert-alert.ldap`:
 | `prune.enabled`      | `false` | Whether stale entries are deleted at all        |
 | `prune.cron`         | `0 0 6 * * SUN` | Prune schedule                          |
 | `prune.after`        | `30d`   | How long an entry may go unseen before deletion |
+| `prune.max-share`    | `0.10`  | Most of one kind of entry one prune may delete  |
 | `changelog.enabled`  | `false` | Follow the directory's changelog continuously   |
 | `changelog.auto-start` | `true` | Whether the loop starts with the application   |
 | `changelog.base-dn`  | `cn=changelog` | The changelog suffix                     |
@@ -3563,6 +3633,17 @@ class SlackAlertNotifier implements AlertNotifier {
 
 Read these before upgrading. They apply to the compose bundle, the Helm chart and a plain
 `java -jar` alike.
+
+### The client's address behind a proxy, and the chart's trusted proxies
+
+With `SERVER_FORWARD_HEADERS_STRATEGY=framework`, the client's address in the audit trail is
+now the rightmost `X-Forwarded-For` hop that is not in `ENS_X509_TRUSTED_PROXIES`, no longer the
+leftmost one, which a client could write. Until that list names the proxy in front, the trail
+records the proxy's address: on the release bundle, set it to the Docker network (see
+`env.template`). The Helm chart's `x509.trustedProxies` now defaults to `""` (loopback) instead
+of every private range, since with those a client on a private address could still have a hop
+it wrote taken as its address. Set it to the ingress controller's or router's pod network, e.g.
+`10.42.0.0/16`; with `x509.source=header` the chart does not render until it is set.
 
 ### The round-up's "About" column names the entry
 
@@ -3797,8 +3878,12 @@ Certificate and password sign-in work as before. Turning single sign-on on needs
 
 With `SERVER_FORWARD_HEADERS_STRATEGY=framework` (the chart's setting behind an ingress or
 an edge route), `Forwarded`, `X-Forwarded-Host` and `X-Forwarded-Prefix` are no longer
-believed; `X-Forwarded-Proto`, `-Port` and `-For` still are. A proxy that publishes CertAlert
+believed; `X-Forwarded-Proto` and `-Port` still are. A proxy that publishes CertAlert
 under a path prefix through `X-Forwarded-Prefix` must rewrite paths itself instead.
+`X-Forwarded-For` is followed from the right only through addresses in
+`ENS_X509_TRUSTED_PROXIES`: where the proxy in front is not in that list (by default only
+loopback), the audit trail and a token's last-used address now record the proxy's address
+until it is added.
 
 ### Administrators are matched by uid or DN only
 

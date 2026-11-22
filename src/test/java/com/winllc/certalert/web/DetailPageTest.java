@@ -152,6 +152,24 @@ class DetailPageTest {
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("data-subject-type=\"SERVER\"")));
     }
 
+    /** The directory's serverURL is free text: only an http or https address becomes the Open link. */
+    @Test
+    void aServerUrlThatIsNotAWebAddressIsNotALink() throws Exception {
+        mockMvc.perform(get("/servers/{id}", serverId))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("href=\"https://web01.example.gov\"")));
+
+        DirectoryServer server = serverRepository.findById(serverId).orElseThrow();
+        server.setServerUrl("JavaScript:alert(document.domain)");
+        serverRepository.save(server);
+
+        mockMvc.perform(get("/servers/{id}", serverId))
+                .andExpect(status().isOk())
+                .andExpect(content().string(org.hamcrest.Matchers.not(
+                        org.hamcrest.Matchers.containsStringIgnoringCase("href=\"javascript:"))))
+                // Still shown, as text.
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("JavaScript:alert(document.domain)")));
+    }
+
     @Test
     void aPageForSomethingThatIsNotThereIsAPageRatherThanAProblemDetail() throws Exception {
         mockMvc.perform(get("/users/{id}", 999_999))
@@ -241,6 +259,16 @@ class DetailPageTest {
         mockMvc.perform(post(AUDIT + "?subjectId=" + userId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(request())
+                        .with(csrf()))
+                .andExpect(status().isBadRequest());
+    }
+
+    /** The whole of a history in one response is not something the table can ask for. */
+    @Test
+    void anEntrysHistoryIsNotReadAllAtOnce() throws Exception {
+        mockMvc.perform(post(AUDIT + "?subjectType=USER&subjectId=" + userId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(request().replace("\"length\":10", "\"length\":-1"))
                         .with(csrf()))
                 .andExpect(status().isBadRequest());
     }

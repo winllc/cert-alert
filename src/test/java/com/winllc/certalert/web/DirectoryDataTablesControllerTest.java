@@ -1,5 +1,6 @@
 package com.winllc.certalert.web;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -73,6 +74,9 @@ class DirectoryDataTablesControllerTest {
     @Autowired
     private ServerContactService contactService;
 
+    @Autowired
+    private com.winllc.certalert.api.ApiProperties apiProperties;
+
     private MockMvc mockMvc;
 
     @BeforeEach
@@ -114,6 +118,50 @@ class DirectoryDataTablesControllerTest {
                 .andExpect(jsonPath("$.recordsTotal").value(4))
                 .andExpect(jsonPath("$.recordsFiltered").value(4))
                 .andExpect(jsonPath("$.data.length()").value(2));
+    }
+
+    /** "All rows" (-1) and an empty page are refused; a longer page than allowed is cut to it. */
+    @Test
+    void aPageIsNeverEveryRowAndNeverLongerThanTheMaximum() throws Exception {
+        for (int length : new int[] {-1, 0}) {
+            mockMvc.perform(post(USERS).contentType(MediaType.APPLICATION_JSON).content(usersRequest(0, length, null, null))
+                            .with(csrf()))
+                    .andExpect(status().isBadRequest());
+            mockMvc.perform(post(SERVERS).contentType(MediaType.APPLICATION_JSON).content(serversRequest(0, length, null))
+                            .with(csrf()))
+                    .andExpect(status().isBadRequest());
+        }
+        int max = apiProperties.getMaxPageSize();
+        apiProperties.setMaxPageSize(2);
+        try {
+            mockMvc.perform(post(USERS).contentType(MediaType.APPLICATION_JSON).content(usersRequest(0, 100, null, null))
+                            .with(csrf()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.recordsFiltered").value(4))
+                    .andExpect(jsonPath("$.data.length()").value(2));
+            mockMvc.perform(post(SERVERS).contentType(MediaType.APPLICATION_JSON).content(serversRequest(0, 100, null))
+                            .with(csrf()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.length()").value(2));
+        } finally {
+            apiProperties.setMaxPageSize(max);
+        }
+    }
+
+    /**
+     * A query the library cannot run - here, a search on a column the entity does not have -
+     * is a plain 500, not a 200 carrying the exception's text.
+     */
+    @Test
+    void aFailedQueryIsAnErrorWithoutItsDetail() throws Exception {
+        String[] columns = java.util.Arrays.copyOf(USER_COLUMNS, USER_COLUMNS.length + 1);
+        columns[columns.length - 1] = "noSuchAttribute";
+        String body = mockMvc.perform(post(USERS).contentType(MediaType.APPLICATION_JSON)
+                        .content(request(columns, 0, 10, null, "noSuchAttribute", "x"))
+                        .with(csrf()))
+                .andExpect(status().isInternalServerError())
+                .andReturn().getResponse().getContentAsString();
+        assertThat(body).doesNotContain("noSuchAttribute").doesNotContain("Exception");
     }
 
     @Test

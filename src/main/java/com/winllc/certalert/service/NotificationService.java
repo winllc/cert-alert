@@ -16,14 +16,19 @@ import com.winllc.certalert.domain.Severity;
 import com.winllc.certalert.observability.EnsMetrics;
 import com.winllc.certalert.repository.CachedCertificateRepository;
 import com.winllc.certalert.repository.NotificationRepository;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.FlushModeType;
+import jakarta.persistence.PersistenceContext;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -73,6 +78,9 @@ public class NotificationService {
     private final TransactionTemplate transactions;
     private final ObjectProvider<EnsMetrics> metrics;
     private final Clock clock;
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     public NotificationService(
             NotificationRepository notifications,
@@ -254,10 +262,18 @@ public class NotificationService {
                 prepared.rehearsing() ? " (dry run)" : "", prepared.expiring(), prepared.leadDays(),
                 prepared.superseded(), prepared.told(), emailed,
                 unsent.isEmpty() ? "" : ", " + unsent.size() + " queued to try again");
+        if (prepared.overCap() > 0) {
+            // Every run, not once per process: a cap that binds today binds tomorrow too.
+            log.warn("Expiry digest{}: stopped at the {} message cap for one run; {} message(s) were not {} "
+                            + "this run. Upcoming expiries went first, the longest expired last. Raise "
+                            + "cert-alert.notifications.email.max-per-run to send them all",
+                    prepared.rehearsing() ? " (dry run)" : "", properties.getEmail().getMaxPerRun(),
+                    prepared.overCap(), prepared.rehearsing() ? "built" : "sent");
+        }
         List<NotificationMailer.Failure> failures = new ArrayList<>(prepared.failures());
         failures.addAll(unsent);
         String note = emailed > 0 && failures.isEmpty()
-                ? null
+                ? capped(prepared.overCap())
                 : whyNothingWasBuilt(
                         prepared.expiring(),
                         prepared.superseded(),
@@ -267,6 +283,7 @@ public class NotificationService {
                         prepared.leadDays(),
                         prepared.failures(),
                         unsent,
+                        prepared.overCap(),
                         prepared.rehearsing());
         List<NotificationMailer.Rendered> built = prepared.messages();
         return new DigestResult(
@@ -277,7 +294,17 @@ public class NotificationService {
                 properties.getEmail().isEnabled(),
                 note,
                 failures,
-                built.size() > DRY_RUN_PREVIEW_LIMIT ? built.subList(0, DRY_RUN_PREVIEW_LIMIT) : built);
+                built.size() > DRY_RUN_PREVIEW_LIMIT ? built.subList(0, DRY_RUN_PREVIEW_LIMIT) : built,
+                prepared.overCap());
+    }
+
+    /** What the run says when the per-run cap held messages back, or null where it did not. */
+    private String capped(int overCap) {
+        return overCap == 0
+                ? null
+                : "Stopped at the " + properties.getEmail().getMaxPerRun() + " message cap for one run "
+                        + "(cert-alert.notifications.email.max-per-run); " + overCap
+                        + " message(s) were not sent this run, the longest expired among them";
     }
 
     /**
@@ -295,12 +322,13 @@ public class NotificationService {
             int unaddressed,
             int leadDays,
             int built,
+            int overCap,
             List<Long> queued,
             List<NotificationMailer.Failure> failures,
             List<NotificationMailer.Rendered> messages) {
 
         static Prepared finished(DigestResult result) {
-            return new Prepared(result, result.dryRun(), 0, 0, 0, 0, 0, 0, 0, List.of(), List.of(), List.of());
+            return new Prepared(result, result.dryRun(), 0, 0, 0, 0, 0, 0, 0, 0, List.of(), List.of(), List.of());
         }
     }
 
@@ -316,6 +344,12 @@ public class NotificationService {
         // further than the window certificates are marked EXPIRING_SOON in.
         int leadDays = settings.leadDays();
         Instant horizon = now.plus(Duration.ofDays(leadDays));
+
+        // Nothing is written until every round is built, so no query before then needs the
+        // automatic flush - which dirty-checks everything the transaction holds, once per
+        // query, and on a large directory that was most of the run.
+        FlushModeType flushMode = entityManager.getFlushMode();
+        entityManager.setFlushMode(FlushModeType.COMMIT);
 
         // Two reads, each to its own limit, and what is about to expire first. Read as one,
         // soonest first, the expired came first: a directory publishing more old
@@ -341,6 +375,7 @@ public class NotificationService {
         expiring.addAll(upcoming.certificates());
         if (expiring.isEmpty()) {
             log.debug("Expiry digest: nothing expiring in the next {} day(s) that has not been renewed", leadDays);
+            entityManager.setFlushMode(flushMode);
             // Nothing expiring means nobody's round-up still says anything true.
             if (!dryRun && !properties.getEmail().isDryRun()) {
                 clearRoundUpsExcept(Set.of(), complete);
@@ -393,36 +428,55 @@ public class NotificationService {
         for (Map.Entry<Long, List<CachedCertificate>> owned : byEntry.entrySet()) {
             AuditEvent.SubjectRef subject = subjects.get(owned.getKey());
             OwnerType type = types.get(owned.getKey());
+            // Once per entry rather than per credential: a server's are several queries.
+            List<NotificationRecipients.Recipient> entryRecipients = resolve(type, subject.id());
             for (Credential credential : Credential.group(owned.getValue(), credentialProperties.getPairWindow())) {
                 credentials++;
-                for (NotificationRecipients.Recipient recipient : resolve(type, subject.id())) {
+                for (NotificationRecipients.Recipient recipient : entryRecipients) {
                     rounds.computeIfAbsent(keyOf(recipient), key -> new Round(recipient))
                             .add(credential, subject, type, now);
                 }
             }
         }
+        entityManager.setFlushMode(flushMode);
 
         int told = 0;
         int unaddressed = 0;
         Set<Long> standing = new HashSet<>();
-        mailer.beginRun(dryRun);
-        boolean rehearsing = mailer.isDryRun();
+        NotificationMailer.Run run = mailer.beginRun(dryRun);
+        boolean rehearsing = run.isDryRun();
+        // One message of each kind per address. Two entries publishing the same address -
+        // somebody's two personas, a person and a role contact - are two rounds, and their
+        // messages share an outbox supersede key: queued separately, the second would
+        // replace the first unsent.
+        Map<String, Mail> byAddress = new LinkedHashMap<>();
         for (Round round : rounds.values()) {
             told++;
-            if (round.recipient.address() == null || round.recipient.address().isBlank()) {
+            boolean addressed = round.recipient.address() != null && !round.recipient.address().isBlank();
+            if (!addressed) {
                 unaddressed++;
             }
-            if (rehearsing) {
-                // Nothing saved and nothing marked: a rehearsal that left notifications
-                // behind would be answering the question by doing the thing.
-                mailer.send(round.recipient, round.entries);
-                continue;
+            Long notificationId = null;
+            if (!rehearsing) {
+                // The notification first, so the message knows which one it delivers: it is
+                // marked emailed when the message actually goes, not when it is queued. A
+                // rehearsal saves and marks nothing: one that left notifications behind
+                // would be answering the question by doing the thing.
+                Notification notification = roundUpFor(round, now);
+                standing.add(notification.getId());
+                notificationId = notification.getId();
             }
-            // The notification first, so the message knows which one it delivers: it is
-            // marked emailed when the message actually goes, not when it is queued.
-            Notification notification = roundUpFor(round, now);
-            standing.add(notification.getId());
-            mailer.send(round.recipient, round.entries, notification.getId());
+            if (addressed) {
+                byAddress.merge(round.recipient.address().toLowerCase(Locale.ROOT),
+                        new Mail(round.recipient, round.entries, notificationId), Mail::with);
+            }
+        }
+        // Most urgent first, so that where max-per-run binds it is the long-lapsed that wait
+        // rather than everybody with something about to expire.
+        List<Mail> mail = new ArrayList<>(byAddress.values());
+        mail.sort(Comparator.comparing(Mail::urgency));
+        for (Mail item : mail) {
+            mailer.send(run, item.recipient(), item.entries(), item.notificationId());
         }
         if (!rehearsing) {
             clearRoundUpsExcept(standing, complete);
@@ -438,10 +492,11 @@ public class NotificationService {
                 told,
                 unaddressed,
                 leadDays,
-                mailer.sent(),
-                mailer.queued(),
-                mailer.failures(),
-                rehearsing ? mailer.rendered() : List.of());
+                run.sent(),
+                run.overCap(),
+                run.queued(),
+                run.failures(),
+                rehearsing ? run.rendered() : List.of());
     }
 
     /**
@@ -525,6 +580,7 @@ public class NotificationService {
             int leadDays,
             List<NotificationMailer.Failure> failures,
             List<NotificationMailer.Failure> unsent,
+            int overCap,
             boolean rehearsing) {
 
         // First, because it is the answer that means somebody has something to fix, and the
@@ -565,9 +621,8 @@ public class NotificationService {
             return "Email is switched on but there is no mail server configured to send with "
                     + "(spring.mail.host)";
         }
-        if (told >= email.getMaxPerRun()) {
-            return "Stopped at the " + email.getMaxPerRun() + " message cap for one run "
-                    + "(cert-alert.notifications.email.max-per-run)";
+        if (overCap > 0) {
+            return capped(overCap);
         }
         return "Nothing was built, and nothing here says why - the log will have it";
     }
@@ -685,11 +740,15 @@ public class NotificationService {
      * about a certificate somebody has already dealt with, which is how a round-up teaches
      * people to ignore it. Note that it is not "the newest one wins": an entry holding two
      * certificates for different names holds both because it needs both.
+     *
+     * <p>A person is asked the second question alone. They hold a pair, and the roll-up
+     * passing over an expired half because the other half is current does not mean anybody
+     * renewed it: half a pair lapsed and not replaced is the case most worth telling.
      */
     private Set<Long> stillDependedOn(DirectoryEntry entry) {
         List<CachedCertificate> held = entry.getCertificates();
         Set<Long> ids = new HashSet<>();
-        for (CachedCertificate certificate : entry.standingCertificates()) {
+        for (CachedCertificate certificate : entry instanceof DirectoryUser ? held : entry.standingCertificates()) {
             if (certificate.getId() == null) {
                 continue;
             }
@@ -756,6 +815,9 @@ public class NotificationService {
      * @param note why no messages were built, where none were; null where some were
      * @param failures messages that could not be built or sent, and what went wrong
      * @param messages on a rehearsal, the messages as they would have gone out
+     * @param notMailed messages not built this run because it reached
+     *     {@code cert-alert.notifications.email.max-per-run}; those people are still told
+     *     on the page
      */
     public record DigestResult(
             int certificates,
@@ -765,11 +827,58 @@ public class NotificationService {
             boolean emailEnabled,
             String note,
             List<NotificationMailer.Failure> failures,
-            List<NotificationMailer.Rendered> messages) {
+            List<NotificationMailer.Rendered> messages,
+            int notMailed) {
 
         /** A run with nothing to do, which is still a run of one kind or the other. */
         static DigestResult nothing(boolean dryRun, boolean emailEnabled, String note) {
-            return new DigestResult(0, 0, 0, dryRun, emailEnabled, note, List.of(), List.of());
+            return new DigestResult(0, 0, 0, dryRun, emailEnabled, note, List.of(), List.of(), 0);
+        }
+    }
+
+    /**
+     * What to email one address, and the round-up it delivers (none on a rehearsal). Where
+     * several round-ups share the address, the first is the one marked emailed.
+     */
+    private record Mail(NotificationRecipients.Recipient recipient, List<ExpiryDigest.Entry> entries, Long notificationId) {
+
+        /** Another round-up for the same address, folded in: each credential once. */
+        Mail with(Mail other) {
+            Map<String, ExpiryDigest.Entry> merged = new LinkedHashMap<>();
+            for (ExpiryDigest.Entry entry : entries) {
+                merged.putIfAbsent(keyOf(entry), entry);
+            }
+            for (ExpiryDigest.Entry entry : other.entries) {
+                merged.putIfAbsent(keyOf(entry), entry);
+            }
+            // Greeted by name only where both are the same person by name.
+            String name = Objects.equals(recipient.name(), other.recipient.name()) ? recipient.name() : null;
+            return new Mail(
+                    new NotificationRecipients.Recipient(recipient.userId(), recipient.address(), name),
+                    List.copyOf(merged.values()),
+                    notificationId);
+        }
+
+        /**
+         * How soon this wants sending, lowest first: whatever is next to expire, by days to
+         * go, and only then what has lapsed, most recently first.
+         */
+        long urgency() {
+            long soonest = Long.MAX_VALUE;
+            long latestLapsed = Long.MAX_VALUE;
+            for (ExpiryDigest.Entry entry : entries) {
+                if (entry.isExpired()) {
+                    latestLapsed = Math.min(latestLapsed, Math.abs(entry.getDays()));
+                } else {
+                    soonest = Math.min(soonest, entry.getDays());
+                }
+            }
+            return soonest != Long.MAX_VALUE ? soonest : Integer.MAX_VALUE + Math.min(latestLapsed, Integer.MAX_VALUE);
+        }
+
+        private static String keyOf(ExpiryDigest.Entry entry) {
+            return entry.getOwnerType() + ":" + entry.getOwnerId() + ":" + entry.getSerialNumbers() + ":"
+                    + entry.getNotAfter();
         }
     }
 
@@ -873,7 +982,9 @@ public class NotificationService {
             long named = entries.stream().map(ExpiryDigest.Entry::getOwnerDn).distinct().count();
             String where;
             if (entries.size() == 1) {
-                where = "(" + entries.getFirst().getSummary() + ")";
+                // Dated rather than counted down: the count changes every day, and a message
+                // that changes every day is marked unread every day.
+                where = "(" + entries.getFirst().getDatedSummary() + ")";
             } else if (named == 1) {
                 where = "for " + entries.getFirst().getOwnerName();
             } else {

@@ -28,7 +28,9 @@ import org.springframework.stereotype.Component;
  * {@code auditor}), and remembered for {@code cache-for}, because a client certificate is
  * checked on every request. A directory that cannot be read gives no groups - and so no role
  * from one - rather than refusing the sign-in, which the directory-password and certificate
- * paths would otherwise lose to an outage of a different kind.
+ * paths would otherwise lose to an outage of a different kind. That answer is not the same
+ * as having none: it is kept for a few seconds only, and nothing that lasts beyond the
+ * request (an API token's ceiling, see {@code ApiTokens}) is decided from a sign-in's roles.
  */
 @Component
 public class DirectoryGroups {
@@ -40,6 +42,9 @@ public class DirectoryGroups {
     private final BaseLdapPathContextSource contextSource;
     private final SecurityProperties properties;
     private final Clock clock;
+
+    /** How long a failed read stands before the next request tries again. */
+    static final java.time.Duration UNREADABLE_REMEMBERED = java.time.Duration.ofSeconds(10);
 
     private record Remembered(Set<String> groups, Instant until) {}
 
@@ -67,8 +72,13 @@ public class DirectoryGroups {
         if (remembered.size() > MAX_REMEMBERED) {
             remembered.clear();
         }
-        remembered.put(key, new Remembered(read, now.plus(groups.getCacheFor())));
-        return read;
+        // Unknown, not none: kept only long enough that an outage is not a read per request.
+        java.time.Duration keep = read == null && groups.getCacheFor().compareTo(UNREADABLE_REMEMBERED) > 0
+                ? UNREADABLE_REMEMBERED
+                : groups.getCacheFor();
+        Set<String> known = read == null ? Set.of() : read;
+        remembered.put(key, new Remembered(known, now.plus(keep)));
+        return known;
     }
 
     /** Forgets what was read, so the next sign-in reads again. */
@@ -76,6 +86,7 @@ public class DirectoryGroups {
         remembered.clear();
     }
 
+    /** The groups, or null where the directory could not be read. */
     private Set<String> read(String dn, String attribute) {
         LdapName name;
         try {
@@ -94,7 +105,7 @@ public class DirectoryGroups {
             return values(attributes.get(attribute));
         } catch (NamingException | RuntimeException e) {
             log.warn("Could not read the groups of {}; no role is granted by a group this time: {}", dn, e.toString());
-            return Set.of();
+            return null;
         } finally {
             if (context != null) {
                 try {

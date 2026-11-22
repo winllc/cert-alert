@@ -134,9 +134,11 @@ public interface CachedCertificateRepository
      * certificates are leftovers beside a current one, and reading them all only to drop
      * them after would spend the read on nothing. The rule is the first half of
      * {@link com.winllc.certalert.domain.DirectoryEntry#standingCertificates()}: a
-     * certificate marked expired is passed over when its entry holds another that is not -
-     * and, for one not yet marked, {@link #REPLACED}. The rest of that question - which of
-     * several a server stands on - is the caller's, because it compares subjects and names.
+     * server's certificate marked expired is passed over when the server holds another that
+     * is not; a person's only once it is {@link #REPLACED}, since a person holds a pair and
+     * the other half being current says nothing about this one. The rest of that question -
+     * which of several a server stands on - is the caller's, because it compares subjects
+     * and names.
      */
     @Query("""
             select c from CachedCertificate c
@@ -147,12 +149,10 @@ public interface CachedCertificateRepository
               and c.notAfter > :floor
               and (c.notAfter < :beforeNotAfter or (c.notAfter = :beforeNotAfter and c.id < :beforeId))
               and (c.status <> :expired
-                   or ((c.user is null or not exists (
+                   or c.server is null
+                   or not exists (
                             select o.id from CachedCertificate o
-                            where o.user = c.user and o.id <> c.id and o.status <> :expired))
-                       and (c.server is null or not exists (
-                            select o.id from CachedCertificate o
-                            where o.server = c.server and o.id <> c.id and o.status <> :expired))))
+                            where o.server = c.server and o.id <> c.id and o.status <> :expired))
               and not\s""" + REPLACED + """
             order by c.notAfter desc, c.id desc
             """)
@@ -198,21 +198,23 @@ public interface CachedCertificateRepository
     /**
      * Certificates whose validity ran out before this. Ordered by expiry, oldest first, so
      * a capped run works through the most finished-with ones rather than an arbitrary
-     * slice of them.
+     * slice of them - after any it has not tried yet, so that rows it could not remove (the
+     * entry gone, the modify refused) wait their turn rather than filling every run.
      *
      * <p>The owner's id comes back with the row rather than being reached for afterwards:
      * the association is lazy, and the job that reads these groups them by entry outside
      * any transaction.
      */
     @Query("select c.id as id, c.user.id as userId, c.server.id as serverId from CachedCertificate c "
-            + "where c.notAfter is not null and c.notAfter < :before order by c.notAfter, c.id")
+            + "where c.notAfter is not null and c.notAfter < :before "
+            + "order by c.cleanupAttemptedAt asc nulls first, c.notAfter, c.id")
     List<CleanupCandidate> findExpiredBefore(@Param("before") Instant before, Pageable pageable);
 
-    /** Certificates an authority has revoked, found out about before this. */
+    /** Certificates an authority has revoked, found out about before this; untried ones first, as above. */
     @Query("select c.id as id, c.user.id as userId, c.server.id as serverId from CachedCertificate c "
             + "where c.revocationStatus = :status "
-            + "and c.revocationCheckedAt is not null and c.revocationCheckedAt < :before "
-            + "order by c.revocationCheckedAt, c.id")
+            + "and c.revocationFoundAt is not null and c.revocationFoundAt < :before "
+            + "order by c.cleanupAttemptedAt asc nulls first, c.revocationFoundAt, c.id")
     List<CleanupCandidate> findRevokedBefore(
             @Param("status") RevocationStatus status, @Param("before") Instant before, Pageable pageable);
 
@@ -229,6 +231,6 @@ public interface CachedCertificateRepository
     long countExpiredBefore(@Param("before") Instant before);
 
     @Query("select count(c) from CachedCertificate c where c.revocationStatus = :status "
-            + "and c.revocationCheckedAt is not null and c.revocationCheckedAt < :before")
+            + "and c.revocationFoundAt is not null and c.revocationFoundAt < :before")
     long countRevokedBefore(@Param("status") RevocationStatus status, @Param("before") Instant before);
 }

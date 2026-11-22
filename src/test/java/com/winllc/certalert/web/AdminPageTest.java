@@ -68,6 +68,15 @@ class AdminPageTest {
     @Autowired
     private DirectoryServerRepository serverRepository;
 
+    @Autowired
+    private com.winllc.certalert.ldap.ChangelogProperties changelogProperties;
+
+    @Autowired
+    private com.winllc.certalert.service.ChangelogCursorStore cursorStore;
+
+    @Autowired
+    private com.winllc.certalert.repository.ChangelogCursorRepository cursorRepository;
+
     private MockMvc mockMvc;
     private Instant now;
     private Long userId;
@@ -321,6 +330,42 @@ class AdminPageTest {
                 .andExpect(status().isForbidden());
         mockMvc.perform(post(REVOCATION_CHECK).with(csrf()).with(anonymous()))
                 .andExpect(status().isUnauthorized());
+    }
+
+    /**
+     * A sweep's run, and what a prune or a cleanup would remove, carry the directory's own
+     * errors and entries: for administrators and auditors, as the job runs are.
+     */
+    @Test
+    void aReaderIsRefusedTheSweepRunsAndPreviews() throws Exception {
+        for (String path : List.of(
+                "/api/v1/sync/runs", "/api/v1/sync/prune/preview", "/api/v1/sync/certificate-cleanup/preview")) {
+            mockMvc.perform(get(path).with(reader())).andExpect(status().isForbidden());
+        }
+        mockMvc.perform(get("/api/v1/sync/runs").with(admin())).andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/sync/runs").with(user("inspector").roles("USER", "AUDITOR")))
+                .andExpect(status().isOk());
+    }
+
+    /** The header badge reads the changelog's status for everybody, but not its last error. */
+    @Test
+    void theChangelogsLastErrorIsNotEverybodys() throws Exception {
+        boolean enabled = changelogProperties.isEnabled();
+        changelogProperties.setEnabled(true);
+        try {
+            cursorStore.loadOrCreate(1, now);
+            cursorStore.recordError("javax.naming.CommunicationException: ldap.internal.example:636");
+            mockMvc.perform(get("/api/v1/changelog").with(reader()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.enabled").value(true))
+                    .andExpect(jsonPath("$.lastError").doesNotExist());
+            mockMvc.perform(get("/api/v1/changelog").with(admin()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.lastError").value(org.hamcrest.Matchers.containsString("CommunicationException")));
+        } finally {
+            changelogProperties.setEnabled(enabled);
+            cursorRepository.deleteAll();
+        }
     }
 
     /** The UTC day an instant falls on, as the date inputs send it. */

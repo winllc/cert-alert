@@ -50,6 +50,7 @@ class AuditChainTest {
     @BeforeEach
     void startFromAnEmptyTrail() {
         repository.deleteAll();
+        PrunedTrail.asIfPruned(jdbc);
     }
 
     @AfterEach
@@ -133,6 +134,58 @@ class AuditChainTest {
     }
 
     @Test
+    void eventsDeletedFromTheStartWithoutRetentionAreDetected() {
+        long head = store.headSeq();
+        for (int i = 0; i < 4; i++) {
+            audit.record(event("test.delete"));
+        }
+        jdbc.update("delete from audit_event where seq <= ?", head + 2);
+
+        AuditVerifier.Result result = verifier.verify();
+        assertThat(result.intact()).as(result.summary()).isFalse();
+        assertThat(result.brokenSeq()).isEqualTo(head + 1);
+        assertThat(result.summary()).contains("are missing; retention");
+        repository.deleteAll();
+    }
+
+    @Test
+    void theNewestEventsDeletedAreDetected() {
+        long head = store.headSeq();
+        for (int i = 0; i < 4; i++) {
+            audit.record(event("test.delete"));
+        }
+        jdbc.update("delete from audit_event where seq >= ?", head + 3);
+
+        AuditVerifier.Result result = verifier.verify();
+        assertThat(result.intact()).as(result.summary()).isFalse();
+        assertThat(result.brokenSeq()).isEqualTo(head + 3);
+        assertThat(result.summary()).contains("the chain head is at seq " + (head + 4));
+        repository.deleteAll();
+    }
+
+    @Test
+    void afterPruningTheAnchorMustBeTheEventAfterTheLastPruned() {
+        Instant old = Instant.now().minus(Duration.ofDays(40));
+        long head = store.headSeq();
+        for (int i = 0; i < 3; i++) {
+            audit.record(event("test.old").time(old.plusSeconds(i)));
+        }
+        audit.record(event("test.recent"));
+        audit.record(event("test.recent"));
+        properties.setRetentionDays(30);
+        assertThat(retention.prune()).isEqualTo(3);
+        assertThat(store.chainState().prunedThroughSeq()).isEqualTo(head + 3);
+        assertThat(verifier.verify().intact()).isTrue();
+
+        jdbc.update("delete from audit_event where seq = ?", head + 4);
+        AuditVerifier.Result result = verifier.verify();
+        assertThat(result.intact()).as(result.summary()).isFalse();
+        assertThat(result.brokenSeq()).isEqualTo(head + 4);
+        assertThat(result.summary()).contains("retention pruned only up to seq " + (head + 3));
+        repository.deleteAll();
+    }
+
+    @Test
     void verificationAfterPruningReportsTheAnchor() {
         Instant old = Instant.now().minus(Duration.ofDays(40));
         long head = store.headSeq();
@@ -155,6 +208,41 @@ class AuditChainTest {
         StoredEvent pruned = store.after(head + 5, 10).getFirst();
         assertThat(pruned.action()).isEqualTo("audit.pruned");
         assertThat(pruned.line()).contains("\"count\":3", "\"fromSeq\":" + (head + 1), "\"toSeq\":" + (head + 3));
+    }
+
+    @Test
+    void anExportFollowsOnBySeqSoEventsRecordedMeanwhileShiftNothing() {
+        String run = "export-" + System.nanoTime();
+        List<AuditRecord> many = new java.util.ArrayList<>();
+        for (int i = 0; i < 1_005; i++) {
+            many.add(event("test.export").detail("run", run));
+        }
+        audit.recordAll(many);
+        long upTo = store.headSeq();
+        AuditQuery query = new AuditQuery(null, null, null, "test.export", null, null, null, null, null, run);
+
+        List<Long> seen = new java.util.ArrayList<>();
+        int handed = store.forEach(query, upTo, 2_000, e -> {
+            if (seen.isEmpty()) {
+                // appended while the export streams, as a busy portal does
+                java.util.concurrent.CompletableFuture.runAsync(() -> audit.recordAll(List.of(
+                        event("test.export").detail("run", run), event("test.export").detail("run", run),
+                        event("test.export").detail("run", run)))).join();
+            }
+            seen.add(e.getSeq());
+        });
+
+        assertThat(handed).isEqualTo(1_005);
+        assertThat(seen).doesNotHaveDuplicates().allMatch(seq -> seq <= upTo);
+    }
+
+    @Test
+    void theRecordedActionsForTheFilterAreReadAtMostHourly() {
+        store.actions();
+        String novel = "test.novel-" + System.nanoTime();
+        audit.record(event(novel));
+
+        assertThat(store.actions()).doesNotContain(novel);
     }
 
     @Test

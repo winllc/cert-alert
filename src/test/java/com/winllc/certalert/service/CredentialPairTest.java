@@ -164,6 +164,42 @@ class CredentialPairTest {
     }
 
     /**
+     * Half a pair lapsed and not renewed, the other half good for months: still reported. The
+     * other half being current says nothing about this one.
+     */
+    @Test
+    void anExpiredHalfNobodyRenewedIsStillReported() {
+        DirectoryUser half = user("halfway", "Half Way", "halfway@example.gov");
+        half.addCertificate(signing("CN=halfway@example.gov", now.minus(Duration.ofDays(1000)),
+                now.minus(Duration.ofDays(2))));
+        half.addCertificate(encryption("CN=halfway@example.gov", now.minus(Duration.ofDays(100)),
+                now.plus(Duration.ofDays(200))));
+        save(half);
+
+        NotificationService.DigestResult result = notificationService.digest(true);
+
+        assertThat(result.messages()).hasSize(1);
+        assertThat(result.messages().getFirst().subject())
+                .isEqualTo("[cert-alert] 1 of your credential(s) expired");
+        assertThat(result.messages().getFirst().text()).contains("Expired 2 day(s) ago");
+    }
+
+    /** Once that half is renewed, the leftover goes quiet. */
+    @Test
+    void anExpiredHalfThatWasRenewedIsNot() {
+        DirectoryUser renewed = user("renewed", "Re Newed", "renewed@example.gov");
+        renewed.addCertificate(signing("CN=renewed@example.gov", now.minus(Duration.ofDays(1000)),
+                now.minus(Duration.ofDays(2))));
+        renewed.addCertificate(signing("CN=renewed@example.gov", now.minus(Duration.ofDays(10)),
+                now.plus(Duration.ofDays(355))));
+        save(renewed);
+
+        assertThat(notificationService.digest(true).messages()).isEmpty();
+        assertThat(users.findByDn("uid=renewed,ou=people").orElseThrow().getCertificateStatus())
+                .isNotEqualTo(CertificateStatus.EXPIRED);
+    }
+
+    /**
      * The alert path too. Both halves cross into EXPIRING_SOON within moments of each
      * other, because they were issued within moments of each other - and that is one thing
      * to tell somebody, not two identical messages with different serial numbers.

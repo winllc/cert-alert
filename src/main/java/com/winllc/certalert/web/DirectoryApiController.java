@@ -12,6 +12,7 @@ import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.repository.DirectoryServerRepository;
 import com.winllc.certalert.repository.DirectoryUserRepository;
 import com.winllc.certalert.repository.SyncRunRepository;
+import com.winllc.certalert.security.SignedInDirectoryUser;
 import com.winllc.certalert.ldap.ChangelogProperties;
 import com.winllc.certalert.service.CertificateRefreshService;
 import com.winllc.certalert.service.ChangelogConnector;
@@ -30,6 +31,7 @@ import java.util.Map;
 import java.util.Optional;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -181,7 +183,16 @@ public class DirectoryApiController {
     /** Where the changelog connector has got to, and how far behind the directory it is. */
     @RequiresFeature("changelog-sync")
     @GetMapping("/changelog")
-    public ChangelogStatus changelog() {
+    public ChangelogStatus changelog(Authentication authentication) {
+        ChangelogStatus status = changelogStatus();
+        // The header badge reads this for everybody; the directory's own error text is for
+        // the people who run the jobs, and auditors, as with the runs themselves.
+        return SignedInDirectoryUser.isAdmin(authentication) || SignedInDirectoryUser.isAuditor(authentication)
+                ? status
+                : status.withoutError();
+    }
+
+    private ChangelogStatus changelogStatus() {
         // Read from configuration, not from whether a bean happens to exist: the cursor
         // store is always present, so its presence says nothing about the connector.
         if (!changelogProperties.isEnabled()) {
@@ -205,7 +216,7 @@ public class DirectoryApiController {
         return JobRunController.accepted(runs, "changelog sync", step -> {
             connector.ifPresent(c -> step.exclusive(
                     ChangelogConnector.LOCK, "changelog sync", c::pollOnce, applied -> Map.of("changes", applied)));
-            return changelog();
+            return changelogStatus();
         });
     }
 

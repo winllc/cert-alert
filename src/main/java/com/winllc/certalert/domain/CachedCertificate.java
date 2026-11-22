@@ -162,6 +162,22 @@ public class CachedCertificate {
     @Column(name = "revoked_at")
     private Instant revokedAt;
 
+    /**
+     * When this first found it revoked: set on the change into REVOKED and cleared on the way
+     * out. What the certificate cleanup's {@code revoked-after} is measured from, because
+     * {@code revocation_checked_at} moves on with every nightly check.
+     */
+    @Column(name = "revocation_found_at")
+    private Instant revocationFoundAt;
+
+    /**
+     * When the certificate cleanup last tried to remove it and could not - the entry gone
+     * from the directory, or the modify refused. Such rows go to the back of the next run's
+     * list, so they cannot fill every run's cap and stop it reaching anything else.
+     */
+    @Column(name = "cleanup_attempted_at")
+    private Instant cleanupAttemptedAt;
+
     @Column(name = "revocation_reason", length = 64)
     private String revocationReason;
 
@@ -172,6 +188,15 @@ public class CachedCertificate {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 32)
     private CertificateStatus status = CertificateStatus.VALID;
+
+    /**
+     * The severity of the last expiry alert raised about it, or null for none. What lets the
+     * refresh escalate one alerted as a WARNING once it comes inside the critical threshold,
+     * once, without a status change to hang it on.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "last_alert_severity", length = 16)
+    private Severity lastAlertSeverity;
 
     @Column(name = "cached_at", nullable = false)
     private Instant cachedAt;
@@ -221,6 +246,18 @@ public class CachedCertificate {
     public void updateStatus(CertificateStatus status, Instant evaluatedAt) {
         this.status = status;
         this.cachedAt = evaluatedAt;
+        if (!status.isAlertable()) {
+            this.lastAlertSeverity = null;
+        }
+    }
+
+    /** That an expiry alert of this severity has been raised about it. */
+    public void alerted(Severity severity) {
+        this.lastAlertSeverity = severity;
+    }
+
+    public Severity getLastAlertSeverity() {
+        return lastAlertSeverity;
     }
 
     public Long getId() {
@@ -376,7 +413,13 @@ public class CachedCertificate {
         return authorityKeyId;
     }
 
-    /** What an authority said about this certificate, and when it was asked. */
+    /**
+     * What an authority said about this certificate, and when it was asked.
+     *
+     * <p>A check that got no answer (UNKNOWN) does not undo a revocation already found: the
+     * certificate stays REVOKED, with its date and reason, and only the detail says the last
+     * check went unanswered.
+     */
     public void recordRevocation(
             RevocationStatus status,
             RevocationMethod method,
@@ -385,7 +428,22 @@ public class CachedCertificate {
             String detail,
             Instant checkedAt) {
 
-        this.revocationStatus = status == null ? RevocationStatus.NOT_CHECKED : status;
+        RevocationStatus next = status == null ? RevocationStatus.NOT_CHECKED : status;
+        if (next == RevocationStatus.UNKNOWN && this.revocationStatus == RevocationStatus.REVOKED) {
+            if (detail != null && !detail.isBlank()) {
+                this.revocationDetail = truncate("Still revoked; the last check got no answer: " + detail, 500);
+            }
+            this.revocationCheckedAt = checkedAt;
+            return;
+        }
+        if (next == RevocationStatus.REVOKED) {
+            if (this.revocationStatus != RevocationStatus.REVOKED || this.revocationFoundAt == null) {
+                this.revocationFoundAt = checkedAt;
+            }
+        } else {
+            this.revocationFoundAt = null;
+        }
+        this.revocationStatus = next;
         this.revocationMethod = method;
         this.revokedAt = revokedAt;
         this.revocationReason = truncate(reason, 64);
@@ -407,6 +465,19 @@ public class CachedCertificate {
 
     public Instant getRevokedAt() {
         return revokedAt;
+    }
+
+    public Instant getRevocationFoundAt() {
+        return revocationFoundAt;
+    }
+
+    /** That the cleanup tried to remove it, and the directory was missing the entry or refused. */
+    public void cleanupAttempted(Instant when) {
+        this.cleanupAttemptedAt = when;
+    }
+
+    public Instant getCleanupAttemptedAt() {
+        return cleanupAttemptedAt;
     }
 
     public String getRevocationReason() {

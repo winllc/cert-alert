@@ -10,6 +10,7 @@ import com.winllc.certalert.domain.DirectoryEntry;
 import com.winllc.certalert.domain.DirectoryServer;
 import com.winllc.certalert.domain.DirectoryUser;
 import com.winllc.certalert.domain.OwnerType;
+import com.winllc.certalert.domain.Severity;
 import com.winllc.certalert.ldap.LdapProperties;
 import com.winllc.certalert.license.Licensing;
 import com.winllc.certalert.ldap.LdapServerEntry;
@@ -92,6 +93,7 @@ public class DirectoryPersistenceService {
         if (batch.isEmpty()) {
             return BatchOutcome.EMPTY;
         }
+        batch = firstPerDn(batch, LdapUserEntry::dn);
         Map<String, DirectoryUser> existing = index(userRepository.findAllByDnIn(dns(batch, LdapUserEntry::dn)));
         // One query for the batch: a sweep rebuilds each person's identifiers from the
         // directory, and the addresses added here have to go back in or they would last
@@ -160,6 +162,7 @@ public class DirectoryPersistenceService {
         if (batch.isEmpty()) {
             return BatchOutcome.EMPTY;
         }
+        batch = firstPerDn(batch, LdapServerEntry::dn);
         Map<String, DirectoryServer> existing =
                 index(serverRepository.findAllByDnIn(dns(batch, LdapServerEntry::dn)));
         BatchOutcome outcome = BatchOutcome.EMPTY;
@@ -220,55 +223,73 @@ public class DirectoryPersistenceService {
     }
 
     private void applyAttributes(DirectoryUser user, LdapUserEntry entry, List<String> aliases) {
-        user.setUid(entry.get(UserField.UID));
-        user.setCommonName(entry.get(UserField.COMMON_NAME));
-        user.setDisplayName(entry.get(UserField.DISPLAY_NAME));
-        user.setPreferredName(entry.get(UserField.PREFERRED_NAME));
-        user.setGivenName(entry.get(UserField.GIVEN_NAME));
-        user.setSurname(entry.get(UserField.SURNAME));
-        user.setMail(entry.get(UserField.MAIL));
-        user.setIcEmail(entry.get(UserField.IC_EMAIL));
-        user.setInternetEmail(entry.get(UserField.INTERNET_EMAIL));
-        user.setNiprnetEmail(entry.get(UserField.NIPRNET_EMAIL));
-        user.setSiprnetEmail(entry.get(UserField.SIPRNET_EMAIL));
-        user.setTelephoneNumber(entry.get(UserField.TELEPHONE_NUMBER));
-        user.setTitle(entry.get(UserField.TITLE));
-        user.setEmployeeType(entry.get(UserField.EMPLOYEE_TYPE));
-        user.setRank(entry.get(UserField.RANK));
-        user.setCountryOfAffiliation(entry.get(UserField.COUNTRY_OF_AFFILIATION));
-        user.setDutyOrganization(entry.get(UserField.DUTY_ORGANIZATION));
-        user.setDutySubOrganization(entry.get(UserField.DUTY_SUB_ORGANIZATION));
-        user.setAdminOrganization(entry.get(UserField.ADMIN_ORGANIZATION));
+        user.setUid(clip(entry.get(UserField.UID), 255));
+        user.setCommonName(clip(entry.get(UserField.COMMON_NAME), 255));
+        user.setDisplayName(clip(entry.get(UserField.DISPLAY_NAME), 255));
+        user.setPreferredName(clip(entry.get(UserField.PREFERRED_NAME), 255));
+        user.setGivenName(clip(entry.get(UserField.GIVEN_NAME), 255));
+        user.setSurname(clip(entry.get(UserField.SURNAME), 255));
+        user.setMail(clip(entry.get(UserField.MAIL), 320));
+        user.setIcEmail(clip(entry.get(UserField.IC_EMAIL), 320));
+        user.setInternetEmail(clip(entry.get(UserField.INTERNET_EMAIL), 320));
+        user.setNiprnetEmail(clip(entry.get(UserField.NIPRNET_EMAIL), 320));
+        user.setSiprnetEmail(clip(entry.get(UserField.SIPRNET_EMAIL), 320));
+        user.setTelephoneNumber(clip(entry.get(UserField.TELEPHONE_NUMBER), 64));
+        user.setTitle(clip(entry.get(UserField.TITLE), 255));
+        user.setEmployeeType(clip(entry.get(UserField.EMPLOYEE_TYPE), 128));
+        user.setRank(clip(entry.get(UserField.RANK), 128));
+        user.setCountryOfAffiliation(clip(entry.get(UserField.COUNTRY_OF_AFFILIATION), 128));
+        user.setDutyOrganization(clip(entry.get(UserField.DUTY_ORGANIZATION), 255));
+        user.setDutySubOrganization(clip(entry.get(UserField.DUTY_SUB_ORGANIZATION), 255));
+        user.setAdminOrganization(clip(entry.get(UserField.ADMIN_ORGANIZATION), 255));
         user.setIcMember(parseBoolean(entry.get(UserField.IS_IC_MEMBER)));
-        user.setIcNetworks(entry.get(UserField.IC_NETWORKS));
-        user.setResourceSecurityMark(entry.get(UserField.RESOURCE_SECURITY_MARK));
-        user.setOrganization(entry.get(UserField.ORGANIZATION));
-        user.setOrganizationalUnit(entry.get(UserField.ORGANIZATIONAL_UNIT));
+        user.setIcNetworks(clip(entry.get(UserField.IC_NETWORKS), 500));
+        user.setResourceSecurityMark(clip(entry.get(UserField.RESOURCE_SECURITY_MARK), 500));
+        user.setOrganization(clip(entry.get(UserField.ORGANIZATION), 255));
+        user.setOrganizationalUnit(clip(entry.get(UserField.ORGANIZATIONAL_UNIT), 255));
         // Before the identifiers are rebuilt, because they are rebuilt from these.
-        user.setAdditionalEmails(entry.allExtraEmails());
-        user.refreshIdentifiers(primaryEmail(entry), aliases);
+        user.setAdditionalEmails(addresses(entry.allExtraEmails()));
+        user.refreshIdentifiers(clip(primaryEmail(entry), ADDRESS), aliases);
     }
 
     private void applyAttributes(DirectoryServer server, LdapServerEntry entry) {
-        server.setCommonName(entry.get(ServerField.COMMON_NAME));
-        server.setUid(entry.get(ServerField.UID));
-        server.setGivenName(entry.get(ServerField.GIVEN_NAME));
-        server.setDescription(entry.get(ServerField.DESCRIPTION));
-        server.setServerUrl(entry.get(ServerField.SERVER_URL));
-        server.setIcServerAddress(entry.get(ServerField.IC_SERVER_ADDRESS));
-        server.setAtoStatus(entry.get(ServerField.ATO_STATUS));
-        server.setLifeCycleStatus(entry.get(ServerField.LIFE_CYCLE_STATUS));
-        server.setEmployeeType(entry.get(ServerField.EMPLOYEE_TYPE));
-        server.setCountryOfAffiliation(entry.get(ServerField.COUNTRY_OF_AFFILIATION));
-        server.setDutyOrganization(entry.get(ServerField.DUTY_ORGANIZATION));
-        server.setDutySubOrganization(entry.get(ServerField.DUTY_SUB_ORGANIZATION));
-        server.setAdminOrganization(entry.get(ServerField.ADMIN_ORGANIZATION));
+        server.setCommonName(clip(entry.get(ServerField.COMMON_NAME), 255));
+        server.setUid(clip(entry.get(ServerField.UID), 255));
+        server.setGivenName(clip(entry.get(ServerField.GIVEN_NAME), 255));
+        server.setDescription(clip(entry.get(ServerField.DESCRIPTION), 1000));
+        server.setServerUrl(clip(entry.get(ServerField.SERVER_URL), 500));
+        server.setIcServerAddress(clip(entry.get(ServerField.IC_SERVER_ADDRESS), 128));
+        server.setAtoStatus(clip(entry.get(ServerField.ATO_STATUS), 128));
+        server.setLifeCycleStatus(clip(entry.get(ServerField.LIFE_CYCLE_STATUS), 128));
+        server.setEmployeeType(clip(entry.get(ServerField.EMPLOYEE_TYPE), 128));
+        server.setCountryOfAffiliation(clip(entry.get(ServerField.COUNTRY_OF_AFFILIATION), 128));
+        server.setDutyOrganization(clip(entry.get(ServerField.DUTY_ORGANIZATION), 255));
+        server.setDutySubOrganization(clip(entry.get(ServerField.DUTY_SUB_ORGANIZATION), 255));
+        server.setAdminOrganization(clip(entry.get(ServerField.ADMIN_ORGANIZATION), 255));
         server.setIcMember(parseBoolean(entry.get(ServerField.IS_IC_MEMBER)));
-        server.setIcNetworks(entry.get(ServerField.IC_NETWORKS));
-        server.setResourceSecurityMark(entry.get(ServerField.RESOURCE_SECURITY_MARK));
-        server.setOrganization(entry.get(ServerField.ORGANIZATION));
-        server.setOrganizationalUnit(entry.get(ServerField.ORGANIZATIONAL_UNIT));
-        server.setServerPocs(entry.serverPocs());
+        server.setIcNetworks(clip(entry.get(ServerField.IC_NETWORKS), 500));
+        server.setResourceSecurityMark(clip(entry.get(ServerField.RESOURCE_SECURITY_MARK), 500));
+        server.setOrganization(clip(entry.get(ServerField.ORGANIZATION), 255));
+        server.setOrganizationalUnit(clip(entry.get(ServerField.ORGANIZATIONAL_UNIT), 255));
+        server.setServerPocs(addresses(entry.serverPocs()));
+    }
+
+    /** The longest address column; an address longer than this is not one. */
+    private static final int ADDRESS = 320;
+
+    /**
+     * A value cut to fit its column. The directory's schema is not this one's, and one entry
+     * with an over-long title would otherwise fail its whole batch on every sweep.
+     */
+    static String clip(String value, int length) {
+        return value == null || value.length() <= length ? value : value.substring(0, length);
+    }
+
+    /** Addresses that fit; a longer value is no address, and cutting it would make it a wrong one. */
+    private static List<String> addresses(Collection<String> values) {
+        return values == null
+                ? List.of()
+                : values.stream().filter(value -> value == null || value.length() <= ADDRESS).toList();
     }
 
     /**
@@ -417,6 +438,7 @@ public class DirectoryPersistenceService {
             }
         }
 
+        List<CachedCertificate> alertable = new ArrayList<>();
         for (Map.Entry<String, CachedCertificate> candidate : parsed.entrySet()) {
             CachedCertificate certificate = existing.get(candidate.getKey());
             boolean isNew = certificate == null;
@@ -453,19 +475,31 @@ public class DirectoryPersistenceService {
             // A newly discovered certificate is not news, it is just the first time we
             // looked. Only a transition into a bad state is worth waking someone for.
             if (!isNew && current != previous && current.isAlertable()) {
-                long daysUntilExpiry = evaluator.daysUntilExpiry(certificate.getNotAfter(), now);
-                alertDispatcher.dispatch(CertificateAlert.from(
-                        ownerType,
-                        ownerId,
-                        ownerName,
-                        entity.getDn(),
-                        contact.get(),
-                        certificate,
-                        evaluator.severityFor(current, daysUntilExpiry),
-                        daysUntilExpiry,
-                        now));
-                alertsRaised++;
+                alertable.add(certificate);
             }
+        }
+
+        // With everything the entry now publishes in place: an old certificate lapsing
+        // beside its renewal is in the history above, but nobody is woken for it.
+        for (CachedCertificate certificate : alertable) {
+            if (Renewals.replaced(certificate, entity.getCertificates())) {
+                continue;
+            }
+            CertificateStatus current = certificate.getStatus();
+            long daysUntilExpiry = evaluator.daysUntilExpiry(certificate.getNotAfter(), now);
+            Severity severity = evaluator.severityFor(current, daysUntilExpiry);
+            certificate.alerted(severity);
+            alertDispatcher.dispatch(CertificateAlert.from(
+                    ownerType,
+                    ownerId,
+                    ownerName,
+                    entity.getDn(),
+                    contact.get(),
+                    certificate,
+                    severity,
+                    daysUntilExpiry,
+                    now));
+            alertsRaised++;
         }
 
         return new CertificateReconciliation(cached, removed, alertsRaised);
@@ -483,6 +517,16 @@ public class DirectoryPersistenceService {
             }
         }
         return parsed;
+    }
+
+    /**
+     * The batch with each DN once. The same DN twice would be two new rows for one entry,
+     * and the unique constraint would fail the batch.
+     */
+    private static <T> List<T> firstPerDn(List<T> batch, java.util.function.Function<T, String> dn) {
+        Map<String, T> byDn = new LinkedHashMap<>();
+        batch.forEach(entry -> byDn.putIfAbsent(dn.apply(entry), entry));
+        return byDn.size() == batch.size() ? batch : List.copyOf(byDn.values());
     }
 
     private <T> List<String> dns(List<T> batch, java.util.function.Function<T, String> dn) {

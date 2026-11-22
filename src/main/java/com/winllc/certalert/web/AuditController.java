@@ -1,5 +1,6 @@
 package com.winllc.certalert.web;
 
+import com.winllc.certalert.api.ApiProperties;
 import com.winllc.certalert.domain.AuditAction;
 import com.winllc.certalert.domain.AuditEvent;
 import com.winllc.certalert.domain.OwnerType;
@@ -60,6 +61,7 @@ public class AuditController {
     private final AuditEventRepository auditRepository;
     private final DirectoryUserRepository userRepository;
     private final DirectoryServerRepository serverRepository;
+    private final ApiProperties apiProperties;
     private final Clock clock;
 
     public AuditController(
@@ -67,11 +69,13 @@ public class AuditController {
             AuditEventRepository auditRepository,
             DirectoryUserRepository userRepository,
             DirectoryServerRepository serverRepository,
+            ApiProperties apiProperties,
             Clock clock) {
         this.auditService = auditService;
         this.auditRepository = auditRepository;
         this.userRepository = userRepository;
         this.serverRepository = serverRepository;
+        this.apiProperties = apiProperties;
         this.clock = clock;
     }
 
@@ -125,6 +129,7 @@ public class AuditController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             Authentication authentication) {
 
+        DataTablesRequests.bounded(input, apiProperties.getMaxPageSize());
         Specification<AuditEvent> filter = AuditSpecifications.actionIn(action)
                 .and(AuditSpecifications.actorLike(actor))
                 .and(AuditSpecifications.subjectLike(subject))
@@ -134,18 +139,18 @@ public class AuditController {
             if (subjectType == null) {
                 throw new IllegalArgumentException("A subject id needs the subject type alongside it");
             }
-            return auditRepository.findAll(
-                    input, filter, AuditSpecifications.subject(subjectType, subjectId), AuditEventRow::from);
+            return DataTablesRequests.checked(auditRepository.findAll(
+                    input, filter, AuditSpecifications.subject(subjectType, subjectId), AuditEventRow::from));
         }
 
         requireAdministrator(authentication);
         // Every entry's changes at once. The rest of the trail - sign-ins, refusals,
         // settings, the license, job runs - is on the audit log page (/admin/audit).
-        return auditRepository.findAll(
+        return DataTablesRequests.checked(auditRepository.findAll(
                 input,
                 filter.and(AuditSpecifications.subjectTypeIs(subjectType)),
                 AuditSpecifications.aboutAnEntry(),
-                AuditEventRow::from);
+                AuditEventRow::from));
     }
 
     /** How much trail there is, and how much of it is recent. Administrators only. */

@@ -18,7 +18,8 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.web.authentication.preauth.PreAuthenticatedAuthenticationToken;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Resolves a client certificate to the person who holds it.
@@ -64,6 +65,7 @@ public class X509DirectoryUserDetailsService
     private final ClientCertificateChecks checks;
     private final CertificateMapping mapping;
     private final Clock clock;
+    private final TransactionTemplate readOnly;
 
     public X509DirectoryUserDetailsService(
             CachedCertificateRepository certificateRepository,
@@ -71,22 +73,30 @@ public class X509DirectoryUserDetailsService
             SecurityProperties properties,
             ClientCertificateChecks checks,
             CertificateMapping mapping,
-            Clock clock) {
+            Clock clock,
+            PlatformTransactionManager transactions) {
         this.certificateRepository = certificateRepository;
         this.resolver = resolver;
         this.properties = properties;
         this.checks = checks;
         this.mapping = mapping;
         this.clock = clock;
+        this.readOnly = new TransactionTemplate(transactions);
+        this.readOnly.setReadOnly(true);
     }
 
     @Override
-    @Transactional(readOnly = true)
     public UserDetails loadUserDetails(PreAuthenticatedAuthenticationToken token) {
         X509Certificate certificate = certificateOf(token);
+        // Before the transaction, not in it: a revocation check can wait on the network, and
+        // nothing it does needs a database connection held for it.
+        checks.check(certificate, chainOf(token, certificate));
+        return readOnly.execute(status -> matchedPerson(certificate));
+    }
+
+    private UserDetails matchedPerson(X509Certificate certificate) {
         // For the log only, on one line: whoever made the certificate chose its subject.
         String subject = LogSafe.oneLine(certificate.getSubjectX500Principal().getName());
-        checks.check(certificate, chainOf(token, certificate));
 
         Optional<DirectoryUser> byFingerprint = byPublishedCertificate(certificate, subject);
         if (byFingerprint.isPresent()) {
@@ -130,7 +140,7 @@ public class X509DirectoryUserDetailsService
      * the certificate is still good.
      *
      * @throws RefusedCertificateException when a person publishes it, but it has been revoked
-     *     or its dates say it is not good now
+     *     or its dates say it is not good now, or when more than one person publishes it
      */
     private Optional<DirectoryUser> byPublishedCertificate(X509Certificate certificate, String subject) {
         String fingerprint = CertificateFingerprints.sha256(certificate);
@@ -153,6 +163,14 @@ public class X509DirectoryUserDetailsService
                             ? ""
                             : " (" + revoked.get().getRevocationReason() + ")");
             throw new RefusedCertificateException(RefusedCertificateException.Reason.REVOKED, fingerprint);
+        }
+        // Two entries publishing one certificate (a regular and a privileged account carrying
+        // the same card, a shared mailbox) leave nothing to say which of them is holding it.
+        long people = owned.stream().map(match -> match.getUser().getId()).distinct().count();
+        if (people > 1) {
+            log.warn("Refusing client certificate '{}': {} different directory entries publish it, "
+                    + "so it cannot say which of them is signing in", subject, people);
+            throw new RefusedCertificateException(RefusedCertificateException.Reason.AMBIGUOUS, fingerprint);
         }
         CachedCertificate cached = owned.getFirst();
         Instant now = Instant.now(clock);

@@ -266,10 +266,20 @@ public final class ExpiryDigest {
                     : "expires in %d day(s), on %s".formatted(days, getDay());
         }
 
-        /** The one-line form, as it reads on the notifications page. */
+        /** The one-line form, with the day count. */
         public String getSummary() {
             return "%s - %s%s - %s".formatted(
                     ownerName, subjectDn, isPair() ? " (signing and encryption)" : "", getStateSummary());
+        }
+
+        /**
+         * The one-line form as the notifications page keeps it: the date and no day count, so
+         * that it reads the same tomorrow and a round-up with nothing new stays read.
+         */
+        public String getDatedSummary() {
+            return "%s - %s%s - %s %s".formatted(
+                    ownerName, subjectDn, isPair() ? " (signing and encryption)" : "",
+                    expired ? "expired on" : "expires on", getDay());
         }
     }
 }

@@ -65,9 +65,11 @@ class MailOutboxTest {
         private final List<MimeMessage> sent = new ArrayList<>();
         private volatile boolean down;
         private volatile boolean askedInsideATransaction;
+        private volatile int asked;
 
         @Override
         protected void doSend(MimeMessage[] messages, Object[] originalMessages) {
+            asked++;
             if (TransactionSynchronizationManager.isActualTransactionActive()) {
                 askedInsideATransaction = true;
             }
@@ -113,6 +115,7 @@ class MailOutboxTest {
         mailSender.sent.clear();
         mailSender.down = false;
         mailSender.askedInsideATransaction = false;
+        mailSender.asked = 0;
         outboundEmails.deleteAll();
         notifications.deleteAll();
         servers.deleteAll();
@@ -235,6 +238,34 @@ class MailOutboxTest {
                 .isEqualTo(OutboundEmail.State.SENT);
         assertThat(notifications.findAll()).singleElement()
                 .satisfies(notification -> assertThat(notification.getEmailedAt()).isNotNull());
+    }
+
+    /**
+     * A mail server that is down fails every message after a full timeout, so the round-up's
+     * own delivery stops after three in a row, as a background pass does, rather than waiting
+     * out five hundred of them.
+     */
+    @Test
+    void anExplicitDeliveryStopsAfterThreeFailuresInARow() {
+        mailSender.down = true;
+        List<Long> ids = new ArrayList<>();
+        for (int i = 0; i < 6; i++) {
+            ids.add(outbox.queue(new OutboundEmail(OutboundEmail.Kind.DIGEST, "cert-alert@example.gov",
+                    List.of("person" + i + "@example.gov"), "Round-up " + i, "Text", null, null, null,
+                    Instant.now()), false));
+        }
+
+        MailOutbox.Delivery delivery = outbox.deliver(ids);
+
+        assertThat(mailSender.asked).isEqualTo(3);
+        assertThat(delivery.sent()).isZero();
+        // Every one of them is reported as not sent, the untried ones included.
+        assertThat(delivery.failures()).hasSize(6);
+        assertThat(delivery.failures().getLast().reason()).contains("not tried");
+        assertThat(outboundEmails.findAllById(ids))
+                .allSatisfy(row -> assertThat(row.getState()).isEqualTo(OutboundEmail.State.PENDING))
+                .filteredOn(row -> row.getAttempts() == 0)
+                .hasSize(3);
     }
 
     @Test

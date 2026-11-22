@@ -2,6 +2,7 @@ package com.winllc.certalert.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.winllc.certalert.config.NotificationProperties;
 import com.winllc.certalert.domain.CachedCertificate;
 import com.winllc.certalert.domain.CertificateStatus;
 import com.winllc.certalert.domain.DirectoryServer;
@@ -85,6 +86,9 @@ class NotificationEmailTest {
 
     @Autowired
     private DirectoryServerRepository servers;
+
+    @Autowired
+    private NotificationProperties properties;
 
     @BeforeEach
     void seed() {
@@ -247,6 +251,76 @@ class NotificationEmailTest {
         assertThat(mailSender.sent).hasSize(3);
         assertThat(real.emailsSent()).isEqualTo(3);
         assertThat(notifications.count()).as("one notification per person").isEqualTo(2);
+    }
+
+    /**
+     * Where max-per-run binds, what is about to expire goes first and the long-lapsed wait -
+     * and the run says how many it held back, every time.
+     */
+    @Test
+    void theCapSendsUpcomingExpiriesFirstAndSaysWhatItHeldBack() {
+        // Nobody renews this one, and it is the first thing the reads come back with.
+        servers.save(server("cn=old01,ou=servers", "old01", "legacy@example.gov",
+                certificate("CN=old01.example.gov", Instant.now().minus(Duration.ofDays(60)),
+                        CertificateStatus.EXPIRED, Instant.now())));
+        int cap = properties.getEmail().getMaxPerRun();
+        properties.getEmail().setMaxPerRun(1);
+        try {
+            NotificationService.DigestResult result = notificationService.digest();
+
+            assertThat(mailSender.sent).hasSize(1);
+            assertThat(subject(to("alice@example.gov").getFirst()))
+                    .isEqualTo("[cert-alert] 1 of your credential(s) expiring soon");
+            assertThat(to("legacy@example.gov")).isEmpty();
+            // Alice's server message, ops@ and legacy@.
+            assertThat(result.notMailed()).isEqualTo(3);
+            assertThat(result.note()).contains("1 message cap").contains("3 message(s) were not sent");
+
+            // And again the next day: the cap is reported on every run, not once.
+            assertThat(notificationService.digest().notMailed()).isEqualTo(3);
+        } finally {
+            properties.getEmail().setMaxPerRun(cap);
+        }
+    }
+
+    /**
+     * Two entries publishing one address - somebody's admin persona beside their own - are two
+     * rounds but one mailbox: one message about both, rather than the second replacing the
+     * first unsent.
+     */
+    @Test
+    void twoEntriesWithOneAddressGetOneMessageAboutBoth() {
+        Instant now = Instant.now();
+        DirectoryUser admin = new DirectoryUser("uid=alice-admin,ou=people");
+        admin.setUid("alice-admin");
+        admin.setDisplayName("Alice Archer (admin)");
+        admin.refreshIdentifiers("Alice@Example.gov");
+        admin.addCertificate(certificate(
+                "CN=alice-admin", now.plus(Duration.ofDays(12)), CertificateStatus.EXPIRING_SOON, now));
+        admin.markSynced(now);
+        admin.refreshCertificateSummary();
+        users.save(admin);
+
+        NotificationService.DigestResult result = notificationService.digest();
+
+        List<MimeMessage> own = mailSender.sent.stream()
+                .filter(message -> recipients(message).stream().anyMatch("alice@example.gov"::equalsIgnoreCase))
+                .filter(message -> subject(message).contains("your credential"))
+                .toList();
+        assertThat(own).hasSize(1);
+        assertThat(subject(own.getFirst())).isEqualTo("[cert-alert] 2 of your credential(s) expiring soon");
+        assertThat(html(own.getFirst())).contains("CN=alice@example.gov").contains("CN=alice-admin");
+        assertThat(result.failures()).isEmpty();
+        // Both people still have their own round-up on the page.
+        assertThat(notifications.count()).isEqualTo(3);
+    }
+
+    private List<String> recipients(MimeMessage message) {
+        try {
+            return List.of(message.getAllRecipients()).stream().map(Object::toString).toList();
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     private List<MimeMessage> to(String address) {

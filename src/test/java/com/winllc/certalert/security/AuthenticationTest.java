@@ -106,6 +106,9 @@ class AuthenticationTest {
     /** Published, and past its notAfter. */
     private static byte[] expiredCertificate;
 
+    /** Published by two people: it names neither of them. */
+    private static byte[] sharedCertificate;
+
     /** Published, and not valid for another week. */
     private static byte[] earlyCertificate;
 
@@ -170,6 +173,11 @@ class AuthenticationTest {
         earlyCertificate = TestCertificates.der("early@example.gov", now.plus(Duration.ofDays(7)),
                 now.plus(Duration.ofDays(365)));
         directory.addUser("early", "Ear Ly", "early@example.gov", earlyCertificate);
+
+        sharedCertificate = TestCertificates.der("shared@example.gov", now.minus(Duration.ofDays(30)),
+                now.plus(Duration.ofDays(365)));
+        directory.addUser("shared.reader", "Sha Red", "shared.reader@example.gov", sharedCertificate);
+        directory.addUser("shared.boss", "Sha Red", "shared.boss@example.gov", sharedCertificate);
 
         byte[] server = TestCertificates.der("web01.example.gov", now.minus(Duration.ofDays(30)),
                 now.plus(Duration.ofDays(365)));
@@ -387,6 +395,19 @@ class AuthenticationTest {
     @Test
     void aCertificateNotYetValidIsRefused() {
         assertThatRefused(earlyCertificate, RefusedCertificateException.Reason.NOT_YET_VALID);
+    }
+
+    /**
+     * The same certificate under two entries - a regular and a privileged account carrying
+     * one card - leaves no way to tell which of them is holding it, so it signs in neither.
+     */
+    @Test
+    void aCertificatePublishedByTwoPeopleIsRefused() throws Exception {
+        assertThat(certificateRepository.findByFingerprint(TestCertificates.sha256(sharedCertificate)))
+                .hasSize(2);
+        assertThatRefused(sharedCertificate, RefusedCertificateException.Reason.AMBIGUOUS);
+        mockMvc.perform(get("/users").with(x509(TestCertificates.certificateOf(sharedCertificate))))
+                .andExpect(unauthenticated());
     }
 
     private void assertThatRefused(byte[] der, RefusedCertificateException.Reason reason) {

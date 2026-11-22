@@ -276,6 +276,13 @@ public class SsoProperties {
         private String metadataLocation;
 
         /**
+         * How long a reading of the metadata is used before it is read again, so a provider
+         * that rolls its signing certificate is followed without a restart. A failed read keeps
+         * the last good copy. Zero reads it once, as before.
+         */
+        private Duration metadataRefresh = Duration.ofHours(1);
+
+        /**
          * This service provider's entity id, as registered with the identity provider: an
          * absolute URI. Empty means {@code <public-url>/saml2/service-provider-metadata/saml}.
          * Never a template filled in from the request.
@@ -314,6 +321,14 @@ public class SsoProperties {
 
         public void setMetadataLocation(String metadataLocation) {
             this.metadataLocation = metadataLocation;
+        }
+
+        public Duration getMetadataRefresh() {
+            return metadataRefresh;
+        }
+
+        public void setMetadataRefresh(Duration metadataRefresh) {
+            this.metadataRefresh = metadataRefresh;
         }
 
         public String getEntityId() {

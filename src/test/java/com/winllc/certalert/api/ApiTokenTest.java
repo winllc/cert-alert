@@ -107,6 +107,15 @@ class ApiTokenTest {
     @Autowired
     private ApplicationEventPublisher events;
 
+    @Autowired
+    private ApiProperties apiProperties;
+
+    @Autowired
+    private com.winllc.certalert.audit.AccessDenials accessDenials;
+
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    private com.winllc.certalert.security.DirectoryStanding standing;
+
     private MockMvc mockMvc;
     private ListAppender<ILoggingEvent> logs;
     private final Logger root = (Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
@@ -310,7 +319,9 @@ class ApiTokenTest {
         String reader = create("certificates:read", authentication(dana), null);
         mockMvc.perform(get("/api/v1/jobs").header("Authorization", bearer(runner))).andExpect(status().isOk());
 
-        // Dana signs in again, no longer an administrator: her tokens are narrowed at once.
+        // Dana is taken out of the group and signs in again, no longer an administrator: her
+        // tokens are narrowed at once.
+        directory.modify(dn, "memberOf");
         events.publishEvent(new AuthenticationSuccessEvent(new UsernamePasswordAuthenticationToken(
                 dana.getPrincipal(), null, List.of(new SimpleGrantedAuthority(DirectoryPrincipalResolver.ROLE_USER)))));
         mockMvc.perform(get("/api/v1/jobs").header("Authorization", bearer(runner)))
@@ -318,9 +329,59 @@ class ApiTokenTest {
                 .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("no longer holds")));
         mockMvc.perform(get("/api/v1/certificates").header("Authorization", bearer(reader))).andExpect(status().isOk());
 
-        // Signing in as an administrator again does not give the token back what it lost.
+        // Put back in the group and signed in as an administrator again: the token does not
+        // get back what it lost.
+        directory.modify(dn, "memberOf", ADMIN_GROUP);
         events.publishEvent(new AuthenticationSuccessEvent(dana));
         mockMvc.perform(get("/api/v1/jobs").header("Authorization", bearer(runner))).andExpect(status().isUnauthorized());
+    }
+
+    /**
+     * A sign-in whose group read failed comes out as a plain user. That is not the directory
+     * saying so, and the creator's tokens keep what the live directory still gives them.
+     */
+    @Test
+    void aSignInThatCouldNotReadTheGroupsDoesNotNarrowTheTokens() throws Exception {
+        String dn = groupAdmin("greta");
+        Authentication greta = signedIn(dn, DirectoryPrincipal.AuthenticationMethod.X509);
+        String runner = create("jobs:run", authentication(greta), null);
+
+        events.publishEvent(new AuthenticationSuccessEvent(new UsernamePasswordAuthenticationToken(
+                greta.getPrincipal(), null, List.of(new SimpleGrantedAuthority(DirectoryPrincipalResolver.ROLE_USER)))));
+        mockMvc.perform(get("/api/v1/jobs").header("Authorization", bearer(runner))).andExpect(status().isOk());
+        assertThat(jdbc.queryForObject("SELECT creator_roles FROM api_token WHERE id = ?", String.class, idOf(runner)))
+                .contains("ADMIN");
+    }
+
+    /**
+     * The creator's entry is read with no transaction open - so no pooled connection waits on
+     * the directory - and only once the token is within its rate.
+     */
+    @Test
+    void theDirectoryIsReadOutsideAnyTransactionAndAfterTheRateLimit() throws Exception {
+        String token = create("certificates:read");
+        List<Boolean> inTransaction = new java.util.concurrent.CopyOnWriteArrayList<>();
+        org.mockito.Mockito.doAnswer(invocation -> {
+            inTransaction.add(org.springframework.transaction.support.TransactionSynchronizationManager
+                    .isActualTransactionActive());
+            return invocation.callRealMethod();
+        }).when(standing).of(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any());
+        int perMinute = apiProperties.getRequestsPerMinute();
+        apiProperties.setRequestsPerMinute(1);
+        try {
+            mockMvc.perform(get("/api/v1/certificates").header("Authorization", bearer(token)))
+                    .andExpect(status().isOk());
+            mockMvc.perform(get("/api/v1/certificates").header("Authorization", bearer(token)))
+                    .andExpect(status().isTooManyRequests())
+                    .andExpect(header().exists("Retry-After"));
+        } finally {
+            apiProperties.setRequestsPerMinute(perMinute);
+            org.mockito.Mockito.reset(standing);
+        }
+        assertThat(inTransaction).containsExactly(false);
+        // Its use is still recorded, in a transaction of its own.
+        assertThat(jdbc.queryForObject("SELECT last_used_at FROM api_token WHERE id = ?", Timestamp.class, idOf(token)))
+                .isNotNull();
     }
 
     @Test
@@ -498,6 +559,30 @@ class ApiTokenTest {
                 .singleElement()
                 .satisfies(event -> assertThat(event.line())
                         .contains("\"type\":\"service\"", "api-token:", "API token of admin", "/api/v1/revocation/check"));
+    }
+
+    /**
+     * A write the token's scopes do not cover is refused by the authorisation filter, after
+     * the token filter has run: recorded as the 403 it is, and the refusal is the token's.
+     */
+    @Test
+    void aWriteRefusedForScopeIsAuditedAsDeniedAndAsTheToken() throws Exception {
+        String reader = create("certificates:read");
+        accessDenials.flush();
+        long head = audit.headSeq();
+        mockMvc.perform(post("/api/v1/revocation/check").header("Authorization", bearer(reader)))
+                .andExpect(status().isForbidden());
+        accessDenials.flush();
+        List<StoredEvent> recorded = audit.after(head, 1000);
+        assertThat(recorded).filteredOn(event -> event.action().equals("api.request"))
+                .singleElement()
+                .satisfies(event -> assertThat(event.line())
+                        .contains("\"outcome\":\"denied\"", "\"status\":403", "api-token:" + idOf(reader)));
+        assertThat(recorded).filteredOn(event -> event.action().equals("access.denied"))
+                .singleElement()
+                .satisfies(event -> assertThat(event.line())
+                        .contains("api-token:" + idOf(reader))
+                        .doesNotContain("\"type\":\"system\""));
     }
 
     private Long idOf(String secret) {

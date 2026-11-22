@@ -329,9 +329,14 @@ x509:
   # nginx.ingress.kubernetes.io/auth-tls-pass-certificate-to-upstream: "true" sends
   # "ssl-client-cert" (URL-encoded PEM).
   header: ""
-  # ENS_X509_TRUSTED_PROXIES: the addresses (CIDRs) the header is accepted from - the
-  # ingress controller's pods, so the pod network.
-  trustedProxies: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+  # ENS_X509_TRUSTED_PROXIES: the addresses (CIDRs) of the proxy in front - the ingress
+  # controller's pods (or the OpenShift router), e.g. "10.42.0.0/16". The certificate header
+  # is accepted only from them, and in any source mode they are the proxies whose
+  # X-Forwarded-For hops are followed to find the client's address for the audit trail.
+  # List only the proxy: a client inside the list is passed over for a hop it can write
+  # itself. Required with source header. Empty: loopback only, so behind an ingress the
+  # audit trail records the controller's address rather than the client's.
+  trustedProxies: ""
   # The shared secret the proxy sends in X-ENS-Proxy-Secret (ENS_X509_PROXY_SECRET_FILE):
   # at least 32 characters, e.g. openssl rand -hex 32. A Secret of your own, or the value
   # (rendered into the chart's Secret). The proxy has to send the same value, e.g. with
@@ -608,6 +613,11 @@ logFormat: json
 # JAVA_OPTS. Replaces the image default, so keep the heap setting. caTruststore adds its
 # -Djavax.net.ssl.* options to whatever is here.
 javaOpts: "-XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError"
+
+# CERT_ALERT_SCHEDULER_THREADS (default 8): the threads the scheduled jobs share (sweeps,
+# refresh, revocation, round-up, cleanups, outboxes). Raising it may need a larger
+# database.poolSize too.
+schedulerThreads: null
 
 # ---------------------------------------------------------------------------------------
 # Inventory exports and scheduled reports (Certificates page)
