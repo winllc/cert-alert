@@ -856,7 +856,7 @@ The ENS platform baseline, the same in every ENS product:
   `x509.trustedProxies` should name the ingress controller's pod network and nothing wider). A
   connection from anywhere else is the client, whatever it says. Behind the release bundle,
   where a proxy on the host reaches the container from the Docker network's gateway, set
-  `ENS_X509_TRUSTED_PROXIES` to that network (e.g. `172.16.0.0/12`).
+  `ENS_X509_TRUSTED_PROXIES` to that network's subnet only (e.g. `172.18.0.0/16`), not a whole private range.
 - **The release bundle** publishes on every interface (`0.0.0.0`) by default
   (`CERT_ALERT_BIND_ADDRESS`, `CERT_ALERT_PORT`). With TLS off on any address but
   `127.0.0.1`, `install.sh` refuses to start it unless `.env` sets
