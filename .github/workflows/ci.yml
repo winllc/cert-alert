@@ -584,9 +584,12 @@ jobs:
           CHART_REPO: ghcr.io/${{ github.repository_owner }}/charts
         run: |
           # Keyless: the signature names this workflow, on this repository, at this tag.
-          # Always by digest - a tag can be moved, a digest cannot.
-          image=$(docker inspect --format '{{ index .RepoDigests 0 }}' "$IMAGE_NAME:$VERSION")
-          case "$image" in "$IMAGE_NAME"@sha256:*) ;; *) echo "::error::no registry digest for $IMAGE_NAME:$VERSION"; exit 1 ;; esac
+          # Always by digest - a tag can be moved, a digest cannot. The digest is read back from the
+          # registry: the first of the local image's RepoDigests is not reliably the registry's (on
+          # Docker 29 runners it was not, and v0.0.3 and v0.0.4 stopped here).
+          digest=$(docker buildx imagetools inspect "$IMAGE_NAME:$VERSION" --format '{{json .Manifest.Digest}}' | tr -d '"')
+          case "$digest" in sha256:*) ;; *) echo "::error::no registry digest for $IMAGE_NAME:$VERSION"; exit 1 ;; esac
+          image="$IMAGE_NAME@$digest"
           cosign sign --yes "$image"
           cosign attest --yes --type spdxjson --predicate "$OUT_DIR/sbom-$PRODUCT_ID.spdx.json" "$image"
           # For the provenance attestation below, which takes the digest on its own.
