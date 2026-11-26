@@ -71,15 +71,25 @@ public class InventoryApiController {
         return inventory.summary(filter);
     }
 
+    /**
+     * Servers, with the search table's point-of-contact filter: {@code pocUserId} for the
+     * servers a person is the contact for (by any name or address they have, or linked to
+     * them by id; an unknown id matches none), {@code pocEmail} for a partial, case-blind
+     * match of the contact as written. An identity product asks this when a person leaves,
+     * to list the servers that need a new contact.
+     */
     @GetMapping("/servers")
     @Transactional(readOnly = true)
     public PageResponse<DirectoryServerRow> servers(
             @RequestParam(required = false) String q,
             @RequestParam(required = false) List<CertificateStatus> certificateStatus,
+            @RequestParam(required = false) Long pocUserId,
+            @RequestParam(required = false) String pocEmail,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "100") int size) {
         Specification<DirectoryServer> filter = DirectorySpecifications.<DirectoryServer>certificateStatusIn(certificateStatus)
-                .and(text(q, "commonName", "uid", "serverUrl", "dn"));
+                .and(text(q, "commonName", "uid", "serverUrl", "dn"))
+                .and(pointOfContact(pocEmail, pocUserId));
         return PageResponse.of(
                 servers.findAll(filter, PageRequest.of(Math.max(page, 0), pageSize(size), Sort.by("id"))),
                 DirectoryServerRow::from);
@@ -109,6 +119,18 @@ public class InventoryApiController {
     @Transactional(readOnly = true)
     public DirectoryUserRow person(@PathVariable Long id) {
         return users.findById(id).map(DirectoryUserRow::from).orElseThrow(() -> ResourceNotFoundException.user(id));
+    }
+
+    /** The same filter as the servers search table's ({@code DirectoryDataTablesController}). */
+    private Specification<DirectoryServer> pointOfContact(String pocEmail, Long pocUserId) {
+        Specification<DirectoryServer> filter = DirectorySpecifications.unfiltered();
+        if (pocEmail != null && !pocEmail.isBlank()) {
+            filter = filter.and(DirectorySpecifications.pointOfContactLike(pocEmail));
+        }
+        if (pocUserId != null) {
+            filter = filter.and(DirectorySpecifications.pointOfContactOf(pocUserId, users.findIdentifiersById(pocUserId)));
+        }
+        return filter;
     }
 
     private int pageSize(int size) {

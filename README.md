@@ -2828,7 +2828,7 @@ The read paths an integration usually wants:
 | `GET` | `/api/v1/certificates/{id}` | `certificates:read` | One certificate |
 | `POST` | `/api/v1/certificates/export?format=csv\|xlsx` | `certificates:read` | The same, as a file (see [Exports](#exports-saved-views-and-scheduled-reports)); a `POST` because it is audited |
 | `GET` | `/api/v1/summary/expiry` | `certificates:read` | Counts by state, expiring within 7/30/60/90 days, revoked, by owner type; takes the same filters |
-| `GET` | `/api/v1/servers`, `/api/v1/servers/{id}` | `certificates:read` | Servers, `?q=&certificateStatus=` |
+| `GET` | `/api/v1/servers`, `/api/v1/servers/{id}` | `certificates:read` | Servers, `?q=&certificateStatus=`; `?pocUserId=` for the servers a person is the point of contact for (by any of their names or addresses, or linked by id; an unknown id matches none), `?pocEmail=` for a contact containing the text |
 | `GET` | `/api/v1/people`, `/api/v1/people/{id}` | `people:read` | People, `?q=&certificateStatus=` |
 | `GET` | `/api/v1/jobs`, `/api/v1/jobs/{id}` | `jobs:read` | Job runs |
 | `POST` | `/api/v1/sync`, `/api/v1/revocation/check`, `/api/v1/notifications/digest` ... | `jobs:run` | Start a job: 202 and a run to poll |
