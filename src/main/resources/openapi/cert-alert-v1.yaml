@@ -197,6 +197,19 @@ paths:
           description: Text in the server's name, uid, URL or DN.
           schema: { type: string }
         - $ref: "#/components/parameters/certificateStatus"
+        - name: pocUserId
+          in: query
+          description: >-
+            The servers this person (a directory user's id, as `/api/v1/people` gives it)
+            is the point of contact for: by any name or address the person has, or linked to
+            them by id. An unknown id matches no server.
+          schema: { type: integer, format: int64 }
+        - name: pocEmail
+          in: query
+          description: >-
+            The servers whose point of contact contains this text, case aside (an e-mail
+            address, usually).
+          schema: { type: string }
         - $ref: "#/components/parameters/page"
         - $ref: "#/components/parameters/size"
       responses:
